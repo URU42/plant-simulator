@@ -1,0 +1,31 @@
+# 명령 하나로 두 프로세스를 띄운다: docker compose up --build
+# 죽어도 다시 살아나 계속 생성한다 (restart: always). DB 파일은 ./data/plant.db 에 남는다.
+services:
+  collector:
+    build: .
+    command: python -m collector.app --plant config/plant_hds.yaml --runtime config/runtime.yaml
+             --scenario config/scenario_dev.yaml --db data/plant.db --port 8000
+    ports: ["8000:8000"]
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    restart: always
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  simulator:
+    build: .
+    # 처음 한 번은 --time-mode backfill 로 90일을 채운 뒤 실시간으로 이어진다. 재시작 때는 live 로 바꾼다.
+    command: python -m simulator.main --plant config/plant_hds.yaml --runtime config/runtime.yaml
+             --scenario config/scenario_dev.yaml --time-mode ${SIM_TIME_MODE:-live}
+    environment:
+      COLLECTOR_URL: http://collector:8000
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      collector:
+        condition: service_healthy
+    restart: always

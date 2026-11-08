@@ -97,6 +97,7 @@ def _parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--scenario", action="append", default=None,
                    help="시나리오 파일. 여러 번 주면 모두 적용한다 (예: 개발용 + 비공개 평가용)")
     p.add_argument("--time-mode", choices=["backfill", "live", "accelerated"], help="runtime.yaml 의 time_mode 를 덮어쓴다")
+    p.add_argument("--collector-url", default=os.environ.get("COLLECTOR_URL"), help="runtime.yaml 의 collector_url 을 덮어쓴다")
     return p.parse_args(argv)
 
 
@@ -105,8 +106,9 @@ def main(argv=None) -> None:
     args = _parse_args(argv)
     plant = load_plant(args.plant)
     runtime = load_runtime(args.runtime)
-    if args.time_mode:
-        runtime = runtime.model_copy(update={"time_mode": args.time_mode})
+    overrides = {k: v for k, v in {"time_mode": args.time_mode, "collector_url": args.collector_url}.items() if v}
+    if overrides:
+        runtime = runtime.model_validate(runtime.model_dump() | overrides)
     scenario_paths = args.scenario or os.environ.get("SCENARIO_CONFIG", "").split(",")
     scenario = None
     if any(scenario_paths):
