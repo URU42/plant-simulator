@@ -20,7 +20,7 @@ uv run pytest                            # 테스트
 # 터미널 1: 수집 서버
 uv run python -m collector.app --scenario config/scenario_dev.yaml --db data/plant.db
 
-# 터미널 2: 시뮬레이터 (처음 한 번은 backfill: 90일 백필 뒤 실시간으로 이어진다)
+# 터미널 2: 시뮬레이터 (backfill: 90일 백필 뒤 실시간으로 이어진다. 재시작하면 수집 서버의 마지막 시각부터 이어서 보낸다)
 uv run python -m simulator.main --scenario config/scenario_dev.yaml --time-mode backfill
 uv run python -m simulator.main --scenario config/scenario_dev.yaml                     # 실시간
 uv run python -m simulator.main --scenario config/scenario_dev.yaml --time-mode accelerated

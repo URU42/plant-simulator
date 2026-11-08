@@ -14,3 +14,15 @@ def test_dev_scenario_history_is_loaded_at_startup(plant_path, runtime_path, sce
         assert fl["FL-DEV-001"]["work_order_id"] == "WO-DEV-001" and fl["FL-DEV-001"]["doc_id"] == "DOC-DEV-BRG-WEAR"
         assert fl["FL-DEV-001"]["end_ts"] == "2026-11-02T01:00:00+00:00"     # 정비 후 복귀 시각
         assert fl["FL-DEV-005"]["equip_id"] == "P-4101"                       # tag_id 만 적어도 설비를 채운다
+
+
+def test_unknown_scenario_id_stops_collector_startup_by_name(plant_path, runtime_path, tmp_path):
+    import pytest
+
+    from common.config_models import ConfigError
+
+    bad = tmp_path / "scenario_bad.yaml"
+    bad.write_text("events:\n  - { event_id: E, tag_id: VI-NOPE, pattern: step, start: 2026-10-01T00:00:00+09:00, duration: 1h, failure_id: F }\n")
+    with pytest.raises(ConfigError, match="VI-NOPE"):
+        with TestClient(create_app(plant_path, runtime_path, ":memory:", scenario_path=bad)):
+            pass

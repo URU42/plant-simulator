@@ -38,3 +38,10 @@ async def test_split_units_produce_same_values_as_all(plant_path):
     whole_u3 = {(s.tag_id, s.ts): s.value for s in whole.batches[0].samples if s.tag_id.endswith("3101") or s.tag_id.endswith("3102")}
     part_u3 = {(s.tag_id, s.ts): s.value for s in part.batches[0].samples}
     assert whole_u3 == part_u3 and len(part_u3) == 10 * 6
+
+
+async def test_live_restart_rewinds_one_window_so_no_minute_is_lost(plant_path):
+    plant = load_plant(plant_path)
+    sim = Simulator(plant, RuntimeConfig(units=["U-5"]), None, MemorySender(), SimClock.backfill(START + timedelta(seconds=37)),
+                    catch_up_windows=1)
+    assert sim.cursor == START - timedelta(minutes=1)

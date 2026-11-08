@@ -3,13 +3,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any, Protocol
 
 import httpx
 
 from common.message import IngestBatch
+from common.timefmt import from_db
 
 log = logging.getLogger(__name__)
+
+MAX_BACKOFF_SEC = 60.0
 
 
 class SendError(Exception):
@@ -19,33 +23,52 @@ class SendError(Exception):
 class Sender(Protocol):
     async def send(self, batch: IngestBatch) -> dict[str, Any]: ...
 
+    async def collector_time(self) -> datetime | None:
+        """수집 서버가 가진 마지막 측정 시각. 백필을 이어서 할 때 쓴다. 모르면 None."""
+        ...
+
     async def close(self) -> None: ...
 
 
 class HttpSender:
-    """httpx 로 POST /ingest. 실패하면 backoff 를 두고 retries 번까지 다시 보낸다."""
+    """httpx 로 POST /ingest.
 
-    def __init__(self, collector_url: str, retries: int = 5, backoff_sec: float = 2.0,
+    실패하면 backoff(상한 60초)를 두고 다시 보낸다. retries 가 None(기본)이면 포기하지 않는다:
+    값은 시각의 순수 함수라 수집 서버가 살아나면 밀린 구간을 그대로 이어 보낼 수 있기 때문이다.
+    """
+
+    def __init__(self, collector_url: str, retries: int | None = None, backoff_sec: float = 2.0,
                  timeout_sec: float = 30.0, transport: httpx.AsyncBaseTransport | None = None) -> None:
-        self._url = collector_url.rstrip("/") + "/ingest"
+        self._base = collector_url.rstrip("/")
         self._retries = retries
         self._backoff = backoff_sec
         self._client = httpx.AsyncClient(timeout=timeout_sec, transport=transport)
 
     async def send(self, batch: IngestBatch) -> dict[str, Any]:
         body = batch.model_dump_json()
-        last_error: Exception | None = None
-        for attempt in range(1, self._retries + 1):
+        attempt = 0
+        while True:
+            attempt += 1
             try:
-                r = await self._client.post(self._url, content=body, headers={"content-type": "application/json"})
+                r = await self._client.post(self._base + "/ingest", content=body,
+                                            headers={"content-type": "application/json"})
                 r.raise_for_status()
                 return r.json()
             except (httpx.HTTPError, ValueError) as e:
-                last_error = e
-                log.warning("send %s failed (attempt %d/%d): %s", batch.batch_id, attempt, self._retries, e)
-                if attempt < self._retries:
-                    await asyncio.sleep(self._backoff * attempt)
-        raise SendError(f"giving up on {batch.batch_id}: {last_error}")
+                if self._retries is not None and attempt >= self._retries:
+                    raise SendError(f"giving up on {batch.batch_id}: {e}") from e
+                log.warning("send %s failed (attempt %d): %s", batch.batch_id, attempt, e)
+                await asyncio.sleep(min(self._backoff * attempt, MAX_BACKOFF_SEC))
+
+    async def collector_time(self) -> datetime | None:
+        try:
+            r = await self._client.get(self._base + "/health")
+            r.raise_for_status()
+            sim_now = r.json().get("sim_now")
+        except (httpx.HTTPError, ValueError) as e:
+            log.warning("collector time unavailable: %s", e)
+            return None
+        return from_db(sim_now) if sim_now else None
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -60,6 +83,9 @@ class MemorySender:
     async def send(self, batch: IngestBatch) -> dict[str, Any]:
         self.batches.append(batch)
         return {"batch_id": batch.batch_id, "stored": len(batch.samples)}
+
+    async def collector_time(self) -> datetime | None:
+        return None
 
     async def close(self) -> None:
         return None

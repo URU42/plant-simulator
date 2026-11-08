@@ -25,6 +25,9 @@ class ClientSender:
         self.results.append(r.json())
         return r.json()
 
+    async def collector_time(self):
+        return None
+
     async def close(self) -> None:
         return None
 

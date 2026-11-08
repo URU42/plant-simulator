@@ -222,6 +222,8 @@ class RuntimeConfig(StrictModel):
     def _intervals(self) -> "RuntimeConfig":
         if self.send_interval_sec % self.sample_interval_sec:
             raise ValueError("send_interval_sec must be a multiple of sample_interval_sec")
+        if 86400 % self.sample_interval_sec:
+            raise ValueError("sample_interval_sec must divide a day (86400 s)")
         return self
 
 

@@ -106,3 +106,19 @@ def test_health_reports_last_received(client):
 
 def test_unknown_tag_current_is_404(client):
     assert client.get("/tags/VI-NOPE/current").status_code == 404
+
+
+def test_sample_with_added_field_is_accepted_v1x(client):
+    """v1.x 는 필드 추가만 허용 — 추가 필드가 있는 행도 받는다 (6.3)."""
+    body = _batch().model_dump(mode="json")
+    body["samples"][0]["new_field"] = "x"
+    r = client.post("/ingest", json=body)
+    assert r.json()["stored"] == 3 and r.json()["rejected"] == 0
+
+
+def test_rows_older_than_retention_are_rejected(client):
+    _post(client, _batch())
+    old = _batch(batch_id="b-old", samples=[
+        Sample(equip_id="C-1101", tag_id="VI-C1101", ts=f"2026-10-01T00:00:00{KST}", value=2.0, quality="Good")])
+    res = _post(client, old).json()
+    assert res["stored"] == 0 and res["rejected"] == 1 and "retention" in res["reasons"][0]["reason"]

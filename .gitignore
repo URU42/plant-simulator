@@ -223,3 +223,4 @@ __marimo__/
 data/*.db
 data/*.db-*
 .superpowers/
+.DS_Store

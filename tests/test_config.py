@@ -91,3 +91,8 @@ def test_runtime_unknown_unit_rejected(plant_path: Path):
     plant = load_plant(plant_path)
     with pytest.raises(ConfigError, match="U-9"):
         plant.equipment_for_units(["U-9"])
+
+
+def test_sample_interval_must_divide_a_day():
+    with pytest.raises(ValueError, match="86400"):
+        RuntimeConfig(sample_interval_sec=7, send_interval_sec=70)

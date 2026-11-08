@@ -50,3 +50,32 @@ async def test_memory_sender_keeps_batches():
     sender = MemorySender()
     await sender.send(_batch())
     assert len(sender.batches) == 1
+
+
+async def test_http_sender_default_never_gives_up():
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return httpx.Response(503) if calls["n"] < 9 else httpx.Response(200, json={"stored": 1})
+
+    sender = HttpSender("http://c", transport=httpx.MockTransport(handler), backoff_sec=0)
+    assert (await sender.send(_batch()))["stored"] == 1
+    assert calls["n"] == 9
+
+
+async def test_http_sender_reads_collector_time():
+    def handler(request):
+        assert request.url.path == "/health"
+        return httpx.Response(200, json={"sim_now": "2026-11-08T08:23:20+00:00"})
+
+    sender = HttpSender("http://c", transport=httpx.MockTransport(handler))
+    t = await sender.collector_time()
+    assert t is not None and t.isoformat() == "2026-11-08T08:23:20+00:00"
+
+
+async def test_collector_time_is_none_when_empty_or_unreachable():
+    sender = HttpSender("http://c", transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"sim_now": None})))
+    assert await sender.collector_time() is None
+    down = HttpSender("http://c", transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    assert await down.collector_time() is None

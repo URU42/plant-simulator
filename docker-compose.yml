@@ -18,7 +18,7 @@ services:
 
   simulator:
     build: .
-    # 처음 한 번은 --time-mode backfill 로 90일을 채운 뒤 실시간으로 이어진다. 재시작 때는 live 로 바꾼다.
+    # SIM_TIME_MODE=backfill 이면 90일을 채운 뒤 실시간으로 이어진다. 재시작하면 수집 서버의 마지막 시각부터 이어서 보낸다.
     command: python -m simulator.main --plant config/plant_hds.yaml --runtime config/runtime.yaml
              --scenario config/scenario_dev.yaml --time-mode ${SIM_TIME_MODE:-live}
     environment:

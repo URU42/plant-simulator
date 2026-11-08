@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -35,7 +35,7 @@ def create_app(plant_path: str | Path, runtime_path: str | Path, db_path: str | 
         seed_master(storage, plant)
         if scenario_path:
             from collector.seed_history import seed_history   # 시나리오 → 정비·고장 이력 (개발용)
-            seed_history(storage, scenario_path)
+            seed_history(storage, scenario_path, plant)
         app.state.storage = storage
         app.state.tag_owner = storage.tag_owner()
         app.state.jobs = JobRunner(storage, plant, runtime)
@@ -55,7 +55,7 @@ def create_app(plant_path: str | Path, runtime_path: str | Path, db_path: str | 
             raise HTTPException(400, f"unsupported schema_version {batch.schema_version}")
         st = request.app.state
         received_at = to_db(datetime.now(timezone.utc))
-        result, accepted = ingest(st.storage, batch, received_at, st.tag_owner)
+        result, accepted = ingest(st.storage, batch, received_at, st.tag_owner, _oldest_allowed(st.storage.sim_now()))
         if accepted:
             st.jobs.advance(st.storage.sim_now())
             st.broadcaster.publish("samples", [s.model_dump(mode="json") for s in accepted])
@@ -114,6 +114,12 @@ def create_app(plant_path: str | Path, runtime_path: str | Path, db_path: str | 
     async def stream(request: Request):
         return StreamingResponse(request.app.state.broadcaster.subscribe(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache"})
+
+    def _oldest_allowed(sim_now: str | None) -> str | None:
+        """시뮬레이터 현재 시각 기준 보관 기간 밖의 행은 받지 않는다. 백필을 다시 돌려도 DB가 부풀지 않는다."""
+        if sim_now is None:
+            return None
+        return to_db(from_db(sim_now) - timedelta(days=runtime.raw_retention_days))
 
     return app
 
