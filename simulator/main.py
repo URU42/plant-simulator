@@ -55,22 +55,36 @@ class Simulator:
                  result.get("stored"), result.get("rejected"))
 
 
+def backfill_range(runtime: RuntimeConfig, now: datetime) -> tuple[datetime, datetime]:
+    """백필 구간 [start, live_start). live_start 는 전송 주기에 맞춰 내림한 현재 시각."""
+    live_start = align_down(now, runtime.send_interval_sec)
+    return live_start - timedelta(days=runtime.backfill_days), live_start
+
+
+async def run_backfill_then_live(plant: PlantConfig, runtime: RuntimeConfig, scenario, sender: Sender,
+                                 now: datetime | None = None, live_clock: SimClock | None = None,
+                                 live_until: datetime | None = None) -> None:
+    """지난 backfill_days 를 1시간 묶음으로 빠르게 보낸 뒤, 끝난 구간부터 실시간으로 이어 간다.
+
+    now / live_clock / live_until 은 테스트용이다. 실제 실행에서는 현재 시각과 실제 시계를 쓴다.
+    """
+    start, live_start = backfill_range(runtime, now or datetime.now(KST))
+    log.info("backfill %s → %s", start, live_start)
+    backfill = Simulator(plant, runtime, scenario, sender, SimClock.backfill(start), window_sec=BACKFILL_WINDOW_SEC)
+    await backfill.run(until=live_start)
+
+    live = Simulator(plant, runtime, scenario, sender, live_clock or SimClock.live())
+    live.cursor, live.seq = live_start, backfill.seq     # 백필이 끝난 구간부터 같은 일련번호로 이어 간다
+    log.info("switch to live from %s", live_start)
+    await live.run(until=live_until)
+
+
 async def run_mode(plant: PlantConfig, runtime: RuntimeConfig, scenario, sender: Sender) -> None:
-    """time_mode 에 따라 시계를 고르고 실행한다. backfill 은 끝난 뒤 실시간으로 이어진다."""
-    interval = runtime.send_interval_sec
+    """time_mode 에 따라 시계를 고르고 실행한다."""
     if runtime.time_mode == "backfill":
-        live_start = align_down(datetime.now(KST), interval)
-        start = live_start - timedelta(days=runtime.backfill_days)
-        log.info("backfill %s → %s", start, live_start)
-        sim = Simulator(plant, runtime, scenario, sender, SimClock.backfill(start), window_sec=BACKFILL_WINDOW_SEC)
-        await sim.run(until=live_start)
-        # 실시간 전환: 백필이 끝난 구간부터 같은 일련번호로 이어 간다
-        live = Simulator(plant, runtime, scenario, sender, SimClock.live())
-        live.cursor, live.seq = live_start, sim.seq
-        log.info("switch to live from %s", live_start)
-        await live.run()
+        await run_backfill_then_live(plant, runtime, scenario, sender)
     elif runtime.time_mode == "accelerated":
-        start = align_down(datetime.now(KST), interval)
+        start = align_down(datetime.now(KST), runtime.send_interval_sec)
         await Simulator(plant, runtime, scenario, sender, SimClock.accelerated(start, runtime.speed)).run()
     else:
         await Simulator(plant, runtime, scenario, sender, SimClock.live()).run()

@@ -30,7 +30,7 @@ class SampleGenerator:
                 columns.append((equip.equip_id, tag.tag_id, values, qualities, present))
 
         tz = start.tzinfo
-        samples: list[Sample] = []
+        samples: list[Sample] = []       # 값은 이미 검증된 설정에서 나오므로 model_construct 로 빠르게 만든다
         for i, epoch in enumerate(epochs):
             ts = datetime.fromtimestamp(int(epoch), tz)
             for equip_id, tag_id, values, qualities, present in columns:
@@ -38,7 +38,7 @@ class SampleGenerator:
                     continue        # gap: 데이터 끊김
                 q = qualities[i]
                 value = round(float(values[i]), 3) if q == "Good" else None
-                samples.append(Sample(equip_id=equip_id, tag_id=tag_id, ts=ts, value=value, quality=q))
+                samples.append(Sample.model_construct(equip_id=equip_id, tag_id=tag_id, ts=ts, value=value, quality=q))
         return samples
 
     def _tag_series(self, equip: EquipmentConfig, tag_id: str, epochs: np.ndarray):
