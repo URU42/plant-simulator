@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# plant-simulator
+data/*.db
+data/*.db-*
+.superpowers/
