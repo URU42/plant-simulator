@@ -1,0 +1,360 @@
+# 구성안 1: 가상 수첨탈황 공장 (기획서 3장, 4.1)
+# - 설비 ID: {유형 접두어}-{Unit 번호}{일련번호 3자리}, 태그 ID: {신호 접두어}-{설비 ID 하이픈 제거}
+# - ID는 이 파일에만 정의한다. 코드는 ID 형식을 해석하지 않는다.
+# - seed_key: 태그별 시드용 고정 키. ID를 바꿔도 생성 값·골든셋 정답이 유지된다.
+# - limits: 시뮬레이터는 정상값을 warn_hi 아래에 두고, 수집 서버는 같은 값으로 알람을 판정한다.
+
+plant:
+  plant_id: PL-HDS
+  name: 가상 수첨탈황 공장
+  config_version: 1
+  unit_groups:
+    - id: UG-RX
+      name: 수첨 반응 계열
+      units:
+        - { id: U-1, name: 등유 수첨 공정 }
+        - { id: U-2, name: 경유 수첨 공정 }
+    - id: UG-H2
+      name: 수소·가스 처리 계열
+      units:
+        - { id: U-3, name: 보충 수소 압축 }
+        - { id: U-4, name: 오프가스 회수 }
+    - id: UG-UT
+      name: 분리·유틸리티 계열
+      units:
+        - { id: U-5, name: 제품 스트리퍼 }
+        - { id: U-6, name: 계장공기 }
+
+# 설비 유형 매핑 (요구사항 정의서 M-2: CC 4, RC 2, PM 6, MT 3, FN 2, ST 2, GB 1)
+equipment_types:
+  - { type: CC, name: 원심 압축기, prefix: C }
+  - { type: RC, name: 왕복동 압축기, prefix: K }
+  - { type: PM, name: 펌프, prefix: P }
+  - { type: MT, name: 모터, prefix: M }
+  - { type: FN, name: 팬, prefix: F }
+  - { type: ST, name: 스팀 터빈, prefix: ST }
+  - { type: GB, name: 기어박스, prefix: G }
+
+# 표준 태그 (신호 접두어·단위)
+signals:
+  - { signal: vibration, prefix: VI, unit: mm/s, name: 진동 }
+  - { signal: temperature, prefix: TI, unit: "°C", name: 온도 }
+  - { signal: pressure, prefix: PI, unit: kg/cm2, name: 압력 }
+
+equipment:
+  # ---------------- U-1 등유 수첨 ----------------
+  - equip_id: C-1101
+    name: 등유 수첨 순환가스 압축기
+    type: CC
+    grade: 1
+    unit_id: U-1
+    aliases: [1호기 압축기, C1101]
+    driven_by: ST-1101
+    tags:
+      - { tag_id: VI-C1101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 4.5, alarm_hi: 6.0, trip_hi: 7.1 }, delay_samples: 2, seed_key: t001,
+          normal: { base: 2.3, noise_sd: 0.08, daily_amp: 0.05, drift_sd: 0.01 } }
+      - { tag_id: TI-C1101, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, delay_samples: 3, seed_key: t002,
+          normal: { base: 64, noise_sd: 0.3, daily_amp: 1.5, drift_sd: 0.15 } }
+      - { tag_id: PI-C1101, signal: pressure, unit: kg/cm2, location: DISCH,
+          limits: { warn_hi: 55, alarm_hi: 58, trip_hi: 60 }, delay_samples: 1, seed_key: t003,
+          normal: { base: 48.0, noise_sd: 0.15, daily_amp: 0.3, drift_sd: 0.05 } }
+  - equip_id: ST-1101
+    name: 등유 순환가스 압축기 구동 터빈
+    type: ST
+    grade: 1
+    unit_id: U-1
+    aliases: [ST1101]
+    tags:
+      - { tag_id: VI-ST1101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 4.5, alarm_hi: 6.0, trip_hi: 7.1 }, delay_samples: 2, seed_key: t004,
+          normal: { base: 2.0, noise_sd: 0.07, daily_amp: 0.04, drift_sd: 0.01 } }
+      - { tag_id: TI-ST1101, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 90, alarm_hi: 100, trip_hi: 110 }, delay_samples: 3, seed_key: t005,
+          normal: { base: 76, noise_sd: 0.3, daily_amp: 1.2, drift_sd: 0.15 } }
+  - equip_id: P-1101
+    name: 등유 원료 펌프
+    type: PM
+    grade: 2
+    unit_id: U-1
+    aliases: [P1101]
+    tags:
+      - { tag_id: VI-P1101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 3.5, alarm_hi: 5.0, trip_hi: 6.3 }, delay_samples: 2, seed_key: t006,
+          normal: { base: 1.9, noise_sd: 0.06, daily_amp: 0.04, drift_sd: 0.01 } }
+      - { tag_id: TI-P1101, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 75, alarm_hi: 85, trip_hi: 95 }, delay_samples: 3, seed_key: t007,
+          normal: { base: 56, noise_sd: 0.25, daily_amp: 1.5, drift_sd: 0.12 } }
+  - equip_id: F-1101
+    name: 등유 가열로 FD 팬
+    type: FN
+    grade: 2
+    unit_id: U-1
+    aliases: [F1101]
+    tags:
+      - { tag_id: VI-F1101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 4.5, alarm_hi: 7.1, trip_hi: 9.0 }, delay_samples: 2, seed_key: t008,
+          normal: { base: 2.9, noise_sd: 0.1, daily_amp: 0.08, drift_sd: 0.015 } }
+      - { tag_id: TI-F1101, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 70, alarm_hi: 80, trip_hi: 90 }, delay_samples: 3, seed_key: t009,
+          normal: { base: 53, noise_sd: 0.25, daily_amp: 2.0, drift_sd: 0.12 } }
+
+  # ---------------- U-2 경유 수첨 ----------------
+  - equip_id: C-2101
+    name: 경유 수첨 순환가스 압축기
+    type: CC
+    grade: 1
+    unit_id: U-2
+    aliases: [2호기 압축기, C2101]
+    driven_by: ST-2101
+    tags:
+      - { tag_id: VI-C2101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 4.5, alarm_hi: 6.0, trip_hi: 7.1 }, delay_samples: 2, seed_key: t010,
+          normal: { base: 2.6, noise_sd: 0.09, daily_amp: 0.06, drift_sd: 0.012 } }
+      - { tag_id: TI-C2101, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, delay_samples: 3, seed_key: t011,
+          normal: { base: 66, noise_sd: 0.3, daily_amp: 1.5, drift_sd: 0.15 } }
+      - { tag_id: PI-C2101, signal: pressure, unit: kg/cm2, location: DISCH,
+          limits: { warn_hi: 60, alarm_hi: 63, trip_hi: 65 }, delay_samples: 1, seed_key: t012,
+          normal: { base: 52.0, noise_sd: 0.15, daily_amp: 0.3, drift_sd: 0.05 } }
+  - equip_id: ST-2101
+    name: 경유 순환가스 압축기 구동 터빈
+    type: ST
+    grade: 1
+    unit_id: U-2
+    aliases: [ST2101]
+    tags:
+      - { tag_id: VI-ST2101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 4.5, alarm_hi: 6.0, trip_hi: 7.1 }, delay_samples: 2, seed_key: t013,
+          normal: { base: 2.2, noise_sd: 0.07, daily_amp: 0.04, drift_sd: 0.01 } }
+      - { tag_id: TI-ST2101, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 90, alarm_hi: 100, trip_hi: 110 }, delay_samples: 3, seed_key: t014,
+          normal: { base: 78, noise_sd: 0.3, daily_amp: 1.2, drift_sd: 0.15 } }
+  - equip_id: P-2101
+    name: 경유 원료 펌프
+    type: PM
+    grade: 2
+    unit_id: U-2
+    aliases: [P2101]
+    tags:
+      - { tag_id: VI-P2101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 3.5, alarm_hi: 5.0, trip_hi: 6.3 }, delay_samples: 2, seed_key: t015,
+          normal: { base: 2.1, noise_sd: 0.06, daily_amp: 0.04, drift_sd: 0.01 } }
+      - { tag_id: TI-P2101, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 75, alarm_hi: 85, trip_hi: 95 }, delay_samples: 3, seed_key: t016,
+          normal: { base: 58, noise_sd: 0.25, daily_amp: 1.5, drift_sd: 0.12 } }
+  - equip_id: F-2101
+    name: 경유 가열로 ID 팬
+    type: FN
+    grade: 2
+    unit_id: U-2
+    aliases: [F2101]
+    tags:
+      - { tag_id: VI-F2101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 4.5, alarm_hi: 7.1, trip_hi: 9.0 }, delay_samples: 2, seed_key: t017,
+          normal: { base: 3.2, noise_sd: 0.11, daily_amp: 0.08, drift_sd: 0.015 } }
+      - { tag_id: TI-F2101, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 70, alarm_hi: 80, trip_hi: 90 }, delay_samples: 3, seed_key: t018,
+          normal: { base: 55, noise_sd: 0.25, daily_amp: 2.0, drift_sd: 0.12 } }
+
+  # ---------------- U-3 보충 수소 압축 ----------------
+  - equip_id: K-3101
+    name: 보충 수소 왕복동 압축기 A
+    type: RC
+    grade: 1
+    unit_id: U-3
+    aliases: [K3101]
+    driven_by: M-3101
+    tags:
+      - { tag_id: VI-K3101, signal: vibration, unit: mm/s, location: CRANK,
+          limits: { warn_hi: 9.0, alarm_hi: 11.0, trip_hi: 14.0 }, delay_samples: 2, seed_key: t019,
+          normal: { base: 5.6, noise_sd: 0.2, daily_amp: 0.1, drift_sd: 0.03 } }
+      - { tag_id: TI-K3101, signal: temperature, unit: "°C", location: CYL_DISCH,
+          limits: { warn_hi: 85, alarm_hi: 95, trip_hi: 105 }, delay_samples: 3, seed_key: t020,
+          normal: { base: 71, noise_sd: 0.35, daily_amp: 1.5, drift_sd: 0.15 } }
+      - { tag_id: PI-K3101, signal: pressure, unit: kg/cm2, location: DISCH,
+          limits: { warn_hi: 72, alarm_hi: 76, trip_hi: 80 }, delay_samples: 1, seed_key: t021,
+          normal: { base: 65.0, noise_sd: 0.25, daily_amp: 0.4, drift_sd: 0.08 } }
+  - equip_id: K-3102
+    name: 보충 수소 왕복동 압축기 B
+    type: RC
+    grade: 1
+    unit_id: U-3
+    aliases: [K3102]
+    driven_by: M-3102
+    tags:
+      - { tag_id: VI-K3102, signal: vibration, unit: mm/s, location: CRANK,
+          limits: { warn_hi: 9.0, alarm_hi: 11.0, trip_hi: 14.0 }, delay_samples: 2, seed_key: t022,
+          normal: { base: 6.0, noise_sd: 0.22, daily_amp: 0.1, drift_sd: 0.03 } }
+      - { tag_id: TI-K3102, signal: temperature, unit: "°C", location: CYL_DISCH,
+          limits: { warn_hi: 85, alarm_hi: 95, trip_hi: 105 }, delay_samples: 3, seed_key: t023,
+          normal: { base: 73, noise_sd: 0.35, daily_amp: 1.5, drift_sd: 0.15 } }
+      - { tag_id: PI-K3102, signal: pressure, unit: kg/cm2, location: DISCH,
+          limits: { warn_hi: 72, alarm_hi: 76, trip_hi: 80 }, delay_samples: 1, seed_key: t024,
+          normal: { base: 64.5, noise_sd: 0.25, daily_amp: 0.4, drift_sd: 0.08 } }
+  - equip_id: M-3101
+    name: 보충 수소 압축기 A 구동 모터
+    type: MT
+    grade: 2
+    unit_id: U-3
+    aliases: [M3101]
+    tags:
+      - { tag_id: VI-M3101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 2.8, alarm_hi: 4.5, trip_hi: 7.1 }, delay_samples: 2, seed_key: t025,
+          normal: { base: 1.6, noise_sd: 0.05, daily_amp: 0.03, drift_sd: 0.008 } }
+      - { tag_id: TI-M3101, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, delay_samples: 3, seed_key: t026,
+          normal: { base: 60, noise_sd: 0.25, daily_amp: 1.8, drift_sd: 0.12 } }
+  - equip_id: M-3102
+    name: 보충 수소 압축기 B 구동 모터
+    type: MT
+    grade: 2
+    unit_id: U-3
+    aliases: [M3102]
+    tags:
+      - { tag_id: VI-M3102, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 2.8, alarm_hi: 4.5, trip_hi: 7.1 }, delay_samples: 2, seed_key: t027,
+          normal: { base: 1.8, noise_sd: 0.05, daily_amp: 0.03, drift_sd: 0.008 } }
+      - { tag_id: TI-M3102, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, delay_samples: 3, seed_key: t028,
+          normal: { base: 62, noise_sd: 0.25, daily_amp: 1.8, drift_sd: 0.12 } }
+
+  # ---------------- U-4 오프가스 회수 ----------------
+  - equip_id: C-4101
+    name: 오프가스 압축기
+    type: CC
+    grade: 1
+    unit_id: U-4
+    aliases: [C4101]
+    driven_by: G-4101
+    tags:
+      - { tag_id: VI-C4101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 4.5, alarm_hi: 6.0, trip_hi: 7.1 }, delay_samples: 2, seed_key: t029,
+          normal: { base: 2.8, noise_sd: 0.09, daily_amp: 0.06, drift_sd: 0.012 } }
+      - { tag_id: TI-C4101, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, delay_samples: 3, seed_key: t030,
+          normal: { base: 62, noise_sd: 0.3, daily_amp: 1.5, drift_sd: 0.15 } }
+      - { tag_id: PI-C4101, signal: pressure, unit: kg/cm2, location: DISCH,
+          limits: { warn_hi: 10.0, alarm_hi: 11.0, trip_hi: 12.0 }, delay_samples: 1, seed_key: t031,
+          normal: { base: 8.5, noise_sd: 0.05, daily_amp: 0.1, drift_sd: 0.02 } }
+  - equip_id: M-4101
+    name: 오프가스 압축기 구동 모터
+    type: MT
+    grade: 2
+    unit_id: U-4
+    aliases: [M4101]
+    tags:
+      - { tag_id: VI-M4101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 2.8, alarm_hi: 4.5, trip_hi: 7.1 }, delay_samples: 2, seed_key: t032,
+          normal: { base: 1.7, noise_sd: 0.05, daily_amp: 0.03, drift_sd: 0.008 } }
+      - { tag_id: TI-M4101, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, delay_samples: 3, seed_key: t033,
+          normal: { base: 61, noise_sd: 0.25, daily_amp: 1.8, drift_sd: 0.12 } }
+  - equip_id: G-4101
+    name: 오프가스 압축기 증속 기어박스
+    type: GB
+    grade: 2
+    unit_id: U-4
+    aliases: [G4101]
+    driven_by: M-4101
+    tags:
+      - { tag_id: VI-G4101, signal: vibration, unit: mm/s, location: HS_BRG,
+          limits: { warn_hi: 5.0, alarm_hi: 7.0, trip_hi: 9.0 }, delay_samples: 2, seed_key: t034,
+          normal: { base: 3.0, noise_sd: 0.1, daily_amp: 0.06, drift_sd: 0.015 } }
+      - { tag_id: TI-G4101, signal: temperature, unit: "°C", location: OIL,
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, delay_samples: 3, seed_key: t035,
+          normal: { base: 60, noise_sd: 0.25, daily_amp: 1.5, drift_sd: 0.12 } }
+  - equip_id: P-4101
+    name: 아민 순환 펌프
+    type: PM
+    grade: 2
+    unit_id: U-4
+    aliases: [P4101]
+    tags:
+      - { tag_id: VI-P4101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 3.5, alarm_hi: 5.0, trip_hi: 6.3 }, delay_samples: 2, seed_key: t036,
+          normal: { base: 2.3, noise_sd: 0.07, daily_amp: 0.04, drift_sd: 0.01 } }
+      - { tag_id: TI-P4101, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 75, alarm_hi: 85, trip_hi: 95 }, delay_samples: 3, seed_key: t037,
+          normal: { base: 57, noise_sd: 0.25, daily_amp: 1.5, drift_sd: 0.12 } }
+
+  # ---------------- U-5 제품 스트리퍼 ----------------
+  - equip_id: P-5101
+    name: 스트리퍼 환류 펌프
+    type: PM
+    grade: 2
+    unit_id: U-5
+    aliases: [P5101]
+    tags:
+      - { tag_id: VI-P5101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 3.5, alarm_hi: 5.0, trip_hi: 6.3 }, delay_samples: 2, seed_key: t038,
+          normal: { base: 2.0, noise_sd: 0.06, daily_amp: 0.04, drift_sd: 0.01 } }
+      - { tag_id: PI-P5101, signal: pressure, unit: kg/cm2, location: DISCH,
+          limits: { warn_hi: 8.0, alarm_hi: 9.0, trip_hi: 10.0 }, delay_samples: 1, seed_key: t039,
+          normal: { base: 6.0, noise_sd: 0.04, daily_amp: 0.08, drift_sd: 0.02 } }
+  - equip_id: P-5102
+    name: 스트리퍼 제품 펌프
+    type: PM
+    grade: 2
+    unit_id: U-5
+    aliases: [P5102]
+    tags:
+      - { tag_id: VI-P5102, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 3.5, alarm_hi: 5.0, trip_hi: 6.3 }, delay_samples: 2, seed_key: t040,
+          normal: { base: 2.4, noise_sd: 0.07, daily_amp: 0.05, drift_sd: 0.01 } }
+      - { tag_id: PI-P5102, signal: pressure, unit: kg/cm2, location: DISCH,
+          limits: { warn_hi: 11.0, alarm_hi: 12.0, trip_hi: 13.0 }, delay_samples: 1, seed_key: t041,
+          normal: { base: 9.0, noise_sd: 0.05, daily_amp: 0.1, drift_sd: 0.02 } }
+
+  # ---------------- U-6 계장공기 ----------------
+  - equip_id: C-6101
+    name: 계장공기 압축기
+    type: CC
+    grade: 2
+    unit_id: U-6
+    aliases: [C6101]
+    tags:
+      - { tag_id: VI-C6101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 4.5, alarm_hi: 6.0, trip_hi: 7.1 }, delay_samples: 2, seed_key: t042,
+          normal: { base: 2.5, noise_sd: 0.08, daily_amp: 0.05, drift_sd: 0.01 } }
+      - { tag_id: TI-C6101, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, delay_samples: 3, seed_key: t043,
+          normal: { base: 60, noise_sd: 0.3, daily_amp: 2.0, drift_sd: 0.15 } }
+      - { tag_id: PI-C6101, signal: pressure, unit: kg/cm2, location: DISCH,
+          limits: { warn_hi: 8.5, alarm_hi: 9.0, trip_hi: 9.5 }, delay_samples: 1, seed_key: t044,
+          normal: { base: 7.2, noise_sd: 0.04, daily_amp: 0.08, drift_sd: 0.02 } }
+  - equip_id: P-6101
+    name: 냉각수 펌프
+    type: PM
+    grade: 3
+    unit_id: U-6
+    aliases: [P6101]
+    tags:
+      - { tag_id: VI-P6101, signal: vibration, unit: mm/s, location: DE,
+          limits: { warn_hi: 3.5, alarm_hi: 5.0, trip_hi: 6.3 }, delay_samples: 2, seed_key: t045,
+          normal: { base: 2.2, noise_sd: 0.07, daily_amp: 0.04, drift_sd: 0.01 } }
+      - { tag_id: TI-P6101, signal: temperature, unit: "°C", location: DE_BRG,
+          limits: { warn_hi: 75, alarm_hi: 85, trip_hi: 95 }, delay_samples: 3, seed_key: t046,
+          normal: { base: 50, noise_sd: 0.25, daily_amp: 2.0, drift_sd: 0.12 } }
+
+# 연관 규칙 (기획서 5.2): 진동이 오르면 베어링 온도가 시간차를 두고 따라 오른다. 같은 Unit 안에서만 둔다.
+correlations:
+  - { source: VI-C1101, target: TI-C1101, gain: 1.8, lag_minutes: 60 }
+  - { source: VI-ST1101, target: TI-ST1101, gain: 1.5, lag_minutes: 60 }
+  - { source: VI-P1101, target: TI-P1101, gain: 1.5, lag_minutes: 45 }
+  - { source: VI-F1101, target: TI-F1101, gain: 1.2, lag_minutes: 45 }
+  - { source: VI-C2101, target: TI-C2101, gain: 1.8, lag_minutes: 60 }
+  - { source: VI-ST2101, target: TI-ST2101, gain: 1.5, lag_minutes: 60 }
+  - { source: VI-P2101, target: TI-P2101, gain: 1.5, lag_minutes: 45 }
+  - { source: VI-F2101, target: TI-F2101, gain: 1.2, lag_minutes: 45 }
+  - { source: VI-K3101, target: TI-K3101, gain: 1.2, lag_minutes: 60 }
+  - { source: VI-K3102, target: TI-K3102, gain: 1.2, lag_minutes: 60 }
+  - { source: VI-M3101, target: TI-M3101, gain: 2.0, lag_minutes: 45 }
+  - { source: VI-M3102, target: TI-M3102, gain: 2.0, lag_minutes: 45 }
+  - { source: VI-C4101, target: TI-C4101, gain: 1.8, lag_minutes: 60 }
+  - { source: VI-M4101, target: TI-M4101, gain: 2.0, lag_minutes: 45 }
+  - { source: VI-G4101, target: TI-G4101, gain: 1.6, lag_minutes: 30 }
+  - { source: VI-P4101, target: TI-P4101, gain: 1.5, lag_minutes: 45 }
+  - { source: VI-C6101, target: TI-C6101, gain: 1.8, lag_minutes: 60 }
+  - { source: VI-P6101, target: TI-P6101, gain: 1.5, lag_minutes: 45 }

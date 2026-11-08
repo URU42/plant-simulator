@@ -1,0 +1,31 @@
+[project]
+name = "plant-simulator"
+version = "0.1.0"
+description = "Skadi 앞단 데이터 생성기: 가상 수첨탈황 공장 설비 시뮬레이터 + 중앙 수집 서버"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "numpy>=1.26",
+    "httpx>=0.27",
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.setuptools]
+packages = ["common", "simulator", "collector"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
