@@ -96,3 +96,15 @@ def test_unknown_signal_kind_and_speed_mismatch_are_reported(rfcc_plant_path, rf
     bad.tag_by_id()["SI-B-1201"].normal.base = 5300
     with pytest.raises(ConfigError, match="B-1201"):
         RfccSignalModel(bad, rt.seed, rt.sample_interval_sec)
+
+
+def test_fast_noise_is_continuous_across_block_boundaries(model):
+    """빠른 성분 블록 경계(UTC 자정)의 한 스텝 차이가 블록 안의 한 스텝 차이와 같은 크기여야 한다 (τ 80, τ 12 태그)."""
+    by_id = model.plant.tag_by_id()
+    for tag_id in ("TI-P-1101A", "ZI-E-1202"):
+        step = by_id[tag_id].interval_sec
+        boundaries = np.array([int(T0.timestamp()) // 86400 * 86400 + d * 86400 for d in range(30)])     # 30일의 UTC 자정
+        at_boundary = np.abs(model.normal_values(tag_id, boundaries) - model.normal_values(tag_id, boundaries - step))
+        inside = model.normal_values(tag_id, np.arange(boundaries[0] + 3600, boundaries[0] + 3600 + 3000 * step, step))
+        typical = np.abs(np.diff(inside)).mean()
+        assert at_boundary.mean() < 1.5 * typical, (tag_id, at_boundary.mean(), typical)

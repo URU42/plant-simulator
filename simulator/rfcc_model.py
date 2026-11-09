@@ -5,7 +5,8 @@
 
 - 공통 성분: 공정 부하 L(t), 외기 A(t), 설비 부하 local_e(t) = L + 설비별 OU.
 - 느린 성분(τ ≥ 500 s): 고정 기준 시각(KST 2026-01-01)부터 600초 격자의 정상 AR(1) 매듭을 선형 보간.
-- 빠른 성분(τ ≤ 80 s): 날짜 블록을 (seed, seed_key, 성분, 날짜) 로 시드해 잘린 지수 커널 합성곱으로 만든다.
+- 빠른 성분(τ ≤ 80 s): 날짜 블록을 (seed, seed_key, 성분, 날짜) 로 시드한 혁신 잡음과 잘린 지수 커널의 합성곱으로 만든다.
+  블록 앞의 예열 구간은 전날 블록의 마지막 혁신값을 쓰므로 날짜 경계에서도 하나의 연속 필터와 같다.
 - 온도: 강제항(부하·외기)을 시정수 240초로 지연시킨 뒤 느린 잡음을 더한다.
 - 축 속도: 피구동 설비(driven_by)는 구동기 speed 태그의 시드와 기준값으로 같은 값을 만든다.
 """
@@ -209,18 +210,28 @@ class RfccSignalModel(SignalModel):
         return out
 
     def _block(self, tag: TagConfig, day: int, interval: int) -> np.ndarray:
+        """하루 블록 = AR(1) 잡음 (+ 흰 잡음). 예열은 전날 혁신값이라 경계에서 끊기지 않는다."""
         cache = self._blocks.setdefault(tag.tag_id, {})
         if day not in cache:
             tau, white = _FAST.get(tag.signal, _FAST_DEFAULT)
-            rng = np.random.default_rng(_seed_of(self._seed, tag.seed_key, _C_FAST, day))
             n = DAY_SEC // interval
-            block = ar1_series(rng, tag.normal.noise_sd, tau, interval, n)
+            kernel = _kernel(tau, interval)
+            kernel *= tag.normal.noise_sd / math.sqrt(float(np.square(kernel).sum()))
+            ar_prev, _ = self._innovations(tag, day - 1, n)
+            ar_today, white_today = self._innovations(tag, day, n)
+            warmup = ar_prev[n - (len(kernel) - 1):] if len(kernel) > 1 else ar_prev[:0]
+            block = np.convolve(np.concatenate([warmup, ar_today]), kernel, "valid")
             if white:
-                block = block + rng.normal(0.0, white * tag.normal.noise_sd, n)
+                block = block + white * tag.normal.noise_sd * white_today
             cache[day] = block
             while len(cache) > BLOCK_CACHE_DAYS:
                 cache.pop(next(iter(cache)))
         return cache[day]
+
+    def _innovations(self, tag: TagConfig, day: int, n: int) -> tuple[np.ndarray, np.ndarray]:
+        """(AR 혁신 n 개, 흰 잡음 n 개). 날짜·태그로 시드한 표준 정규."""
+        rng = np.random.default_rng(_seed_of(self._seed, tag.seed_key, _C_FAST, day))
+        return rng.normal(0.0, 1.0, n), rng.normal(0.0, 1.0, n)
 
     # --- 태그 종류별 식 -----------------------------------------------------
     def _vibration(self, tag: TagConfig, equip: EquipmentConfig, epochs: np.ndarray) -> np.ndarray:
