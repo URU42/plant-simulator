@@ -153,7 +153,7 @@ Unit 별로 프로세스를 나눠도 같은 값이 나오고, 같은 시드로 
 | 메서드 · 경로 | 용도 |
 | --- | --- |
 | `POST /ingest` | 시뮬레이터 묶음 수신 |
-| `GET /health` | 서버 상태, 마지막 수신 시각, 시뮬레이터 현재 시각(`sim_now`) |
+| `GET /health` | 서버 상태, 마지막 수신 시각, 시뮬레이터 현재 시각(`sim_now`), 밀린 배치 처리 중 여부(`catching_up`) |
 | `GET /tags/{tag_id}/current` | 태그 현재값. 전송 주기 3번 동안 안 들어오면 `status: NoData` |
 | `GET /timeseries?tag_id=&from=&to=&interval=1h` | 집계 시계열 (`10m` / `1h`) |
 | `GET /alarms?equip_id=&from=&to=` | 알람 목록 |
