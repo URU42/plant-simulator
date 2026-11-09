@@ -1,0 +1,534 @@
+# 구성안: RHDS (상압 잔사유 수첨탈황) (PL-RHDS) — 다중 공장 설계 docs/superpowers/specs/2026-11-09-multi-plant-design.md
+# - 출처: RHDS_VRDS_v3/data/RHDS_*.xlsx 의 `설비 설명`(계층)·`설비 태그`(태그명·설명·단위·정상 기준·경고/알람/정지 상·하한·근거) 시트. 마스터 값은 그대로.
+# - 태그명은 같은 설비 안에서만 고유하다 (복합키 (equip_id, tag_id)). 한계값·정상 기준·근거는 자료 그대로이며 빈 칸은 적지 않았다.
+# - normal.base 는 데이터 첫 6시간 Good·Uncertain 평균, noise_sd 는 첫 1시간 연속 차분 표준편차를 종류별 상수로 나눈 값, decimals 는 데이터의 소수 자릿수.
+# - 온도 10초, 나머지 1초. 신호 모델은 rfcc. seed_key 는 공장 접두어를 붙여 다른 공장과 겹치지 않는다.
+
+plant:
+  plant_id: PL-RHDS
+  name: "RHDS (상압 잔사유 수첨탈황)"
+  config_version: 1
+  signal_model: rfcc
+  unit_groups:
+    - id: UG-RHDS-01
+      name: "원료 공급"
+      units:
+        - { id: UNIT-RHDS-01, name: "잔사유 가압·공급" }
+    - id: UG-RHDS-02
+      name: "수소 공급"
+      units:
+        - { id: UNIT-RHDS-02, name: "보충 수소 압축" }
+    - id: UG-RHDS-03
+      name: "수첨탈황 반응"
+      units:
+        - { id: UNIT-RHDS-03, name: "수소 순환" }
+    - id: UG-RHDS-04
+      name: "반응 가열"
+      units:
+        - { id: UNIT-RHDS-04, name: "연소공기 공급" }
+    - id: UG-RHDS-05
+      name: "고온 유체 처리"
+      units:
+        - { id: UNIT-RHDS-05, name: "잔사유 이송" }
+    - id: UG-RHDS-06
+      name: "생성물 분별"
+      units:
+        - { id: UNIT-RHDS-06, name: "환류·순환" }
+
+# 설비 유형 매핑. kind 는 신호 모델이 보는 기계 종류
+equipment_types:
+  - { type: PM, name: 펌프, prefix: P, kind: pump }
+  - { type: CC, name: 압축기, prefix: C, kind: compressor }
+  - { type: FN, name: 팬, prefix: F, kind: fan }
+
+# 표준 태그 (신호 종류 · 대표 접두어 · 대표 단위). 태그별 실제 단위는 각 태그에 적는다
+signals:
+  - { signal: vibration, prefix: VI, unit: "mm/s RMS", name: 케이싱 진동 속도 }
+  - { signal: bearing_temp, prefix: TI, unit: "DEG C", name: 베어링 온도 }
+  - { signal: suction_pressure, prefix: PI, unit: "bar(g)", name: 흡입 압력 }
+  - { signal: discharge_pressure, prefix: PI, unit: "bar(g)", name: 토출 압력 }
+  - { signal: flow, prefix: FI, unit: "m3/h", name: 유량 }
+  - { signal: current, prefix: II, unit: "A", name: 모터 전류 }
+  - { signal: suction_temp, prefix: TI, unit: "DEG C", name: 흡입 온도 }
+  - { signal: discharge_temp, prefix: TI, unit: "DEG C", name: 토출 온도 }
+  - { signal: speed, prefix: SI, unit: "rpm", name: 회전속도 }
+  - { signal: shaft_vibration, prefix: XI, unit: "um pk-pk", name: 축 상대 진동 }
+  - { signal: axial_position, prefix: ZI, unit: "mm", name: 축방향 위치 }
+  - { signal: oil_pressure, prefix: PI, unit: "bar(g)", name: 윤활유 압력 }
+  - { signal: oil_temp, prefix: TI, unit: "DEG C", name: 윤활유 온도 }
+  - { signal: differential_pressure, prefix: PDI, unit: "Pa", name: 차압 }
+  - { signal: process_temp, prefix: TI, unit: "DEG C", name: 공정 유체 온도 }
+
+equipment:
+  # ---------------- UNIT-RHDS-01 잔사유 가압·공급 ----------------
+  - equip_id: P-3101
+    name: "고압 원료 공급 펌프 (High Pressure Feed Pump)"
+    type: PM
+    unit_id: UNIT-RHDS-01
+    seed_key: rhds-e01
+    tags:
+      - { tag_id: VI-A-3101,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "구동측 수평 케이싱 진동",
+          limits: { warn_hi: 4.5 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r001,
+          normal: { base: 1.651, noise_sd: 0.05915 } }
+      - { tag_id: TI-B-3101,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "구동측 베어링 온도",
+          limits: { warn_hi: 85 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 10,
+          decimals: 1,
+          seed_key: rhds-r002,
+          normal: { base: 63.515, noise_sd: 0.145198 } }
+      - { tag_id: PI-S-3101,
+          signal: suction_pressure,
+          unit: "bar(g)",
+          description: "흡입 압력",
+          limits: { warn_lo: 3.5 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r003,
+          normal: { base: 5.2, noise_sd: 0.016568 } }
+      - { tag_id: PI-D-3101,
+          signal: discharge_pressure,
+          unit: "bar(g)",
+          description: "토출 압력",
+          limits: { warn_hi: 170 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r004,
+          normal: { base: 155.029, noise_sd: 0.100858 } }
+      - { tag_id: FI-3101,
+          signal: flow,
+          unit: "m3/h",
+          description: "원료 유량",
+          limits: { warn_lo: 160 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r005,
+          normal: { base: 210.515, noise_sd: 0.387308 } }
+      - { tag_id: II-3101,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { warn_hi: 210 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r006,
+          normal: { base: 165.257, noise_sd: 0.303178 } }
+  # ---------------- UNIT-RHDS-02 보충 수소 압축 ----------------
+  - equip_id: C-3102
+    name: "보충 수소 압축기 (Make-up Hydrogen Compressor)"
+    type: CC
+    unit_id: UNIT-RHDS-02
+    seed_key: rhds-e02
+    tags:
+      - { tag_id: VI-A-3102,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "프레임 케이싱 진동",
+          limits: { warn_hi: 6 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r007,
+          normal: { base: 2.302, noise_sd: 0.083736 } }
+      - { tag_id: TI-B-3102,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "프레임 베어링 온도",
+          limits: { warn_hi: 85 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 10,
+          decimals: 1,
+          seed_key: rhds-r008,
+          normal: { base: 61.518, noise_sd: 0.141295 } }
+      - { tag_id: PI-S-3102,
+          signal: suction_pressure,
+          unit: "bar(g)",
+          description: "첫 단 흡입 압력",
+          limits: { warn_lo: 20 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r009,
+          normal: { base: 24.997, noise_sd: 0.030137 } }
+      - { tag_id: PI-D-3102,
+          signal: discharge_pressure,
+          unit: "bar(g)",
+          description: "최종 단 토출 압력",
+          limits: { warn_hi: 175 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r010,
+          normal: { base: 158.026, noise_sd: 0.118123 } }
+      - { tag_id: TI-S-3102,
+          signal: suction_temp,
+          unit: "DEG C",
+          description: "첫 단 흡입 가스 온도",
+          limits: { warn_hi: 50 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 10,
+          decimals: 1,
+          seed_key: rhds-r011,
+          normal: { base: 36.624, noise_sd: 0.130365 } }
+      - { tag_id: TI-D-3102,
+          signal: discharge_temp,
+          unit: "DEG C",
+          description: "최종 단 토출 가스 온도",
+          limits: { warn_hi: 145 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 10,
+          decimals: 1,
+          seed_key: rhds-r012,
+          normal: { base: 117.623, noise_sd: 0.184512 } }
+      - { tag_id: FI-3102,
+          signal: flow,
+          unit: "Nm3/h",
+          description: "보충 수소 표준 유량",
+          limits: { warn_lo: 9000 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 0,
+          seed_key: rhds-r013,
+          normal: { base: 12028.495, noise_sd: 21.235716 } }
+      - { tag_id: SI-3102,
+          signal: speed,
+          unit: "rpm",
+          description: "크랭크축 회전속도",
+          limits: { warn_lo: 570, warn_hi: 610 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r014,
+          normal: { base: 589.993, noise_sd: 0.318218 } }
+  # ---------------- UNIT-RHDS-03 수소 순환 ----------------
+  - equip_id: C-3101
+    name: "순환가스 압축기 (Recycle Gas Compressor)"
+    type: CC
+    unit_id: UNIT-RHDS-03
+    seed_key: rhds-e03
+    tags:
+      - { tag_id: XI-X-3101,
+          signal: shaft_vibration,
+          unit: "um pk-pk",
+          description: "구동측 X방향 축 상대 진동",
+          limits: { warn_hi: 75 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r015,
+          normal: { base: 33.021, noise_sd: 1.040492 } }
+      - { tag_id: TI-B-3101,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "저널 베어링 금속 온도",
+          limits: { warn_hi: 95 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 10,
+          decimals: 1,
+          seed_key: rhds-r016,
+          normal: { base: 76.525, noise_sd: 0.139025 } }
+      - { tag_id: ZI-3101,
+          signal: axial_position,
+          unit: "mm",
+          description: "축방향 위치·기준점 대비",
+          limits: { warn_lo: -0.35, warn_hi: 0.35 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: rhds-r017,
+          normal: { base: 0.05, noise_sd: 0.002986 } }
+      - { tag_id: PI-S-3101,
+          signal: suction_pressure,
+          unit: "bar(g)",
+          description: "흡입 압력",
+          limits: { warn_lo: 125 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r018,
+          normal: { base: 139.983, noise_sd: 0.067289 } }
+      - { tag_id: PI-D-3101,
+          signal: discharge_pressure,
+          unit: "bar(g)",
+          description: "토출 압력",
+          limits: { warn_hi: 170 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r019,
+          normal: { base: 153.027, noise_sd: 0.075571 } }
+      - { tag_id: TI-S-3101,
+          signal: suction_temp,
+          unit: "DEG C",
+          description: "흡입 가스 온도",
+          limits: { warn_hi: 60 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 10,
+          decimals: 1,
+          seed_key: rhds-r020,
+          normal: { base: 45.617, noise_sd: 0.110763 } }
+      - { tag_id: TI-D-3101,
+          signal: discharge_temp,
+          unit: "DEG C",
+          description: "토출 가스 온도",
+          limits: { warn_hi: 95 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 10,
+          decimals: 1,
+          seed_key: rhds-r021,
+          normal: { base: 67.623, noise_sd: 0.141563 } }
+      - { tag_id: FI-3101,
+          signal: flow,
+          unit: "Nm3/h",
+          description: "순환가스 표준 유량",
+          limits: { warn_lo: 110000 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 0,
+          seed_key: rhds-r022,
+          normal: { base: 150367.09, noise_sd: 190.737122 } }
+      - { tag_id: SI-3101,
+          signal: speed,
+          unit: "rpm",
+          description: "압축기 회전속도",
+          limits: { warn_lo: 8500, warn_hi: 10000 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r023,
+          normal: { base: 9203.301, noise_sd: 2.684643 } }
+      - { tag_id: PI-LO-3101,
+          signal: oil_pressure,
+          unit: "bar(g)",
+          description: "윤활유 헤더 압력",
+          limits: { warn_lo: 2 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r024,
+          normal: { base: 2.7, noise_sd: 0.00902 } }
+      - { tag_id: TI-LO-3101,
+          signal: oil_temp,
+          unit: "DEG C",
+          description: "윤활유 공급 온도",
+          limits: { warn_hi: 55 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 10,
+          decimals: 1,
+          seed_key: rhds-r025,
+          normal: { base: 43.665, noise_sd: 0.101399 } }
+  # ---------------- UNIT-RHDS-04 연소공기 공급 ----------------
+  - equip_id: F-3101
+    name: "가열로 강제통풍 팬 (FD Fan)"
+    type: FN
+    unit_id: UNIT-RHDS-04
+    seed_key: rhds-e04
+    tags:
+      - { tag_id: VI-A-3101,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "팬 구동측 케이싱 진동",
+          limits: { warn_hi: 4.5 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r026,
+          normal: { base: 1.9, noise_sd: 0.071449 } }
+      - { tag_id: TI-B-3101,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "팬 구동측 베어링 온도",
+          limits: { warn_hi: 80 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 10,
+          decimals: 1,
+          seed_key: rhds-r027,
+          normal: { base: 54.516, noise_sd: 0.142516 } }
+      - { tag_id: SI-3101,
+          signal: speed,
+          unit: "rpm",
+          description: "팬 회전속도",
+          limits: { warn_lo: 1150, warn_hi: 1550 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r028,
+          normal: { base: 1461.175, noise_sd: 1.658425 } }
+      - { tag_id: II-3101,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { warn_hi: 80 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r029,
+          normal: { base: 58.141, noise_sd: 0.223165 } }
+      - { tag_id: FI-3101,
+          signal: flow,
+          unit: "m3/h",
+          description: "연소공기 실제 체적 유량",
+          limits: { warn_lo: 35000 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r030,
+          normal: { base: 48043.238, noise_sd: 101.023467 } }
+      - { tag_id: PDI-3101,
+          signal: differential_pressure,
+          unit: "Pa",
+          description: "팬 입출구 차압",
+          limits: { warn_lo: 1400 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r031,
+          normal: { base: 2203.681, noise_sd: 10.466695 } }
+  # ---------------- UNIT-RHDS-05 잔사유 이송 ----------------
+  - equip_id: P-3102
+    name: "고온 잔사유 이송 펌프 (Hot Residue Pump)"
+    type: PM
+    unit_id: UNIT-RHDS-05
+    seed_key: rhds-e05
+    tags:
+      - { tag_id: VI-A-3102,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "구동측 케이싱 진동",
+          limits: { warn_hi: 4.5 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r032,
+          normal: { base: 1.85, noise_sd: 0.065121 } }
+      - { tag_id: TI-B-3102,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "구동측 베어링 온도",
+          limits: { warn_hi: 90 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 10,
+          decimals: 1,
+          seed_key: rhds-r033,
+          normal: { base: 72.515, noise_sd: 0.141293 } }
+      - { tag_id: TI-F-3102,
+          signal: process_temp,
+          unit: "DEG C",
+          description: "흡입 유체 온도",
+          limits: { warn_hi: 310 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 10,
+          decimals: 1,
+          seed_key: rhds-r034,
+          normal: { base: 279.739, noise_sd: 0.166608 } }
+      - { tag_id: PI-S-3102,
+          signal: suction_pressure,
+          unit: "bar(g)",
+          description: "흡입 압력",
+          limits: { warn_lo: 3 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r035,
+          normal: { base: 4.6, noise_sd: 0.016551 } }
+      - { tag_id: PI-D-3102,
+          signal: discharge_pressure,
+          unit: "bar(g)",
+          description: "토출 압력",
+          limits: { warn_hi: 25 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r036,
+          normal: { base: 19.001, noise_sd: 0.034111 } }
+      - { tag_id: FI-3102,
+          signal: flow,
+          unit: "m3/h",
+          description: "잔사유 유량",
+          limits: { warn_lo: 140 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r037,
+          normal: { base: 185.451, noise_sd: 0.385921 } }
+      - { tag_id: II-3102,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { warn_hi: 145 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r038,
+          normal: { base: 112.178, noise_sd: 0.274789 } }
+  # ---------------- UNIT-RHDS-06 환류·순환 ----------------
+  - equip_id: P-3103
+    name: "분별탑 환류 펌프 (Fractionator Reflux Pump)"
+    type: PM
+    unit_id: UNIT-RHDS-06
+    seed_key: rhds-e06
+    tags:
+      - { tag_id: VI-A-3103,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "구동측 케이싱 진동",
+          limits: { warn_hi: 4.5 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r039,
+          normal: { base: 1.351, noise_sd: 0.052093 } }
+      - { tag_id: TI-B-3103,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "구동측 베어링 온도",
+          limits: { warn_hi: 80 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 10,
+          decimals: 1,
+          seed_key: rhds-r040,
+          normal: { base: 57.513, noise_sd: 0.13379 } }
+      - { tag_id: PI-S-3103,
+          signal: suction_pressure,
+          unit: "bar(g)",
+          description: "흡입 압력",
+          limits: { warn_lo: 2 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r041,
+          normal: { base: 3.1, noise_sd: 0.012939 } }
+      - { tag_id: PI-D-3103,
+          signal: discharge_pressure,
+          unit: "bar(g)",
+          description: "토출 압력",
+          limits: { warn_hi: 15 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r042,
+          normal: { base: 11.001, noise_sd: 0.022274 } }
+      - { tag_id: FI-3103,
+          signal: flow,
+          unit: "m3/h",
+          description: "환류액 유량",
+          limits: { warn_lo: 65 },
+          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r043,
+          normal: { base: 95.215, noise_sd: 0.264158 } }

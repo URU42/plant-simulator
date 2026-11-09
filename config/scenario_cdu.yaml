@@ -1,0 +1,44 @@
+# CDU 개발용 시나리오 (다중 공장 설계 §4.6). 출처: cdu-sample/평가전용/시나리오_정답.md. 매주 같은 요일·시각에 반복.
+# 운전 변경(원유 탱크 전환)은 넣지 않는다. 확정 고장이 아니므로 failure_id 를 주지 않는다.
+# related.ratio 는 기준 태그 편차(magnitude)에 대한 배율. 태그명이 공장 안에서 고유하면 equip_id 를 생략할 수 있다.
+events:
+  # ① 상압탑 하부 펌프 NDE 베어링 열화: VI-8303B ×2.25(+1.25·1.47 ≈ +1.85), VI-8303A ×1.18, TI-8303A +5.5
+  - event_id: EV-CDU-001
+    equip_id: P-8303A
+    tag_id: VI-8303B
+    pattern: swell
+    start: 2026-11-02T12:06:40+09:00
+    duration: 47h
+    repeat_every: 7d
+    magnitude: 1.85
+    related:
+      - { tag_id: VI-8303A, ratio: 0.17 }         # +0.18·1.74 / 1.85
+      - { tag_id: TI-8303A, ratio: 2.97 }         # +5.5 / 1.85
+    description: 반구동측 구름 베어링 열화 가정. NDE 진동·베어링 온도 점진 상승, 유량·압력 정상. 경고(3.0) 초과, 알람 미도달
+
+  # ② 원유 공급 펌프 흡입 스트레이너 막힘 초기 징후: 흡입 압력 −0.42, 진동 소폭 상승 (경고 미만)
+  - event_id: EV-CDU-002
+    equip_id: P-8101A
+    tag_id: PI-8101A
+    pattern: swell
+    start: 2026-11-01T16:40:00+09:00
+    duration: 4000m
+    repeat_every: 7d
+    magnitude: -0.42
+    related:
+      - { tag_id: VI-8101A, ratio: -0.39 }        # +0.16 / −0.42
+    description: 흡입 스트레이너 막힘 가정. 유량이 일정한데 흡입 압력만 서서히 내려가고 진동이 약간 오른다
+
+  # 계기 품질: 가열로 FD 팬 베어링 온도 RTD 단선 25분 (설비 이상 아님)
+  - event_id: EV-CDU-003
+    equip_id: F-8201
+    tag_id: TI-8201A
+    pattern: quality
+    quality: Bad
+    start: 2026-11-03T11:30:00+09:00
+    duration: 25m
+    repeat_every: 7d
+    description: RTD·결선 이상. 같은 시각 팬 진동·전류·회전속도는 정상
+
+random_anomalies:
+  rate_per_tag_day: 0
