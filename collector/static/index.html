@@ -38,7 +38,7 @@
 <script>
 (function () {
   const rows = new Map();          // tag_id → { tr, tds, decimals }
-  let received = 0, simNow = "";
+  let received = 0, simNowMs = 0;
 
   const kst = (iso) => iso ? new Date(iso).toLocaleString("sv-SE", { timeZone: "Asia/Seoul" }) : "—";
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -74,7 +74,7 @@
     const row = rows.get(s.tag_id);
     if (!row) return;
     const good = s.quality === "Good" && s.value != null;
-    row.tds.value.textContent = good ? Number(s.value).toFixed(row.decimals) : (s.ts ? "—" : "—");
+    row.tds.value.textContent = good ? Number(s.value).toFixed(row.decimals) : "—";
     row.tds.quality.textContent = s.quality || "—";
     row.tds.ts.textContent = kst(s.ts);
     row.tr.classList.toggle("bad", !!s.ts && !good);
@@ -83,7 +83,8 @@
       row.tds.value.classList.add("flash");
       setTimeout(() => row.tds.value.classList.remove("flash"), 500);
     }
-    if (s.ts && s.ts > simNow) { simNow = s.ts; document.getElementById("sim-now").textContent = kst(simNow); }
+    const ms = s.ts ? Date.parse(s.ts) : 0;          // UTC / +09:00 표기가 섞여도 시각으로 비교한다
+    if (ms > simNowMs) { simNowMs = ms; document.getElementById("sim-now").textContent = kst(s.ts); }
   }
 
   function connect() {
@@ -95,7 +96,13 @@
       const samples = JSON.parse(ev.data);
       received += samples.length;
       document.getElementById("count").textContent = received.toLocaleString();
-      for (const s of samples) { s.status = undefined; update(s, true); }
+      // 백필 묶음은 한 이벤트에 수십만 샘플이 온다. 태그마다 가장 늦은 샘플 하나만 반영한다.
+      const latest = new Map();
+      for (const s of samples) {
+        const prev = latest.get(s.tag_id);
+        if (!prev || s.ts > prev.ts) latest.set(s.tag_id, s);
+      }
+      for (const s of latest.values()) { s.status = undefined; update(s, true); }
     });
   }
 
