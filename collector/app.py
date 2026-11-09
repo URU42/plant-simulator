@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -14,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from collector.ingest import RawBatch, ingest, schema_supported
-from collector.jobs import JobRunner
+from collector.jobs import MAX_WINDOWS_PER_ADVANCE, JobRunner
 from collector.seed_master import seed_master
 from collector.storage import Storage
 from collector.stream import Broadcaster
@@ -41,7 +42,10 @@ def create_app(plant_path: str | Path, runtime_path: str | Path, db_path: str | 
         app.state.jobs = JobRunner(storage, plant, runtime)
         app.state.broadcaster = Broadcaster()
         app.state.started_at = to_db(datetime.now(timezone.utc))
+        app.state.catch_up_task = None
         yield
+        if app.state.catch_up_task:
+            app.state.catch_up_task.cancel()
         storage.close()
 
     app = FastAPI(title="Skadi 앞단 수집 서버", lifespan=lifespan)
@@ -57,16 +61,29 @@ def create_app(plant_path: str | Path, runtime_path: str | Path, db_path: str | 
         received_at = to_db(datetime.now(timezone.utc))
         result, accepted = ingest(st.storage, batch, received_at, st.tag_owner, _oldest_allowed(st.storage.sim_now()))
         if accepted:
-            st.jobs.advance(st.storage.sim_now())
+            if st.jobs.advance(st.storage.sim_now()) >= MAX_WINDOWS_PER_ADVANCE:
+                _start_catch_up(st)
             st.broadcaster.publish("samples", [s.model_dump(mode="json") for s in accepted])
         return result
+
+    def _start_catch_up(st) -> None:
+        """밀린 구간이 상한을 넘으면 요청을 붙잡지 않고 백그라운드에서 이어서 따라잡는다."""
+        if st.catch_up_task is None or st.catch_up_task.done():
+            st.catch_up_task = asyncio.create_task(_catch_up(st))
+
+    async def _catch_up(st) -> None:
+        while True:
+            await asyncio.sleep(0)                      # 다른 요청이 끼어들 틈을 준다
+            if st.jobs.advance(st.storage.sim_now()) == 0:
+                return
 
     # --- 조회 ---------------------------------------------------------------
     @app.get("/health")
     async def health(request: Request):
         st = request.app.state
+        catching_up = st.catch_up_task is not None and not st.catch_up_task.done()
         return {"status": "ok", "started_at": st.started_at, "last_received_at": st.storage.last_received_at(),
-                "sim_now": st.storage.sim_now(), "plant_id": plant.plant.plant_id}
+                "sim_now": st.storage.sim_now(), "catching_up": catching_up, "plant_id": plant.plant.plant_id}
 
     @app.get("/tags/{tag_id}/current")
     async def tag_current(tag_id: str, request: Request):

@@ -105,3 +105,21 @@ def test_advance_is_idempotent(env):
     n10, na = storage.count("ts_10m"), storage.count("alarm_detail")
     jobs.advance(storage.sim_now())
     assert (storage.count("ts_10m"), storage.count("alarm_detail")) == (n10, na)
+
+
+def test_advance_processes_at_most_a_cap_per_call_and_reports_progress(env):
+    """오래 멈췄다 켜져도 한 번에 다 처리하지 않는다. 남은 구간은 다음 호출이 이어서 처리한다."""
+    from collector.jobs import MAX_WINDOWS_PER_ADVANCE
+
+    storage, plant, jobs = env
+    _feed(storage, "VI-C1101", "C-1101", T0, 10, 2.0)
+    _feed(storage, "VI-C1101", "C-1101", T0 + timedelta(days=3), 10, 2.0)      # sim_now 가 3일 건너뛴다
+    first = jobs.advance(storage.sim_now())
+    assert first == MAX_WINDOWS_PER_ADVANCE
+    assert storage.query("SELECT COUNT(DISTINCT bucket_start) FROM ts_10m")[0][0] == MAX_WINDOWS_PER_ADVANCE
+    total = first
+    while (n := jobs.advance(storage.sim_now())) > 0:
+        total += n
+    assert storage.query("SELECT COUNT(DISTINCT bucket_start) FROM ts_10m")[0][0] == 3 * 144    # 마지막 10분 구간은 아직 미완료
+    assert storage.query("SELECT COUNT(DISTINCT bucket_start) FROM ts_1h")[0][0] == 3 * 24
+    assert jobs.advance(storage.sim_now()) == 0

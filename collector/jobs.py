@@ -6,6 +6,9 @@
 - 10분 배치: 10분 집계 → 최대값을 한계값과 비교해 알람. 지연 판정(delay_samples)은 연속된 10분 구간 수.
 - 매시 배치: 1시간 집계(평균, 최소, 최대, 표준편차, 상태).
 - 매일 배치: 보관 기간이 지난 원시 값 삭제.
+
+한 번의 advance 는 배치마다 MAX_WINDOWS_PER_ADVANCE 구간까지만 처리한다. 수집 서버가 오래 멈췄다 켜져
+시뮬레이터 시각이 크게 건너뛰어도 한 요청이 수십 초씩 멈추지 않고, 남은 구간은 다음 호출이 이어서 처리한다.
 """
 from __future__ import annotations
 
@@ -15,6 +18,8 @@ from datetime import datetime, timedelta
 from collector.storage import Storage
 from common.config_models import PlantConfig, RuntimeConfig, TagConfig
 from common.timefmt import from_db, to_db
+
+MAX_WINDOWS_PER_ADVANCE = 144      # 한 번에 처리하는 구간 수 상한 (10분 구간 기준 하루)
 
 TEN_MIN = timedelta(minutes=10)
 ONE_HOUR = timedelta(hours=1)
@@ -43,25 +48,31 @@ class JobRunner:
         self.max_delay = max(t.delay_samples for t in self.tags.values())
 
     # --- 진입점 -------------------------------------------------------------
-    def advance(self, sim_now: str | None) -> None:
-        """시뮬레이터 현재 시각(sim_now)이 지난 구간을 모두 처리한다. 여러 번 불러도 결과는 같다."""
-        if sim_now is None:
-            return
-        now = from_db(sim_now)
-        self._run_windows("10m", TEN_MIN, now, self._aggregate_10m)
-        self._run_windows("1h", ONE_HOUR, now, self._aggregate_1h)
-        self._run_windows("daily", ONE_DAY, now, self._retention)
+    def advance(self, sim_now: str | None, max_windows: int = MAX_WINDOWS_PER_ADVANCE) -> int:
+        """시뮬레이터 현재 시각(sim_now)이 지난 구간을 처리하고, 처리한 구간 수(최대 배치별 max_windows)를 돌려준다.
 
-    def _run_windows(self, name: str, step: timedelta, now: datetime, handler) -> None:
+        여러 번 불러도 결과는 같다. 0 을 돌려주면 더 처리할 구간이 없다는 뜻이다.
+        """
+        if sim_now is None:
+            return 0
+        now = from_db(sim_now)
+        return max(self._run_windows("10m", TEN_MIN, now, self._aggregate_10m, max_windows),
+                   self._run_windows("1h", ONE_HOUR, now, self._aggregate_1h, max_windows),
+                   self._run_windows("daily", ONE_DAY, now, self._retention, max_windows))
+
+    def _run_windows(self, name: str, step: timedelta, now: datetime, handler, max_windows: int) -> int:
         start = self._cursor(name, step)
         if start is None:
-            return
-        while start + step <= now:
+            return 0
+        done = 0
+        while start + step <= now and done < max_windows:
             with self.storage.transaction():
                 handler(start, start + step)
                 self.storage.execute("INSERT OR REPLACE INTO job_state (name, last_bucket_end) VALUES (?, ?)",
                                      (name, to_db(start + step)))
             start += step
+            done += 1
+        return done
 
     def _cursor(self, name: str, step: timedelta) -> datetime | None:
         """다음에 처리할 구간의 시작. 처음이면 가장 오래된 원시 값의 구간부터."""

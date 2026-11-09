@@ -43,3 +43,20 @@ def test_current_becomes_nodata_after_three_send_intervals(client):
     assert client.get("/tags/VI-C2101/current").json()["status"] == "Good"
     assert client.get("/tags/VI-C1101/current").json()["status"] == "NoData"
     assert client.get("/tags/TI-C1101/current").json()["status"] == "NoData"
+
+
+def test_large_time_jump_is_caught_up_in_background(client):
+    """시뮬레이터 시각이 크게 건너뛰어도 /ingest 는 바로 응답하고, 나머지 구간은 뒤에서 따라잡는다."""
+    import time
+
+    _send(client, "VI-C1101", "C-1101", T0, 1, 2.0)
+    t = time.monotonic()
+    _send(client, "VI-C1101", "C-1101", T0 + timedelta(days=5), 1, 2.0)
+    assert time.monotonic() - t < 3.0
+    st = client.app.state.storage
+    for _ in range(200):
+        if st.query("SELECT COUNT(DISTINCT bucket_start) FROM ts_10m")[0][0] >= 5 * 144:
+            break
+        time.sleep(0.05)
+    assert st.query("SELECT COUNT(DISTINCT bucket_start) FROM ts_10m")[0][0] == 5 * 144
+    assert client.get("/health").json()["catching_up"] is False
