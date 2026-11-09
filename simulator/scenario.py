@@ -104,7 +104,8 @@ class Scenario:
         return values, qualities, present
 
     def model_for_tests(self) -> SignalModel:
-        return SignalModel(self.plant, self.runtime.seed, self.runtime.sample_interval_sec)
+        from simulator.generator import make_signal_model
+        return make_signal_model(self.plant, self.runtime.seed, self.runtime.sample_interval_sec)
 
 
 def _event_offset(ev: ScenarioEvent, epochs: np.ndarray) -> np.ndarray:
