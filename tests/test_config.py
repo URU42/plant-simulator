@@ -96,3 +96,51 @@ def test_runtime_unknown_unit_rejected(plant_path: Path):
 def test_sample_interval_must_divide_a_day():
     with pytest.raises(ValueError, match="86400"):
         RuntimeConfig(sample_interval_sec=7, send_interval_sec=70)
+
+
+# ---------------------------------------------------------------------------
+# RFCC 구성안을 위한 형식 확장 (설계 §4.1)
+# ---------------------------------------------------------------------------
+
+def _rfcc_like(seed_key_on_equipment=True):
+    """최소 rfcc 구성안 dict."""
+    equip = {"equip_id": "P-1", "name": "pump", "type": "PM", "unit_id": "U-1",
+             "tags": [{"tag_id": "TI-P-1", "signal": "bearing_temp", "unit": "degC", "seed_key": "r1",
+                       "description": "베어링 온도", "interval_sec": 10, "decimals": 4,
+                       "normal": {"base": 66, "noise_sd": 0.035}}]}
+    if seed_key_on_equipment:
+        equip["seed_key"] = "e1"
+    return {"plant": {"plant_id": "PL", "name": "p", "config_version": 1, "signal_model": "rfcc",
+                      "unit_groups": [{"id": "UG-1", "name": "g", "units": [{"id": "U-1", "name": "u"}]}]},
+            "equipment_types": [{"type": "PM", "name": "펌프", "prefix": "P", "kind": "pump"}],
+            "signals": [{"signal": "bearing_temp", "prefix": "TI", "unit": "degC", "name": "베어링 온도"}],
+            "equipment": [equip]}
+
+
+def test_rfcc_fields_are_optional_or_new():
+    plant = PlantConfig.model_validate(_rfcc_like())
+    tag = plant.all_tags()[0]
+    assert plant.plant.signal_model == "rfcc"
+    assert tag.limits is None and tag.location is None and tag.description == "베어링 온도"
+    assert tag.decimals == 4 and plant.tag_interval_sec("TI-P-1", 1) == 10
+    assert plant.equipment[0].grade is None and plant.equipment_kind("P-1") == "pump"
+    assert tag.normal.daily_amp == 0.0 and tag.normal.drift_sd == 0.0
+
+
+def test_rfcc_requires_equipment_seed_key():
+    with pytest.raises(ConfigError, match="equipment P-1: seed_key is required"):
+        PlantConfig.model_validate(_rfcc_like(seed_key_on_equipment=False))
+
+
+def test_tag_interval_must_be_multiple_of_sample_interval():
+    plant = PlantConfig.model_validate(_rfcc_like())
+    RuntimeConfig(sample_interval_sec=1, send_interval_sec=1).validate_tag_intervals(plant)       # 10 은 1 의 배수
+    with pytest.raises(ConfigError, match="TI-P-1"):
+        RuntimeConfig(sample_interval_sec=3, send_interval_sec=3).validate_tag_intervals(plant)   # 10 은 3 의 배수가 아니다
+
+
+def test_hds_plant_still_loads_with_defaults(plant_path):
+    plant = load_plant(plant_path)
+    assert plant.plant.signal_model == "hds"
+    assert all(t.limits is not None and t.decimals == 3 for t in plant.all_tags())
+    assert plant.tag_interval_sec("VI-C1101", 10) == 10

@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from common.config_models import PlantConfig
+from common.config_models import Limits, PlantConfig
 from collector.storage import Storage
 
 
@@ -26,8 +26,15 @@ def seed_master(storage: Storage, plant: PlantConfig) -> None:
         storage.executemany("INSERT OR REPLACE INTO equipment_alias VALUES (?, ?)",
                             [(a, e.equip_id) for e in plant.equipment for a in e.aliases])
         storage.executemany(
-            "INSERT OR REPLACE INTO equipment_tag VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [(t.tag_id, e.equip_id, t.signal, t.unit, t.location,
-              t.limits.warn_hi, t.limits.alarm_hi, t.limits.trip_hi, t.delay_samples)
+            "INSERT OR REPLACE INTO equipment_tag VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(t.tag_id, e.equip_id, t.signal, t.unit, t.location, t.description,
+              *(_limit_values(t.limits)), t.delay_samples, t.interval_sec, t.decimals)
              for e in plant.equipment for t in e.tags],
         )
+
+
+def _limit_values(limits: Limits | None) -> tuple[float | None, float | None, float | None]:
+    """한계값이 없는 태그는 NULL 세 개."""
+    if limits is None:
+        return None, None, None
+    return limits.warn_hi, limits.alarm_hi, limits.trip_hi
