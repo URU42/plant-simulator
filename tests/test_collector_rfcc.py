@@ -48,3 +48,27 @@ def test_old_ingest_batches_are_deleted(client):
     _send(client, "VI-P-1101A", "P-1101A", T0 + timedelta(minutes=10), 1, 1, 1.45)
     assert st.query("SELECT COUNT(*) FROM ingest_batch WHERE batch_id = 'b-old'")[0][0] == 0
     assert st.query("SELECT COUNT(*) FROM ingest_batch")[0][0] == 2
+
+
+# --- 조회 API (설계 §4.5) ---------------------------------------------------
+
+def test_equipment_listing_follows_hierarchy(client):
+    equipment = client.get("/equipment").json()
+    assert [e["equip_id"] for e in equipment][:3] == ["P-1101A", "B-1201", "E-1202"]
+    assert equipment[0]["unit_group_name"] == "원료 공급" and equipment[1]["driven_by"] == "E-1202"
+    tags = {t["tag_id"]: t for e in equipment for t in e["tags"]}
+    assert len(tags) == 81 and tags["TI-P-1101A"]["interval_sec"] == 10 and tags["ZI-E-1202"]["decimals"] == 5
+    assert tags["TI-P-1101A"]["description"] == "펌프 구동측 베어링 온도"
+
+
+def test_current_lists_every_tag_with_status(client):
+    _send(client, "VI-P-1101A", "P-1101A", T0, 1, 1, 1.45)
+    rows = {r["tag_id"]: r for r in client.get("/current").json()}
+    assert len(rows) == 81
+    assert rows["VI-P-1101A"]["status"] == "Good" and rows["VI-P-1101A"]["value"] == 1.45
+    assert rows["TI-P-1101A"]["status"] == "NoData" and rows["TI-P-1101A"]["value"] is None
+
+
+def test_root_serves_html(client):
+    r = client.get("/")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/html") and "<title>" in r.text
