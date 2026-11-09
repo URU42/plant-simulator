@@ -38,7 +38,8 @@ class Storage:
         if found is None or found < SCHEMA_VERSION:
             self._conn.close()
             raise ConfigError(f"DB {self.db_path} was created by an older schema (v{found or 1}); this version needs "
-                              f"v{SCHEMA_VERSION} (composite tag key). Move or delete the file, or pass another --db")
+                              f"v{SCHEMA_VERSION} (composite tag key). Move or delete the file, or point this plant's "
+                              f"db in plants.yaml to a new file")
 
     def close(self) -> None:
         self._conn.close()

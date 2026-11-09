@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from html import escape
@@ -20,6 +21,7 @@ from collector.ingest import RawBatch, ingest, schema_supported
 from collector.jobs import MAX_WINDOWS_PER_ADVANCE
 from collector.plant_context import PlantContext
 from collector.plants import PlantEntry, PlantsConfig, load_plants
+from common.config_models import ConfigError
 from common.timefmt import parse_iso, to_db
 
 STATIC_DIR = Path(__file__).with_name("static")     # 디버깅 화면
@@ -160,6 +162,15 @@ def create_app(plants: PlantsConfig) -> FastAPI:
     return app
 
 
+def check_plants(plants: PlantsConfig) -> None:
+    """서버를 띄우기 전에 공장을 하나씩 열어 본다. 설정·DB 문제는 traceback 대신 "plant <key>: 이유" 한 줄로 알린다."""
+    for entry in plants.plants:
+        try:
+            PlantContext.open(entry).close()
+        except ConfigError as e:
+            raise ConfigError(f"plant {entry.key}: {e}") from None
+
+
 def create_single_app(plant_path, runtime_path, db_path, scenario_path=None, key: str = "plant") -> FastAPI:
     """공장 하나짜리 서버 (테스트·호환용). 경로는 /{key}/... 다."""
     entry = PlantEntry(key=key, plant=str(plant_path), runtime=str(runtime_path), db=str(db_path),
@@ -194,7 +205,12 @@ def main(argv=None) -> None:
     import uvicorn
 
     args = _parse_args(argv)
-    uvicorn.run(create_app(load_plants(args.plants)), host=args.host, port=args.port)
+    plants = load_plants(args.plants)
+    try:
+        check_plants(plants)
+    except ConfigError as e:
+        sys.exit(f"error: {e}")
+    uvicorn.run(create_app(plants), host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

@@ -75,7 +75,7 @@
   function update(s, flash) {
     const row = rows.get(keyOf(s));
     if (!row) return;
-    const good = s.quality === "Good" && s.value != null;
+    const good = (s.quality === "Good" || s.quality === "Uncertain") && s.value != null;   // Uncertain 도 값이 있다
     row.tds.value.textContent = good ? Number(s.value).toFixed(row.decimals) : "—";
     row.tds.quality.textContent = s.quality || "—";
     row.tds.ts.textContent = kst(s.ts);

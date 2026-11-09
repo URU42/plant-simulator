@@ -239,3 +239,22 @@ def test_random_quality_is_deterministic_and_near_rate(rfcc_plant_path, rfcc_run
     assert 0.0004 * len(q) < unc < 0.002 * len(q)
     quiet = RandomQualityMaker(plant, runtime.seed, RandomQuality())
     assert quiet.qualities(key, epochs[:3600], 1) is None
+
+
+def test_explicit_equip_id_is_never_overridden(rfcc_plant_path):
+    """설비를 직접 적었는데 그 설비에 태그가 없으면 다른 설비로 옮기지 말고 멈춘다 (리뷰 Important 1)."""
+    plant = load_plant(rfcc_plant_path)
+    ev = {"event_id": "E", "equip_id": "P-1101A", "tag_id": "VX-B-1201", "pattern": "step", "start": "2026-11-01T00:00:00+09:00",
+          "duration": "1h", "magnitude": 1.0}
+    with pytest.raises(ConfigError, match="E.*P-1101A.*VX-B-1201"):
+        ScenarioConfig.model_validate({"events": [ev]}).validate_against(plant)
+    ev2 = ev | {"tag_id": "B-1201/VX-B-1201"}                              # EQUIP/TAG 가 적힌 설비와 다르다
+    with pytest.raises(ConfigError, match="E.*P-1101A"):
+        ScenarioConfig.model_validate({"events": [ev2]}).validate_against(plant)
+    ev3 = {"event_id": "E", "equip_id": "P-1101A", "tag_id": "VI-P-1101A", "pattern": "step", "start": "2026-11-01T00:00:00+09:00",
+           "duration": "1h", "magnitude": 1.0, "related": [{"equip_id": "P-1101A", "tag_id": "VX-B-1201", "ratio": 0.5}]}
+    with pytest.raises(ConfigError, match="related.*P-1101A.*VX-B-1201"):
+        ScenarioConfig.model_validate({"events": [ev3]}).validate_against(plant)
+    ok = ev3 | {"related": [{"tag_id": "VX-B-1201", "ratio": 0.5}]}         # 설비를 안 적은 related 는 공장 안에서 유일하면 찾는다
+    cfg = ScenarioConfig.model_validate({"events": [ok]}); cfg.validate_against(plant)
+    assert cfg.events[0].related[0].equip_id == "B-1201"

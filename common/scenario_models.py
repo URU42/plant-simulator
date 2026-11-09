@@ -154,17 +154,28 @@ class ScenarioConfig(BaseModel):
                 continue
             if e.tag_id is not None:
                 try:
-                    e.equip_id, e.tag_id = plant.resolve(e.tag_id, equip_hint=e.equip_id)
+                    e.equip_id, e.tag_id = _resolve_strict(plant, e.tag_id, e.equip_id)
                 except ConfigError as err:
                     problems.append(f"event {e.event_id}: {err}")
             for r in e.related:
                 try:
-                    r.equip_id, r.tag_id = plant.resolve(r.tag_id, equip_hint=r.equip_id or e.equip_id)
+                    if r.equip_id is not None:                          # 직접 적은 설비는 그대로 존중한다
+                        r.equip_id, r.tag_id = _resolve_strict(plant, r.tag_id, r.equip_id)
+                    else:                                               # 안 적었으면 이벤트 설비에서 먼저, 없으면 공장 안에서 유일할 때
+                        r.equip_id, r.tag_id = plant.resolve(r.tag_id, equip_hint=e.equip_id)
                 except ConfigError as err:
                     problems.append(f"event {e.event_id}: related {err}")
         problems += [f"maintenance {m.work_order_id}: equipment {m.equip_id}" for m in self.maintenance if m.equip_id not in equips]
         if problems:
             raise ConfigError("scenario references unknown IDs: " + "; ".join(problems))
+
+
+def _resolve_strict(plant: PlantConfig, ref: str, equip_id: str | None) -> TagKey:
+    """equip_id 를 직접 적었으면 그 설비의 태그여야 한다. 다른 설비로 조용히 옮기지 않는다."""
+    key = plant.resolve(ref, equip_hint=equip_id)
+    if equip_id is not None and key[0] != equip_id:
+        raise ConfigError(f"equipment {equip_id} has no tag {ref} (found on {key[0]}); fix equip_id or write EQUIP/TAG")
+    return key
 
 
 def load_scenario(path: str | Path, plant: PlantConfig) -> ScenarioConfig:
