@@ -1,6 +1,6 @@
-"""설정 모델 (기획서 4장).
+"""설정 모델 (기획서 4장, RFCC 설계 §4.1).
 
-plant_hds.yaml(구성안)과 runtime.yaml(실행 설정)을 Pydantic으로 읽고,
+구성안(plant_hds.yaml / plant_rfcc.yaml)과 실행 설정(runtime*.yaml)을 Pydantic으로 읽고,
 시작 시점에 잘못된 설정을 걸러 낸다. 설비·태그 ID는 이 파일을 통해 읽기만 하며,
 코드는 ID 형식을 해석하거나 특정 ID를 하드코딩하지 않는다(기획서 3.4).
 """
@@ -45,20 +45,23 @@ class Limits(StrictModel):
 class NormalModel(StrictModel):
     """정상 운전 신호의 모양 (기획서 5.1)."""
 
-    base: float          # 기준값
-    noise_sd: float      # 작은 잡음의 표준편차
-    daily_amp: float     # 하루 주기 변동 진폭
-    drift_sd: float      # 천천히 떠도는 성분(시간당 랜덤 워크 걸음)의 표준편차
+    base: float               # 기준값
+    noise_sd: float           # 작은 잡음의 표준편차
+    daily_amp: float = 0.0    # 하루 주기 변동 진폭 (hds 모델만)
+    drift_sd: float = 0.0     # 천천히 떠도는 성분(시간당 랜덤 워크 걸음)의 표준편차 (hds 모델만)
 
 
 class TagConfig(StrictModel):
     tag_id: str
-    signal: str                      # signals 목록의 signal 값 (vibration / temperature / pressure)
+    signal: str                           # signals 목록의 signal 값. 신호 모델이 식을 고르는 키
     unit: str
-    location: str
-    limits: Limits
-    delay_samples: int = Field(ge=1)  # 알람 지연 판정: 연속된 10분 구간 수
-    seed_key: str                     # 시드용 고정 키. ID를 바꿔도 생성 값이 유지된다
+    location: str | None = None           # 측정 위치 코드 (hds)
+    description: str | None = None        # 태그 설명 (rfcc). 화면과 equipment_tag 에 남긴다
+    limits: Limits | None = None          # 없으면 알람 판정 대상이 아니다 (rfcc)
+    delay_samples: int = Field(default=1, ge=1)   # 알람 지연 판정: 연속된 10분 구간 수
+    interval_sec: int | None = Field(default=None, ge=1)   # 태그별 측정 주기. 없으면 runtime.sample_interval_sec
+    decimals: int = Field(default=3, ge=0)        # 값 반올림 자릿수
+    seed_key: str                         # 시드용 고정 키. ID를 바꿔도 생성 값이 유지된다
     normal: NormalModel
 
 
@@ -66,10 +69,11 @@ class EquipmentConfig(StrictModel):
     equip_id: str
     name: str
     type: str                         # equipment_types 목록의 type 값
-    grade: int
+    grade: int | None = None
     unit_id: str
     aliases: list[str] = []
-    driven_by: str | None = None      # 구동기 설비 ID. 구동기 이상이 피구동 설비 진동으로 번질 때 쓴다
+    driven_by: str | None = None      # 구동기 설비 ID. 구동기 이상이 피구동 설비 진동으로 번질 때, 축 속도를 공유할 때 쓴다
+    seed_key: str | None = None       # 설비 단위 성분(rfcc 의 설비 부하)의 시드. signal_model rfcc 면 필수
     tags: list[TagConfig]
 
 
@@ -84,10 +88,14 @@ class UnitGroupConfig(StrictModel):
     units: list[UnitConfig]
 
 
+SignalModelName = Literal["hds", "rfcc"]
+
+
 class PlantMeta(StrictModel):
     plant_id: str
     name: str
     config_version: int
+    signal_model: SignalModelName = "hds"     # 값을 만드는 신호 모델 (simulator.generator.make_signal_model)
     unit_groups: list[UnitGroupConfig]
 
 
@@ -97,6 +105,7 @@ class EquipmentType(StrictModel):
     type: str
     name: str
     prefix: str
+    kind: str | None = None           # 신호 모델이 보는 기계 종류 (pump / blower / expander / compressor / turbine)
 
 
 class SignalType(StrictModel):
@@ -138,6 +147,11 @@ class PlantConfig(StrictModel):
         _require_unique("equip_id", equip_ids)
         _require_unique("tag_id", tag_ids)
         _require_unique("seed_key", seed_keys)
+        if self.plant.signal_model == "rfcc":
+            for e in self.equipment:
+                if e.seed_key is None:
+                    raise ConfigError(f"equipment {e.equip_id}: seed_key is required for signal_model rfcc")
+            _require_unique("equipment seed_key", [e.seed_key for e in self.equipment])
 
         equip_set, tag_set = set(equip_ids), set(tag_ids)
         for e in self.equipment:
@@ -180,6 +194,15 @@ class PlantConfig(StrictModel):
 
     def tag_unit(self, tag_id: str) -> str:
         return self.tag_owner()[tag_id].unit_id
+
+    def tag_interval_sec(self, tag_id: str, default: int) -> int:
+        """태그의 측정 주기. 구성안에 없으면 실행 설정의 sample_interval_sec(default)."""
+        return self.tag_by_id()[tag_id].interval_sec or default
+
+    def equipment_kind(self, equip_id: str) -> str | None:
+        """설비 유형(equipment_types)의 kind."""
+        kinds = {t.type: t.kind for t in self.equipment_types}
+        return kinds[self.equipment_by_id()[equip_id].type]
 
     def equipment_for_units(self, units: list[str]) -> list[EquipmentConfig]:
         """runtime.units 에 맞는 설비 목록. `all`이면 전체, 아니면 적힌 Unit만."""
@@ -225,6 +248,14 @@ class RuntimeConfig(StrictModel):
         if 86400 % self.sample_interval_sec:
             raise ValueError("sample_interval_sec must divide a day (86400 s)")
         return self
+
+    def validate_tag_intervals(self, plant: PlantConfig) -> None:
+        """태그별 주기는 sample_interval_sec 의 배수이고 하루를 나눠야 한다."""
+        for t in plant.all_tags():
+            iv = t.interval_sec
+            if iv is not None and (iv % self.sample_interval_sec or 86400 % iv):
+                raise ConfigError(f"tag {t.tag_id}: interval_sec {iv} must be a multiple of "
+                                  f"sample_interval_sec {self.sample_interval_sec} and divide a day")
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""중앙 수집 서버 (FastAPI): /ingest, 조회 API, /stream (기획서 6.4).
+"""중앙 수집 서버 (FastAPI): /ingest, 조회 API, /stream (기획서 6.4), 디버깅 화면 / (RFCC 설계 §4.5~4.6).
 
 실행: uvicorn collector.app:app  또는  python -m collector.app --plant config/plant_hds.yaml ...
 """
@@ -12,23 +12,25 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from collector.ingest import RawBatch, ingest, schema_supported
 from collector.jobs import MAX_WINDOWS_PER_ADVANCE, JobRunner
 from collector.seed_master import seed_master
 from collector.storage import Storage
 from collector.stream import Broadcaster
-from common.config_models import load_plant, load_runtime
+from common.config_models import PlantConfig, RuntimeConfig, load_plant, load_runtime
 from common.timefmt import from_db, parse_iso, to_db
 
-NO_DATA_SEND_INTERVALS = 3      # 전송 주기 3번 동안 안 들어오면 NoData (6.2)
+NO_DATA_SEND_INTERVALS = 3      # 전송 주기(또는 더 긴 태그 주기) 3번 동안 안 들어오면 NoData (6.2, RFCC 설계 §4.5)
+STATIC_DIR = Path(__file__).with_name("static")     # 디버깅 화면
 
 
 def create_app(plant_path: str | Path, runtime_path: str | Path, db_path: str | Path,
                scenario_path: str | Path | None = None) -> FastAPI:
     plant = load_plant(plant_path)
     runtime = load_runtime(runtime_path)
+    equipment_listing = _equipment_listing(plant, runtime)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -78,6 +80,22 @@ def create_app(plant_path: str | Path, runtime_path: str | Path, db_path: str | 
                 return
 
     # --- 조회 ---------------------------------------------------------------
+    @app.get("/")
+    async def index():
+        return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
+
+    @app.get("/equipment")
+    async def equipment():
+        """계층 순서의 설비 목록과 태그 (화면이 표를 그릴 때)."""
+        return equipment_listing
+
+    @app.get("/current")
+    async def current_all(request: Request):
+        """모든 태그의 현재값 + status. 순서는 /equipment 와 같다."""
+        st = request.app.state
+        rows = {r["tag_id"]: r for r in st.storage.query_dicts("SELECT * FROM tag_current")}
+        return [_with_status(st, rows.get(t["tag_id"]), t["tag_id"]) for e in equipment_listing for t in e["tags"]]
+
     @app.get("/health")
     async def health(request: Request):
         st = request.app.state
@@ -91,13 +109,16 @@ def create_app(plant_path: str | Path, runtime_path: str | Path, db_path: str | 
         if tag_id not in st.tag_owner:
             raise HTTPException(404, f"unknown tag_id {tag_id}")
         row = st.storage.current(tag_id)
+        return _with_status(st, row, tag_id)
+
+    def _with_status(st, row: dict | None, tag_id: str) -> dict:
+        """현재값 행에 status 를 붙인다. 행이 없거나 전송·태그 주기 중 긴 쪽의 3배를 넘게 안 들어오면 NoData."""
         if row is None:
-            return {"tag_id": tag_id, "equip_id": st.tag_owner[tag_id], "ts": None, "value": None,
-                    "quality": None, "status": "NoData"}
-        sim_now = from_db(st.storage.sim_now())
-        age = (sim_now - from_db(row["ts"])).total_seconds()
-        stale = age > NO_DATA_SEND_INTERVALS * runtime.send_interval_sec
-        return row | {"status": "NoData" if stale else row["quality"]}
+            return {"tag_id": tag_id, "equip_id": st.tag_owner[tag_id], "ts": None, "value": None, "quality": None,
+                    "received_at": None, "status": "NoData"}
+        age = (from_db(st.storage.sim_now()) - from_db(row["ts"])).total_seconds()
+        interval = max(runtime.send_interval_sec, plant.tag_interval_sec(tag_id, runtime.sample_interval_sec))
+        return row | {"status": "NoData" if age > NO_DATA_SEND_INTERVALS * interval else row["quality"]}
 
     @app.get("/timeseries")
     async def timeseries(request: Request, tag_id: str, from_: str = Query(alias="from"), to: str = Query(),
@@ -139,6 +160,24 @@ def create_app(plant_path: str | Path, runtime_path: str | Path, db_path: str | 
         return to_db(from_db(sim_now) - timedelta(days=runtime.raw_retention_days))
 
     return app
+
+
+def _equipment_listing(plant: PlantConfig, runtime: RuntimeConfig) -> list[dict]:
+    """unit_groups → units → 설비(yaml 순서) 순으로 설비와 태그를 펼친다."""
+    out = []
+    for group in plant.plant.unit_groups:
+        for unit in group.units:
+            for e in plant.equipment:
+                if e.unit_id != unit.id:
+                    continue
+                out.append({
+                    "equip_id": e.equip_id, "name": e.name, "type": e.type, "unit_id": unit.id, "unit_name": unit.name,
+                    "unit_group_id": group.id, "unit_group_name": group.name, "driven_by": e.driven_by,
+                    "tags": [{"tag_id": t.tag_id, "signal": t.signal, "unit": t.unit, "description": t.description,
+                              "interval_sec": plant.tag_interval_sec(t.tag_id, runtime.sample_interval_sec),
+                              "decimals": t.decimals} for t in e.tags],
+                })
+    return out
 
 
 # --- 실행 진입점 -----------------------------------------------------------

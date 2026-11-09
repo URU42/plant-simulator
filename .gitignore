@@ -224,3 +224,6 @@ data/*.db
 data/*.db-*
 .superpowers/
 .DS_Store
+
+# RFCC 샘플 자료 (1.5 GB, 참고용. 구성안은 config/plant_rfcc.yaml 로 옮겼다)
+rfcc-20261109/

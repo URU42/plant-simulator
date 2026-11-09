@@ -4,10 +4,11 @@ from datetime import datetime, timedelta
 import numpy as np
 import pytest
 
-from common.config_models import ConfigError, RuntimeConfig, load_plant
-from common.scenario_models import ScenarioConfig, parse_duration
+from common.config_models import ConfigError, RuntimeConfig, load_plant, load_runtime
+from common.scenario_models import ScenarioConfig, ScenarioEvent, parse_duration
 from common.sim_clock import KST
 from simulator.generator import SampleGenerator
+from simulator.random_anomalies import RandomAnomalyMaker
 from simulator.scenario import Scenario, load_scenarios
 from simulator.signal_model import epochs_range
 
@@ -149,3 +150,42 @@ def test_dev_scenario_file_loads_and_matches_plant(plant_path, scenario_path):
     assert {e.pattern for e in cfg.events} == {"ramp", "step", "spike", "oscillation", "freeze", "quality", "gap"}
     assert any(e.recovered_at and e.work_order_id for e in cfg.events)
     assert {m.work_order_id for m in cfg.maintenance} >= {e.work_order_id for e in cfg.events if e.work_order_id}
+
+
+# ---------------------------------------------------------------------------
+# RFCC 시나리오: swell 반복 이벤트, 품질 이벤트 반복, 한계값 없는 태그 (설계 §4.3)
+# ---------------------------------------------------------------------------
+
+def test_repeat_every_repeats_the_event_weekly(rfcc_plant_path, rfcc_runtime_path, rfcc_scenario_path):
+    plant, runtime = load_plant(rfcc_plant_path), load_runtime(rfcc_runtime_path)
+    sc = load_scenarios([str(rfcc_scenario_path)], plant, runtime)
+    first = datetime(2026, 11, 2, 5, 10, tzinfo=KST)
+    e1 = epochs_range(first, first + timedelta(minutes=40), 1)
+    e2 = e1 + 7 * 86400
+    np.testing.assert_allclose(sc.deviation("VI-P-1101A", e1), sc.deviation("VI-P-1101A", e2))
+    assert sc.deviation("VI-P-1101A", e1).max() > 1.8                                   # magnitude 1.85
+    assert sc.deviation("PS-P-1101A", e1).min() < -0.8                                  # ratio −0.4595
+    assert sc.deviation("VI-P-1101A", e1 + 3 * 86400).max() == 0.0                      # 회차 사이는 0
+
+
+def test_repeat_every_rejects_recovered_at():
+    with pytest.raises(ValueError, match="repeat_every cannot be combined"):
+        ScenarioEvent(event_id="E", tag_id="X", pattern="swell", start=datetime(2026, 1, 1, tzinfo=KST), duration="1h",
+                      repeat_every="7d", recovered_at=datetime(2026, 1, 2, tzinfo=KST))
+
+
+def test_quality_event_repeats(rfcc_plant_path, rfcc_runtime_path, rfcc_scenario_path):
+    plant, runtime = load_plant(rfcc_plant_path), load_runtime(rfcc_runtime_path)
+    sc = load_scenarios([str(rfcc_scenario_path)], plant, runtime)
+    equip = plant.equipment_by_id()["P-1302A"]
+    start = datetime(2026, 11, 2, 23, 13, 20, tzinfo=KST) + timedelta(days=14)
+    epochs = epochs_range(start - timedelta(seconds=5), start + timedelta(seconds=65), 1)
+    _, qualities, _ = sc.apply(sc.model_for_tests(), equip, "VI-P-1302A", epochs)
+    assert qualities[:5] == ["Good"] * 5 and qualities[5:65] == ["Bad"] * 60 and qualities[65:] == ["Good"] * 5
+
+
+def test_random_anomalies_skip_tags_without_limits(rfcc_plant_path, rfcc_runtime_path):
+    plant, runtime = load_plant(rfcc_plant_path), load_runtime(rfcc_runtime_path)
+    maker = RandomAnomalyMaker(plant, runtime.seed, rate_per_tag_day=5.0)
+    epochs = epochs_range(datetime(2026, 11, 9, tzinfo=KST), datetime(2026, 11, 10, tzinfo=KST), 60)
+    assert maker.offset("VI-P-1101A", epochs).max() == 0.0

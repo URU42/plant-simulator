@@ -1,0 +1,307 @@
+# 구성안 2: RFCC 회전기계 (설계 docs/superpowers/specs/2026-11-09-rfcc-simulator-design.md)
+# - 출처: rfcc-20261109 v1.2.0 의 support/config.json. 설비 12대, 태그 81개, 기준값·잡음은 그대로.
+# - 온도(bearing_temp / suction_temp / discharge_temp / oil_temp) 16개는 10초, 나머지 65개는 1초 주기.
+# - 한계값(limits)은 없다. 자료의 매뉴얼이 "정상 중심값을 경보값으로 바꾸지 않는다"고 못 박았다. 알람 배치는 이 태그들을 건너뛴다.
+# - driven_by: 같은 축으로 직접 결합된 설비. 피구동 설비의 speed 태그는 구동기의 속도를 그대로 쓴다.
+# - seed_key: 태그 r001~r081, 설비 e01~e12. ID 를 바꿔도 생성 값이 유지된다.
+
+plant:
+  plant_id: PL-RFCC
+  name: 가상 정유단지 RFCC
+  config_version: 1
+  signal_model: rfcc
+  unit_groups:
+    - id: UG-RFCC-01
+      name: 원료 공급
+      units:
+        - { id: UNIT-RFCC-01, name: 원료 공급 }
+    - id: UG-RFCC-02
+      name: 반응·재생
+      units:
+        - { id: UNIT-RFCC-02, name: 촉매 재생 }
+        - { id: UNIT-RFCC-03, name: 동력 회수 }
+    - id: UG-RFCC-03
+      name: 주분별
+      units:
+        - { id: UNIT-RFCC-04, name: 슬러리·LCO 순환·탑정 처리 }
+    - id: UG-RFCC-04
+      name: 가스 압축·회수
+      units:
+        - { id: UNIT-RFCC-05, name: 습가스 압축 }
+        - { id: UNIT-RFCC-06, name: 습가스 압축 구동 }
+        - { id: UNIT-RFCC-07, name: 흡수·분별·안정화 }
+    - id: UG-RFCC-05
+      name: 제품 처리
+      units:
+        - { id: UNIT-RFCC-08, name: LPG·가솔린 처리 }
+
+# 설비 유형 매핑. kind 는 신호 모델이 식을 고를 때 보는 기계 종류
+equipment_types:
+  - { type: PM, name: 펌프, prefix: P, kind: pump }
+  - { type: BL, name: 송풍기, prefix: B, kind: blower }
+  - { type: EX, name: 팽창 터빈, prefix: E, kind: expander }
+  - { type: CC, name: 원심 압축기, prefix: C, kind: compressor }
+  - { type: ST, name: 증기 터빈, prefix: T, kind: turbine }
+
+# 표준 태그 (신호 종류 · 대표 접두어 · 대표 단위). 태그별 실제 단위는 각 태그에 적는다
+signals:
+  - { signal: vibration, prefix: VI, unit: mm/s RMS, name: 케이싱 진동 속도 }
+  - { signal: shaft_vibration, prefix: VX, unit: um p-p, name: 축 상대 진동 }
+  - { signal: bearing_temp, prefix: TI, unit: degC, name: 베어링 온도 }
+  - { signal: suction_temp, prefix: TS, unit: degC, name: 흡입 온도 }
+  - { signal: discharge_temp, prefix: TD, unit: degC, name: 토출 온도 }
+  - { signal: oil_temp, prefix: LOT, unit: degC, name: 윤활유 공급 온도 }
+  - { signal: suction_pressure, prefix: PS, unit: bar(g), name: 흡입 압력 }
+  - { signal: discharge_pressure, prefix: PD, unit: bar(g), name: 토출 압력 }
+  - { signal: oil_pressure, prefix: LOP, unit: bar(g), name: 윤활유 공급 압력 }
+  - { signal: steam_pressure, prefix: SP, unit: bar(g), name: 입구 증기 압력 }
+  - { signal: flow, prefix: FI, unit: m3/h, name: 유량 }
+  - { signal: current, prefix: II, unit: A, name: 모터 전류 }
+  - { signal: speed, prefix: SI, unit: rpm, name: 축 회전속도 }
+  - { signal: axial_position, prefix: ZI, unit: mm, name: 축방향 상대 위치 }
+
+equipment:
+  # ---------------- UNIT-RFCC-01 원료 공급 ----------------
+  - equip_id: P-1101A
+    name: Feed Charge Pump
+    type: PM
+    unit_id: UNIT-RFCC-01
+    seed_key: e01
+    tags:
+      - { tag_id: VI-P-1101A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          interval_sec: 1, decimals: 4, seed_key: r001, normal: { base: 1.45, noise_sd: 0.03375 } }
+      - { tag_id: TI-P-1101A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          interval_sec: 10, decimals: 4, seed_key: r002, normal: { base: 66, noise_sd: 0.035 } }
+      - { tag_id: PS-P-1101A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          interval_sec: 1, decimals: 4, seed_key: r003, normal: { base: 3.2, noise_sd: 0.008 } }
+      - { tag_id: PD-P-1101A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          interval_sec: 1, decimals: 4, seed_key: r004, normal: { base: 19, noise_sd: 0.025 } }
+      - { tag_id: FI-P-1101A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          interval_sec: 1, decimals: 4, seed_key: r005, normal: { base: 210, noise_sd: 0.315 } }
+      - { tag_id: II-P-1101A, signal: current, unit: A, description: "구동 모터 전류",
+          interval_sec: 1, decimals: 4, seed_key: r006, normal: { base: 145, noise_sd: 0.174 } }
+  # ---------------- UNIT-RFCC-02 촉매 재생 ----------------
+  - equip_id: B-1201
+    name: Main Air Blower
+    type: BL
+    unit_id: UNIT-RFCC-02
+    driven_by: E-1202
+    seed_key: e02
+    tags:
+      - { tag_id: VX-B-1201, signal: shaft_vibration, unit: um p-p, description: "구동측 X축 상대 진동",
+          interval_sec: 1, decimals: 4, seed_key: r007, normal: { base: 32, noise_sd: 0.65 } }
+      - { tag_id: VY-B-1201, signal: shaft_vibration, unit: um p-p, description: "구동측 Y축 상대 진동",
+          interval_sec: 1, decimals: 4, seed_key: r008, normal: { base: 29, noise_sd: 0.65 } }
+      - { tag_id: TI-B-1201, signal: bearing_temp, unit: degC, description: "구동측 저널 베어링 온도",
+          interval_sec: 10, decimals: 4, seed_key: r009, normal: { base: 78, noise_sd: 0.035 } }
+      - { tag_id: PS-B-1201, signal: suction_pressure, unit: bar(g), description: "입구 공기 압력",
+          interval_sec: 1, decimals: 4, seed_key: r010, normal: { base: -0.015, noise_sd: 0.001 } }
+      - { tag_id: PD-B-1201, signal: discharge_pressure, unit: bar(g), description: "토출 공기 압력",
+          interval_sec: 1, decimals: 4, seed_key: r011, normal: { base: 2.8, noise_sd: 0.012 } }
+      - { tag_id: FI-B-1201, signal: flow, unit: Nm3/h, description: "표준 상태 공기 체적 유량",
+          interval_sec: 1, decimals: 4, seed_key: r012, normal: { base: 180000, noise_sd: 160 } }
+      - { tag_id: SI-B-1201, signal: speed, unit: rpm, description: "축 회전속도",
+          interval_sec: 1, decimals: 4, seed_key: r013, normal: { base: 5200, noise_sd: 1.2 } }
+      - { tag_id: LOP-B-1201, signal: oil_pressure, unit: bar(g), description: "윤활유 공급 압력",
+          interval_sec: 1, decimals: 4, seed_key: r014, normal: { base: 2.2, noise_sd: 0.004 } }
+  # ---------------- UNIT-RFCC-03 동력 회수 ----------------
+  - equip_id: E-1202
+    name: Power Recovery Expander
+    type: EX
+    unit_id: UNIT-RFCC-03
+    seed_key: e03
+    tags:
+      - { tag_id: VX-E-1202, signal: shaft_vibration, unit: um p-p, description: "구동측 X축 상대 진동",
+          interval_sec: 1, decimals: 4, seed_key: r015, normal: { base: 35, noise_sd: 0.7 } }
+      - { tag_id: VY-E-1202, signal: shaft_vibration, unit: um p-p, description: "구동측 Y축 상대 진동",
+          interval_sec: 1, decimals: 4, seed_key: r016, normal: { base: 32, noise_sd: 0.7 } }
+      - { tag_id: TI-E-1202, signal: bearing_temp, unit: degC, description: "저널 베어링 온도",
+          interval_sec: 10, decimals: 4, seed_key: r017, normal: { base: 82, noise_sd: 0.035 } }
+      - { tag_id: ZI-E-1202, signal: axial_position, unit: mm, description: "축방향 상대 위치",
+          interval_sec: 1, decimals: 5, seed_key: r018, normal: { base: 0.04, noise_sd: 0.0008 } }
+      - { tag_id: SI-E-1202, signal: speed, unit: rpm, description: "축 회전속도",
+          interval_sec: 1, decimals: 4, seed_key: r019, normal: { base: 5200, noise_sd: 1.2 } }
+      - { tag_id: PS-E-1202, signal: suction_pressure, unit: bar(g), description: "배기가스 입구 압력",
+          interval_sec: 1, decimals: 4, seed_key: r020, normal: { base: 2.6, noise_sd: 0.012 } }
+      - { tag_id: PD-E-1202, signal: discharge_pressure, unit: bar(g), description: "배기가스 출구 압력",
+          interval_sec: 1, decimals: 4, seed_key: r021, normal: { base: 0.13, noise_sd: 0.003 } }
+      - { tag_id: LOT-E-1202, signal: oil_temp, unit: degC, description: "윤활유 공급 온도",
+          interval_sec: 10, decimals: 4, seed_key: r022, normal: { base: 45, noise_sd: 0.025 } }
+  # ---------------- UNIT-RFCC-04 슬러리·LCO 순환·탑정 처리 ----------------
+  - equip_id: P-1301A
+    name: Slurry Pumparound Pump
+    type: PM
+    unit_id: UNIT-RFCC-04
+    seed_key: e04
+    tags:
+      - { tag_id: VI-P-1301A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          interval_sec: 1, decimals: 4, seed_key: r023, normal: { base: 1.85, noise_sd: 0.038475 } }
+      - { tag_id: TI-P-1301A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          interval_sec: 10, decimals: 4, seed_key: r024, normal: { base: 74, noise_sd: 0.035 } }
+      - { tag_id: PS-P-1301A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          interval_sec: 1, decimals: 4, seed_key: r025, normal: { base: 4.1, noise_sd: 0.008 } }
+      - { tag_id: PD-P-1301A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          interval_sec: 1, decimals: 4, seed_key: r026, normal: { base: 10.5, noise_sd: 0.025 } }
+      - { tag_id: FI-P-1301A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          interval_sec: 1, decimals: 4, seed_key: r027, normal: { base: 380, noise_sd: 0.57 } }
+      - { tag_id: II-P-1301A, signal: current, unit: A, description: "구동 모터 전류",
+          interval_sec: 1, decimals: 4, seed_key: r028, normal: { base: 190, noise_sd: 0.228 } }
+  - equip_id: P-1302A
+    name: LCO Pumparound Pump
+    type: PM
+    unit_id: UNIT-RFCC-04
+    seed_key: e05
+    tags:
+      - { tag_id: VI-P-1302A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          interval_sec: 1, decimals: 4, seed_key: r029, normal: { base: 1.22, noise_sd: 0.04005 } }
+      - { tag_id: TI-P-1302A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          interval_sec: 10, decimals: 4, seed_key: r030, normal: { base: 68, noise_sd: 0.035 } }
+      - { tag_id: PS-P-1302A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          interval_sec: 1, decimals: 4, seed_key: r031, normal: { base: 3, noise_sd: 0.008 } }
+      - { tag_id: PD-P-1302A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          interval_sec: 1, decimals: 4, seed_key: r032, normal: { base: 9.5, noise_sd: 0.025 } }
+      - { tag_id: FI-P-1302A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          interval_sec: 1, decimals: 4, seed_key: r033, normal: { base: 240, noise_sd: 0.36 } }
+      - { tag_id: II-P-1302A, signal: current, unit: A, description: "구동 모터 전류",
+          interval_sec: 1, decimals: 4, seed_key: r034, normal: { base: 98, noise_sd: 0.1176 } }
+  - equip_id: P-1303A
+    name: Overhead Reflux Pump
+    type: PM
+    unit_id: UNIT-RFCC-04
+    seed_key: e06
+    tags:
+      - { tag_id: VI-P-1303A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          interval_sec: 1, decimals: 4, seed_key: r035, normal: { base: 1.05, noise_sd: 0.041625 } }
+      - { tag_id: TI-P-1303A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          interval_sec: 10, decimals: 4, seed_key: r036, normal: { base: 58, noise_sd: 0.035 } }
+      - { tag_id: PS-P-1303A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          interval_sec: 1, decimals: 4, seed_key: r037, normal: { base: 2.5, noise_sd: 0.008 } }
+      - { tag_id: PD-P-1303A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          interval_sec: 1, decimals: 4, seed_key: r038, normal: { base: 8.2, noise_sd: 0.025 } }
+      - { tag_id: FI-P-1303A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          interval_sec: 1, decimals: 4, seed_key: r039, normal: { base: 135, noise_sd: 0.2025 } }
+      - { tag_id: II-P-1303A, signal: current, unit: A, description: "구동 모터 전류",
+          interval_sec: 1, decimals: 4, seed_key: r040, normal: { base: 65, noise_sd: 0.078 } }
+  # ---------------- UNIT-RFCC-05 습가스 압축 ----------------
+  - equip_id: C-1401
+    name: Wet Gas Compressor
+    type: CC
+    unit_id: UNIT-RFCC-05
+    driven_by: T-1401
+    seed_key: e07
+    tags:
+      - { tag_id: VX-C-1401, signal: shaft_vibration, unit: um p-p, description: "구동측 X축 상대 진동",
+          interval_sec: 1, decimals: 4, seed_key: r041, normal: { base: 30, noise_sd: 0.65 } }
+      - { tag_id: VY-C-1401, signal: shaft_vibration, unit: um p-p, description: "구동측 Y축 상대 진동",
+          interval_sec: 1, decimals: 4, seed_key: r042, normal: { base: 27, noise_sd: 0.65 } }
+      - { tag_id: TI-C-1401, signal: bearing_temp, unit: degC, description: "구동측 저널 베어링 온도",
+          interval_sec: 10, decimals: 4, seed_key: r043, normal: { base: 77, noise_sd: 0.035 } }
+      - { tag_id: ZI-C-1401, signal: axial_position, unit: mm, description: "축방향 상대 위치",
+          interval_sec: 1, decimals: 5, seed_key: r044, normal: { base: 0.03, noise_sd: 0.0008 } }
+      - { tag_id: PS-C-1401, signal: suction_pressure, unit: bar(g), description: "1단 흡입 압력",
+          interval_sec: 1, decimals: 4, seed_key: r045, normal: { base: 1.2, noise_sd: 0.006 } }
+      - { tag_id: PD-C-1401, signal: discharge_pressure, unit: bar(g), description: "최종 토출 압력",
+          interval_sec: 1, decimals: 4, seed_key: r046, normal: { base: 12.5, noise_sd: 0.028 } }
+      - { tag_id: TS-C-1401, signal: suction_temp, unit: degC, description: "1단 흡입 온도",
+          interval_sec: 10, decimals: 4, seed_key: r047, normal: { base: 42, noise_sd: 0.04 } }
+      - { tag_id: TD-C-1401, signal: discharge_temp, unit: degC, description: "최종 토출 온도",
+          interval_sec: 10, decimals: 4, seed_key: r048, normal: { base: 118, noise_sd: 0.06 } }
+      - { tag_id: FI-C-1401, signal: flow, unit: Nm3/h, description: "흡입 가스 표준 상태 체적 유량",
+          interval_sec: 1, decimals: 4, seed_key: r049, normal: { base: 42000, noise_sd: 50 } }
+      - { tag_id: SI-C-1401, signal: speed, unit: rpm, description: "축 회전속도",
+          interval_sec: 1, decimals: 4, seed_key: r050, normal: { base: 8200, noise_sd: 1.5 } }
+  # ---------------- UNIT-RFCC-06 습가스 압축 구동 ----------------
+  - equip_id: T-1401
+    name: Wet Gas Compressor Driver Steam Turbine
+    type: ST
+    unit_id: UNIT-RFCC-06
+    seed_key: e08
+    tags:
+      - { tag_id: VX-T-1401, signal: shaft_vibration, unit: um p-p, description: "구동측 X축 상대 진동",
+          interval_sec: 1, decimals: 4, seed_key: r051, normal: { base: 28, noise_sd: 0.6 } }
+      - { tag_id: VY-T-1401, signal: shaft_vibration, unit: um p-p, description: "구동측 Y축 상대 진동",
+          interval_sec: 1, decimals: 4, seed_key: r052, normal: { base: 25, noise_sd: 0.6 } }
+      - { tag_id: TI-T-1401, signal: bearing_temp, unit: degC, description: "구동측 저널 베어링 온도",
+          interval_sec: 10, decimals: 4, seed_key: r053, normal: { base: 80, noise_sd: 0.035 } }
+      - { tag_id: SI-T-1401, signal: speed, unit: rpm, description: "축 회전속도",
+          interval_sec: 1, decimals: 4, seed_key: r054, normal: { base: 8200, noise_sd: 1.5 } }
+      - { tag_id: LOP-T-1401, signal: oil_pressure, unit: bar(g), description: "윤활유 공급 압력",
+          interval_sec: 1, decimals: 4, seed_key: r055, normal: { base: 2.1, noise_sd: 0.004 } }
+      - { tag_id: LOT-T-1401, signal: oil_temp, unit: degC, description: "윤활유 공급 온도",
+          interval_sec: 10, decimals: 4, seed_key: r056, normal: { base: 45, noise_sd: 0.025 } }
+      - { tag_id: SP-T-1401, signal: steam_pressure, unit: bar(g), description: "입구 증기 압력",
+          interval_sec: 1, decimals: 4, seed_key: r057, normal: { base: 40, noise_sd: 0.04 } }
+  # ---------------- UNIT-RFCC-07 흡수·분별·안정화 ----------------
+  - equip_id: P-1402A
+    name: Absorber Oil Pump
+    type: PM
+    unit_id: UNIT-RFCC-07
+    seed_key: e09
+    tags:
+      - { tag_id: VI-P-1402A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          interval_sec: 1, decimals: 4, seed_key: r058, normal: { base: 1.12, noise_sd: 0.04635 } }
+      - { tag_id: TI-P-1402A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          interval_sec: 10, decimals: 4, seed_key: r059, normal: { base: 63, noise_sd: 0.035 } }
+      - { tag_id: PS-P-1402A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          interval_sec: 1, decimals: 4, seed_key: r060, normal: { base: 7.2, noise_sd: 0.008 } }
+      - { tag_id: PD-P-1402A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          interval_sec: 1, decimals: 4, seed_key: r061, normal: { base: 17, noise_sd: 0.025 } }
+      - { tag_id: FI-P-1402A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          interval_sec: 1, decimals: 4, seed_key: r062, normal: { base: 95, noise_sd: 0.1425 } }
+      - { tag_id: II-P-1402A, signal: current, unit: A, description: "구동 모터 전류",
+          interval_sec: 1, decimals: 4, seed_key: r063, normal: { base: 52, noise_sd: 0.0624 } }
+  - equip_id: P-1403A
+    name: Gas Recovery Reflux Pump
+    type: PM
+    unit_id: UNIT-RFCC-07
+    seed_key: e10
+    tags:
+      - { tag_id: VI-P-1403A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          interval_sec: 1, decimals: 4, seed_key: r064, normal: { base: 0.98, noise_sd: 0.047925 } }
+      - { tag_id: TI-P-1403A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          interval_sec: 10, decimals: 4, seed_key: r065, normal: { base: 59, noise_sd: 0.035 } }
+      - { tag_id: PS-P-1403A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          interval_sec: 1, decimals: 4, seed_key: r066, normal: { base: 10, noise_sd: 0.008 } }
+      - { tag_id: PD-P-1403A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          interval_sec: 1, decimals: 4, seed_key: r067, normal: { base: 18, noise_sd: 0.025 } }
+      - { tag_id: FI-P-1403A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          interval_sec: 1, decimals: 4, seed_key: r068, normal: { base: 82, noise_sd: 0.123 } }
+      - { tag_id: II-P-1403A, signal: current, unit: A, description: "구동 모터 전류",
+          interval_sec: 1, decimals: 4, seed_key: r069, normal: { base: 49, noise_sd: 0.0588 } }
+  # ---------------- UNIT-RFCC-08 LPG·가솔린 처리 ----------------
+  - equip_id: P-1501A
+    name: LPG Transfer Pump
+    type: PM
+    unit_id: UNIT-RFCC-08
+    seed_key: e11
+    tags:
+      - { tag_id: VI-P-1501A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          interval_sec: 1, decimals: 4, seed_key: r070, normal: { base: 1.08, noise_sd: 0.0495 } }
+      - { tag_id: TI-P-1501A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          interval_sec: 10, decimals: 4, seed_key: r071, normal: { base: 55, noise_sd: 0.035 } }
+      - { tag_id: PS-P-1501A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          interval_sec: 1, decimals: 4, seed_key: r072, normal: { base: 12, noise_sd: 0.008 } }
+      - { tag_id: PD-P-1501A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          interval_sec: 1, decimals: 4, seed_key: r073, normal: { base: 20, noise_sd: 0.025 } }
+      - { tag_id: FI-P-1501A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          interval_sec: 1, decimals: 4, seed_key: r074, normal: { base: 65, noise_sd: 0.0975 } }
+      - { tag_id: II-P-1501A, signal: current, unit: A, description: "구동 모터 전류",
+          interval_sec: 1, decimals: 4, seed_key: r075, normal: { base: 44, noise_sd: 0.0528 } }
+  - equip_id: P-1502A
+    name: Gasoline Transfer Pump
+    type: PM
+    unit_id: UNIT-RFCC-08
+    seed_key: e12
+    tags:
+      - { tag_id: VI-P-1502A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          interval_sec: 1, decimals: 4, seed_key: r076, normal: { base: 1.18, noise_sd: 0.051075 } }
+      - { tag_id: TI-P-1502A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          interval_sec: 10, decimals: 4, seed_key: r077, normal: { base: 57, noise_sd: 0.035 } }
+      - { tag_id: PS-P-1502A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          interval_sec: 1, decimals: 4, seed_key: r078, normal: { base: 2.1, noise_sd: 0.008 } }
+      - { tag_id: PD-P-1502A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          interval_sec: 1, decimals: 4, seed_key: r079, normal: { base: 8.5, noise_sd: 0.025 } }
+      - { tag_id: FI-P-1502A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          interval_sec: 1, decimals: 4, seed_key: r080, normal: { base: 120, noise_sd: 0.18 } }
+      - { tag_id: II-P-1502A, signal: current, unit: A, description: "구동 모터 전류",
+          interval_sec: 1, decimals: 4, seed_key: r081, normal: { base: 60, noise_sd: 0.072 } }

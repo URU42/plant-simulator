@@ -9,6 +9,7 @@ import re
 from datetime import timedelta
 from pathlib import Path
 
+import numpy as np
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from common.config_models import ConfigError, PlantConfig, load_yaml
@@ -51,12 +52,13 @@ class ScenarioEvent(BaseModel):
     work_order_id: str | None = None
     doc_id: str | None = None
     recovered_at: AwareDatetime | None = None   # 정비 후 정상 복귀 시각. 없으면 start + duration 에 끝난다
+    repeat_every: timedelta | None = None       # 있으면 start + k·repeat_every 마다 같은 이벤트가 다시 일어난다
     description: str | None = None
     # 평가용 파일에만
     trend: str | None = None                    # 정답 추이 방향: 상승 / 하강 / 안정
     question_aliases: list[str] = []            # 질문에 쓸 별칭
 
-    @field_validator("duration", mode="before")
+    @field_validator("duration", "repeat_every", mode="before")
     @classmethod
     def _duration(cls, v):
         return parse_duration(v) if isinstance(v, str) else v
@@ -67,7 +69,21 @@ class ScenarioEvent(BaseModel):
             raise ValueError(f"event {self.event_id}: give exactly one of tag_id / equip_id")
         if self.recovered_at is not None and self.recovered_at < self.start + self.duration:
             raise ValueError(f"event {self.event_id}: recovered_at must be after start + duration")
+        if self.repeat_every is not None:
+            if self.recovered_at is not None:
+                raise ValueError(f"event {self.event_id}: repeat_every cannot be combined with recovered_at")
+            if self.duration > self.repeat_every:
+                raise ValueError(f"event {self.event_id}: duration must not exceed repeat_every")
         return self
+
+    def occurrence_start(self, epochs: np.ndarray) -> np.ndarray:
+        """각 epoch 가 속한(또는 직전) 회차의 시작 epoch. 반복이 없으면 start."""
+        start = self.start.timestamp()
+        if self.repeat_every is None:
+            return np.full(len(epochs), start)
+        period = self.repeat_every.total_seconds()
+        k = np.maximum(np.floor((epochs - start) / period), 0)
+        return start + k * period
 
     @property
     def end(self):

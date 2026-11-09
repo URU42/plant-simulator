@@ -1,0 +1,47 @@
+# RFCC 개발용 시나리오 (설계 §4.3). rfcc-20261109/evaluation_reference/development_events.json 과
+# support/generate.py 의 주입 식을 옮겼다. 샘플과 같은 KST 시각에 시작해 매주 같은 요일·시각에 반복한다.
+# - swell: 완만히 올라가 머물다 내려오는 발생·회복 포락선. magnitude 는 기준 태그(진동)의 편차 크기
+# - related.ratio: 기준 태그 편차에 대한 배율 (샘플 식의 계수 ÷ magnitude)
+# - 확정 고장이 아니므로 failure_id 를 주지 않는다 (failure_history 에 들어가지 않는다)
+
+events:
+  # DEV-RFCC-001 흡입 조건 악화 의심 (P-1101A, 40분): 흡입 압력·유량·토출 압력·전류 감소, 진동·베어링 온도 상승
+  - event_id: EV-RFCC-001
+    tag_id: VI-P-1101A
+    pattern: swell
+    start: 2026-11-02T05:10:00+09:00
+    duration: 40m
+    repeat_every: 7d
+    magnitude: 1.85
+    related:
+      - { tag_id: PS-P-1101A, ratio: -0.4595 }     # −0.85 / 1.85
+      - { tag_id: PD-P-1101A, ratio: -0.4865 }     # −0.9 / 1.85
+      - { tag_id: FI-P-1101A, ratio: -13.62 }      # −210·0.12 / 1.85
+      - { tag_id: II-P-1101A, ratio: -5.486 }      # −145·0.07 / 1.85
+      - { tag_id: TI-P-1101A, ratio: 0.6486 }      # 1.2 / 1.85
+    description: 흡입 압력 감소·유량 감소·Overall 진동 상승 후 완만한 회복. 캐비테이션 확정에는 유체 온도·증기압·NPSH·파형이 필요하다
+
+  # DEV-RFCC-002 베어링·윤활 상태 점검 필요 (P-1301A, 90분): 진동·베어링 온도 완만 상승, 전류 소폭 상승
+  - event_id: EV-RFCC-002
+    tag_id: VI-P-1301A
+    pattern: swell
+    start: 2026-11-03T16:26:40+09:00
+    duration: 90m
+    repeat_every: 7d
+    magnitude: 2.1
+    related:
+      - { tag_id: TI-P-1301A, ratio: 6.19 }        # 13 / 2.1
+      - { tag_id: II-P-1301A, ratio: 1.357 }       # 190·0.015 / 2.1
+    description: 일정 부하에서 진동과 베어링 온도가 완만하게 상승하고 후반 회복한다. 윤활·정렬·베어링 원인은 미확정이다
+
+  # 센서 품질 Bad 60초 (P-1302A 진동). 기계 고장이 아니라 계측 품질 문제
+  - event_id: EV-RFCC-003
+    tag_id: VI-P-1302A
+    pattern: quality
+    quality: Bad
+    start: 2026-11-02T23:13:20+09:00
+    duration: 60s
+    repeat_every: 7d
+
+random_anomalies:
+  rate_per_tag_day: 0          # 한계값이 없는 구성안이라 쓰지 않는다

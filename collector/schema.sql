@@ -8,14 +8,17 @@ CREATE TABLE IF NOT EXISTS unit (unit_id TEXT PRIMARY KEY, unit_group_id TEXT NO
 -- 설비 마스터
 CREATE TABLE IF NOT EXISTS equipment_type (type TEXT PRIMARY KEY, name TEXT NOT NULL, prefix TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS equipment (
-    equip_id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, grade INTEGER NOT NULL,
+    equip_id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, grade INTEGER,
     unit_id TEXT NOT NULL, driven_by TEXT
 );
 CREATE TABLE IF NOT EXISTS equipment_alias (alias TEXT PRIMARY KEY, equip_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tag_std (signal TEXT PRIMARY KEY, prefix TEXT NOT NULL, unit TEXT NOT NULL, name TEXT NOT NULL);
+-- 한계값(warn/alarm/trip)은 없을 수 있다(RFCC). interval_sec 가 NULL 이면 실행 설정의 sample_interval_sec.
 CREATE TABLE IF NOT EXISTS equipment_tag (
-    tag_id TEXT PRIMARY KEY, equip_id TEXT NOT NULL, signal TEXT NOT NULL, unit TEXT NOT NULL, location TEXT NOT NULL,
-    warn_hi REAL NOT NULL, alarm_hi REAL NOT NULL, trip_hi REAL NOT NULL, delay_samples INTEGER NOT NULL
+    tag_id TEXT PRIMARY KEY, equip_id TEXT NOT NULL, signal TEXT NOT NULL, unit TEXT NOT NULL,
+    location TEXT, description TEXT,
+    warn_hi REAL, alarm_hi REAL, trip_hi REAL, delay_samples INTEGER NOT NULL,
+    interval_sec INTEGER, decimals INTEGER NOT NULL
 );
 
 -- 정비·고장 이력 (개발용 시나리오에서 적재)

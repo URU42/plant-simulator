@@ -20,3 +20,20 @@ def runtime_path() -> Path:
 @pytest.fixture(scope="session")
 def scenario_path() -> Path:
     return CONFIG_DIR / "scenario_dev.yaml"
+
+
+# --- RFCC 구성안 (설계 docs/superpowers/specs/2026-11-09-rfcc-simulator-design.md) ---
+
+@pytest.fixture(scope="session")
+def rfcc_plant_path() -> Path:
+    return CONFIG_DIR / "plant_rfcc.yaml"
+
+
+@pytest.fixture(scope="session")
+def rfcc_runtime_path() -> Path:
+    return CONFIG_DIR / "runtime_rfcc.yaml"
+
+
+@pytest.fixture(scope="session")
+def rfcc_scenario_path() -> Path:
+    return CONFIG_DIR / "scenario_rfcc.yaml"

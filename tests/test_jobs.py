@@ -86,16 +86,26 @@ def test_hourly_aggregate_and_nodata_status(env):
     assert other and all(r["status"] == "NoData" and r["count"] == 0 for r in other)
 
 
-def test_daily_retention_deletes_old_raw(env):
-    storage, plant, jobs = env
-    old = T0 - timedelta(days=9)
-    _feed(storage, "VI-C1101", "C-1101", old, 10, 2.0)
+def test_retention_runs_with_ten_minute_batch(env):
+    """보관 삭제는 10분 배치마다. 하루 보관이면 T0−1d+5m 행은 하루 경계(매일 배치)로는 남지만 10분 배치가 지운다."""
+    storage, plant, _ = env
+    jobs = JobRunner(storage, plant, RuntimeConfig(raw_retention_days=1))
+    old = T0 - timedelta(days=1) + timedelta(minutes=5)
+    _feed(storage, "VI-C1101", "C-1101", old, 5, 2.0)        # T0−1d+5m ~ T0−1d+10m: 마지막 구간 끝(T0+10m)−1d 보다 오래됨
     _feed(storage, "VI-C1101", "C-1101", T0, 10, 2.0)
-    _feed(storage, "VI-C1101", "C-1101", T0 + timedelta(days=1), 10, 2.0)   # 하루 경계를 넘겨 매일 배치가 돌게 한다
-    jobs.advance(storage.sim_now())
-    remaining = storage.query("SELECT MIN(ts) FROM ts_raw")[0][0]
-    assert remaining == to_db(T0)
+    _feed(storage, "VI-C1101", "C-1101", T0 + timedelta(minutes=10), 1, 2.0)   # sim_now = T0+10m
+    while jobs.advance(storage.sim_now()):
+        pass
+    assert storage.query("SELECT MIN(ts) FROM ts_raw")[0][0] == to_db(T0)
     assert storage.query("SELECT COUNT(*) FROM ts_10m WHERE bucket_start < ?", (to_db(T0),))[0][0] > 0   # 집계는 남는다
+
+
+def test_stale_daily_job_state_is_harmless(env):
+    storage, plant, jobs = env
+    storage.execute("INSERT INTO job_state VALUES ('daily', ?)", (to_db(T0),))
+    _feed(storage, "VI-C1101", "C-1101", T0, 10, 2.0)
+    _feed(storage, "VI-C1101", "C-1101", T0 + timedelta(minutes=10), 1, 2.0)
+    assert jobs.advance(storage.sim_now()) >= 1
 
 
 def test_advance_is_idempotent(env):

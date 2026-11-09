@@ -8,9 +8,15 @@ P = np.linspace(0, 1, 11)
 EPOCHS = np.arange(0, 110, 10, dtype=np.int64)
 
 
-def test_all_seven_patterns_registered():
-    assert set(PATTERNS) == {"ramp", "step", "spike", "oscillation", "freeze", "quality", "gap"}
-    assert VALUE_PATTERNS == {"ramp", "step", "spike", "oscillation"}
+def test_all_eight_patterns_registered():
+    assert set(PATTERNS) == {"ramp", "step", "spike", "oscillation", "swell", "freeze", "quality", "gap"}
+    assert VALUE_PATTERNS == {"ramp", "step", "spike", "oscillation", "swell"}
+
+
+def test_swell_rises_holds_recovers():
+    z = np.array([0.0, 0.125, 0.25, 0.5, 0.7, 0.85, 1.0 - 1e-9])
+    out = shape("swell", z, np.zeros_like(z), 2.0)
+    np.testing.assert_allclose(out, [0.0, 1.0, 2.0, 2.0, 2.0, 1.0, 0.0], atol=1e-6)
 
 
 def test_ramp_rises_linearly():

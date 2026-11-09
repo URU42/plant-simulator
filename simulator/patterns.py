@@ -1,6 +1,6 @@
 """이상 패턴 모음 (기획서 5.3). 시나리오 파일에서 이름으로 골라 쓰는 재사용 부품.
 
-값 패턴(ramp / step / spike / oscillation)은 진행률(0~1)에 따른 편차를 돌려준다.
+값 패턴(ramp / step / spike / oscillation / swell)은 진행률(0~1)에 따른 편차를 돌려준다.
 freeze / quality / gap 은 값을 더하는 게 아니라 샘플 자체를 바꾸므로 scenario.py 가 따로 처리한다.
 """
 from __future__ import annotations
@@ -35,10 +35,20 @@ def oscillation(progress: np.ndarray, epochs: np.ndarray, magnitude: float) -> n
     return magnitude * progress * np.sin(2 * np.pi * epochs / OSCILLATION_PERIOD_SEC)
 
 
-VALUE_PATTERNS = {"ramp", "step", "spike", "oscillation"}
+SWELL_RISE, SWELL_FALL = 0.25, 0.7      # swell: 진행률 0~0.25 상승, 0.25~0.7 유지, 0.7~1 회복
+
+
+def swell(progress: np.ndarray, epochs: np.ndarray, magnitude: float) -> np.ndarray:
+    """완만히 올라가 머물다 내려오는 발생·회복 (RFCC 샘플 자료의 흡입 조건 악화, 베어링·윤활 징후)."""
+    rise = np.sin(np.pi * progress / (2 * SWELL_RISE)) ** 2
+    fall = np.cos(np.pi * (progress - SWELL_FALL) / (2 * (1 - SWELL_FALL))) ** 2
+    return magnitude * np.where(progress < SWELL_RISE, rise, np.where(progress > SWELL_FALL, fall, 1.0))
+
+
+VALUE_PATTERNS = {"ramp", "step", "spike", "oscillation", "swell"}
 SAMPLE_PATTERNS = {"freeze", "quality", "gap"}      # 값 멈춤 / Scan Off·Bad / 데이터 끊김
 PATTERNS: dict[str, Shape | None] = {"ramp": ramp, "step": step, "spike": spike, "oscillation": oscillation,
-                                      "freeze": None, "quality": None, "gap": None}
+                                      "swell": swell, "freeze": None, "quality": None, "gap": None}
 
 
 def shape(pattern: str, progress: np.ndarray, epochs: np.ndarray, magnitude: float) -> np.ndarray:
