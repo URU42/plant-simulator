@@ -11,6 +11,11 @@ from typing import Any, Iterable
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
+# 예전 스키마로 만든 DB 파일에 뒤늦게 추가된 컬럼. CREATE TABLE IF NOT EXISTS 는 기존 테이블을 바꾸지 않으므로 여기서 붙인다.
+ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "equipment_tag": {"description": "TEXT", "interval_sec": "INTEGER", "decimals": "INTEGER NOT NULL DEFAULT 3"},
+}
+
 
 class Storage:
     def __init__(self, db_path: str | Path) -> None:
@@ -20,6 +25,20 @@ class Storage:
             self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        self.db_path = str(db_path)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """예전 DB 파일에 빠진 컬럼을 끝에 덧붙인다 (순서가 schema.sql 과 다르므로 INSERT 는 컬럼 이름을 적는다)."""
+        for table, columns in ADDED_COLUMNS.items():
+            existing = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+            for name, ddl in columns.items():
+                if name not in existing:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+
+    def not_null_columns(self, table: str) -> set[str]:
+        """NOT NULL 인 컬럼 이름. 예전 스키마는 한계값·등급이 NOT NULL 이었다."""
+        return {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})") if r["notnull"]}
 
     def close(self) -> None:
         self._conn.close()
