@@ -2,7 +2,7 @@
 
 - 같은 batch_id 가 다시 오면 저장하지 않고 duplicate 로 응답한다.
 - 모르는 태그 ID나 형식이 틀린 행은 거절하고 건수와 이유를 돌려준다.
-- 같은 (tag_id, ts) 는 한 번만 저장한다. 시각 순서가 뒤바뀐 행도 받는다.
+- 같은 (equip_id, tag_id, ts) 는 한 번만 저장한다. 시각 순서가 뒤바뀐 행도 받는다.
 """
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import AwareDatetime, BaseModel, ConfigDict, ValidationError
 
 from collector.storage import Storage
+from common.config_models import TagKey
 from common.message import SCHEMA_VERSION, Sample
 from common.timefmt import to_db
 
@@ -51,7 +52,7 @@ def schema_supported(version: str) -> bool:
     return version.split(".")[0] == SCHEMA_VERSION.split(".")[0]
 
 
-def validate_samples(samples: list[Any], tag_owner: dict[str, str],
+def validate_samples(samples: list[Any], tag_keys: set[TagKey],
                      oldest_allowed: str | None = None) -> tuple[list[Sample], list[Rejection]]:
     """행 단위 검증. oldest_allowed(UTC ISO) 보다 오래된 측정 시각은 어차피 보관 기간 밖이므로 거절한다."""
     accepted: list[Sample] = []
@@ -64,11 +65,8 @@ def validate_samples(samples: list[Any], tag_owner: dict[str, str],
             fields = ", ".join(str(err["loc"][0]) for err in e.errors() if err["loc"]) or "body"
             rejected.append(Rejection(index=i, tag_id=tag_id, reason=f"invalid {fields}"))
             continue
-        owner = tag_owner.get(s.tag_id)
-        if owner is None:
-            rejected.append(Rejection(index=i, tag_id=s.tag_id, reason=f"unknown tag_id {s.tag_id}"))
-        elif owner != s.equip_id:
-            rejected.append(Rejection(index=i, tag_id=s.tag_id, reason=f"equip_id {s.equip_id} does not own {s.tag_id}"))
+        if (s.equip_id, s.tag_id) not in tag_keys:
+            rejected.append(Rejection(index=i, tag_id=s.tag_id, reason=f"unknown tag {s.equip_id}/{s.tag_id}"))
         elif oldest_allowed is not None and to_db(s.ts) < oldest_allowed:
             rejected.append(Rejection(index=i, tag_id=s.tag_id, reason=f"ts {s.ts.isoformat()} is older than raw retention"))
         else:
@@ -76,14 +74,14 @@ def validate_samples(samples: list[Any], tag_owner: dict[str, str],
     return accepted, rejected
 
 
-def ingest(storage: Storage, batch: RawBatch, received_at: str, tag_owner: dict[str, str],
+def ingest(storage: Storage, batch: RawBatch, received_at: str, tag_keys: set[TagKey],
            oldest_allowed: str | None = None) -> tuple[IngestResult, list[Sample]]:
     """묶음을 저장하고 (결과, 받아들인 샘플) 을 돌려준다."""
-    accepted, rejected = validate_samples(batch.samples, tag_owner, oldest_allowed)
+    accepted, rejected = validate_samples(batch.samples, tag_keys, oldest_allowed)
     if storage.batch_seen(batch.batch_id):
         return IngestResult(batch_id=batch.batch_id, duplicate=True, accepted=len(accepted), stored=0,
                             rejected=len(rejected), reasons=rejected), []
-    rows = [(s.tag_id, to_db(s.ts), s.equip_id, s.value, s.quality) for s in accepted]
+    rows = [(s.equip_id, s.tag_id, to_db(s.ts), s.value, s.quality) for s in accepted]
     stored = storage.store_batch(batch.batch_id, batch.source_id, received_at, rows)
     return IngestResult(batch_id=batch.batch_id, duplicate=False, accepted=len(accepted), stored=stored,
                         rejected=len(rejected), reasons=rejected), accepted
