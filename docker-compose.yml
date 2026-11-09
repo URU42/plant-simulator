@@ -1,10 +1,12 @@
 # 명령 하나로 두 프로세스를 띄운다: docker compose up --build
-# 죽어도 다시 살아나 계속 생성한다 (restart: always). DB 파일은 ./data/plant.db 에 남는다.
+# 죽어도 다시 살아나 계속 생성한다 (restart: always). DB 파일은 ./data/ 에 남는다.
+# 기본은 RFCC 구성안(1초 데이터). 수첨탈황 구성안으로 돌리려면:
+#   PLANT_CONFIG=config/plant_hds.yaml RUNTIME_CONFIG=config/runtime.yaml SCENARIO_CONFIG=config/scenario_dev.yaml DB_PATH=data/plant.db docker compose up
 services:
   collector:
     build: .
-    command: python -m collector.app --plant config/plant_hds.yaml --runtime config/runtime.yaml
-             --scenario config/scenario_dev.yaml --db data/plant.db --port 8000
+    command: python -m collector.app --plant ${PLANT_CONFIG:-config/plant_rfcc.yaml} --runtime ${RUNTIME_CONFIG:-config/runtime_rfcc.yaml}
+             --scenario ${SCENARIO_CONFIG:-config/scenario_rfcc.yaml} --db ${DB_PATH:-data/rfcc.db} --port 8000
     ports: ["8000:8000"]
     volumes:
       - ./data:/app/data
@@ -18,9 +20,10 @@ services:
 
   simulator:
     build: .
-    # SIM_TIME_MODE=backfill 이면 90일을 채운 뒤 실시간으로 이어진다. 재시작하면 수집 서버의 마지막 시각부터 이어서 보낸다.
-    command: python -m simulator.main --plant config/plant_hds.yaml --runtime config/runtime.yaml
-             --scenario config/scenario_dev.yaml --time-mode ${SIM_TIME_MODE:-live}
+    # SIM_TIME_MODE 기본 backfill: 지난 하루(runtime 의 backfill_days)를 채운 뒤 실시간으로 이어진다.
+    # 재시작하면 수집 서버의 마지막 시각부터 이어서 보내므로 다시 채우지 않는다.
+    command: python -m simulator.main --plant ${PLANT_CONFIG:-config/plant_rfcc.yaml} --runtime ${RUNTIME_CONFIG:-config/runtime_rfcc.yaml}
+             --scenario ${SCENARIO_CONFIG:-config/scenario_rfcc.yaml} --time-mode ${SIM_TIME_MODE:-backfill}
     environment:
       COLLECTOR_URL: http://collector:8000
     volumes:
