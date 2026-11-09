@@ -22,7 +22,7 @@ from collector.stream import Broadcaster
 from common.config_models import load_plant, load_runtime
 from common.timefmt import from_db, parse_iso, to_db
 
-NO_DATA_SEND_INTERVALS = 3      # 전송 주기 3번 동안 안 들어오면 NoData (6.2)
+NO_DATA_SEND_INTERVALS = 3      # 전송 주기(또는 더 긴 태그 주기) 3번 동안 안 들어오면 NoData (6.2, RFCC 설계 §4.5)
 
 
 def create_app(plant_path: str | Path, runtime_path: str | Path, db_path: str | Path,
@@ -91,13 +91,16 @@ def create_app(plant_path: str | Path, runtime_path: str | Path, db_path: str | 
         if tag_id not in st.tag_owner:
             raise HTTPException(404, f"unknown tag_id {tag_id}")
         row = st.storage.current(tag_id)
+        return _with_status(st, row, tag_id)
+
+    def _with_status(st, row: dict | None, tag_id: str) -> dict:
+        """현재값 행에 status 를 붙인다. 행이 없거나 전송·태그 주기 중 긴 쪽의 3배를 넘게 안 들어오면 NoData."""
         if row is None:
-            return {"tag_id": tag_id, "equip_id": st.tag_owner[tag_id], "ts": None, "value": None,
-                    "quality": None, "status": "NoData"}
-        sim_now = from_db(st.storage.sim_now())
-        age = (sim_now - from_db(row["ts"])).total_seconds()
-        stale = age > NO_DATA_SEND_INTERVALS * runtime.send_interval_sec
-        return row | {"status": "NoData" if stale else row["quality"]}
+            return {"tag_id": tag_id, "equip_id": st.tag_owner[tag_id], "ts": None, "value": None, "quality": None,
+                    "received_at": None, "status": "NoData"}
+        age = (from_db(st.storage.sim_now()) - from_db(row["ts"])).total_seconds()
+        interval = max(runtime.send_interval_sec, plant.tag_interval_sec(tag_id, runtime.sample_interval_sec))
+        return row | {"status": "NoData" if age > NO_DATA_SEND_INTERVALS * interval else row["quality"]}
 
     @app.get("/timeseries")
     async def timeseries(request: Request, tag_id: str, from_: str = Query(alias="from"), to: str = Query(),

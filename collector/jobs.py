@@ -3,9 +3,9 @@
 별도 스케줄러 없이, 수집 서버가 보는 시뮬레이터 현재 시각(수신한 측정 시각의 최대값)이
 구간 끝을 지날 때마다 그 구간을 처리한다. 컴퓨터 시계는 보지 않으므로 백필에서도 같은 경로를 탄다.
 
-- 10분 배치: 10분 집계 → 최대값을 한계값과 비교해 알람. 지연 판정(delay_samples)은 연속된 10분 구간 수.
+- 10분 배치: 10분 집계 → 최대값을 한계값과 비교해 알람(한계값 있는 태그만). 지연 판정(delay_samples)은 연속된 10분 구간 수.
+          끝에 보관 기간이 지난 원시 값과 수신 묶음 기록을 지운다 (1초 데이터는 하루에 580만 행이라 매일로는 늦다).
 - 매시 배치: 1시간 집계(평균, 최소, 최대, 표준편차, 상태).
-- 매일 배치: 보관 기간이 지난 원시 값 삭제.
 
 한 번의 advance 는 배치마다 MAX_WINDOWS_PER_ADVANCE 구간까지만 처리한다. 수집 서버가 오래 멈췄다 켜져
 시뮬레이터 시각이 크게 건너뛰어도 한 요청이 수십 초씩 멈추지 않고, 남은 구간은 다음 호출이 이어서 처리한다.
@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from collector.storage import Storage
 from common.config_models import PlantConfig, RuntimeConfig, TagConfig
@@ -23,7 +23,6 @@ MAX_WINDOWS_PER_ADVANCE = 144      # 한 번에 처리하는 구간 수 상한 (
 
 TEN_MIN = timedelta(minutes=10)
 ONE_HOUR = timedelta(hours=1)
-ONE_DAY = timedelta(days=1)
 
 # 한계 구분 → (한계값 속성, 심각도). 팀 규칙: Trip → High, Alarm → Medium, Soft → Low
 LIMIT_LEVELS: list[tuple[str, str, str]] = [
@@ -45,7 +44,8 @@ class JobRunner:
         self.runtime = runtime
         self.tags: dict[str, TagConfig] = plant.tag_by_id()
         self.tag_owner: dict[str, str] = {t: e.equip_id for t, e in plant.tag_owner().items()}
-        self.max_delay = max(t.delay_samples for t in self.tags.values())
+        self.alarm_tags = {k: t for k, t in self.tags.items() if t.limits is not None}   # 한계값 있는 태그만 알람 판정
+        self.max_delay = max((t.delay_samples for t in self.alarm_tags.values()), default=1)
 
     # --- 진입점 -------------------------------------------------------------
     def advance(self, sim_now: str | None, max_windows: int = MAX_WINDOWS_PER_ADVANCE) -> int:
@@ -57,8 +57,7 @@ class JobRunner:
             return 0
         now = from_db(sim_now)
         return max(self._run_windows("10m", TEN_MIN, now, self._aggregate_10m, max_windows),
-                   self._run_windows("1h", ONE_HOUR, now, self._aggregate_1h, max_windows),
-                   self._run_windows("daily", ONE_DAY, now, self._retention, max_windows))
+                   self._run_windows("1h", ONE_HOUR, now, self._aggregate_1h, max_windows))
 
     def _run_windows(self, name: str, step: timedelta, now: datetime, handler, max_windows: int) -> int:
         start = self._cursor(name, step)
@@ -105,6 +104,7 @@ class JobRunner:
     def _aggregate_10m(self, start: datetime, end: datetime) -> None:
         self._aggregate("ts_10m", start, end)
         self._evaluate_alarms(start)
+        self._retention(end)
 
     def _aggregate_1h(self, start: datetime, end: datetime) -> None:
         self._aggregate("ts_1h", start, end)
@@ -122,7 +122,7 @@ class JobRunner:
             "SELECT alarm_id, tag_id, limit_type FROM alarm_detail WHERE cleared_at IS NULL")}
 
         when = to_db(bucket_start)
-        for tag_id, tag in self.tags.items():
+        for tag_id, tag in self.alarm_tags.items():
             maxes = history.get(tag_id, [])
             current = maxes[-1] if maxes else None
             for limit_type, attr, severity in LIMIT_LEVELS:
@@ -141,7 +141,11 @@ class JobRunner:
                                          (when, open_alarms[key]))
 
     # --- 보관 ---------------------------------------------------------------
-    def _retention(self, start: datetime, end: datetime) -> None:
-        """하루가 지날 때마다 보관 기간이 지난 원시 값을 지운다. 집계는 남긴다."""
-        cutoff = end - timedelta(days=self.runtime.raw_retention_days)
-        self.storage.execute("DELETE FROM ts_raw WHERE ts < ?", (to_db(cutoff),))
+    def _retention(self, now: datetime) -> None:
+        """보관 기간이 지난 원시 값(측정 시각 기준)과 수신 묶음 기록(받은 벽시계 시각 기준)을 지운다. 집계는 남긴다.
+
+        그보다 오래된 묶음은 측정 시각도 보관 기간 밖이라 어차피 거절되므로, batch_id 중복 확인 창이 줄어도 결과는 같다.
+        """
+        keep = timedelta(days=self.runtime.raw_retention_days)
+        self.storage.execute("DELETE FROM ts_raw WHERE ts < ?", (to_db(now - keep),))
+        self.storage.execute("DELETE FROM ingest_batch WHERE received_at < ?", (to_db(datetime.now(timezone.utc) - keep),))
