@@ -14,9 +14,9 @@ def test_rfcc_plant_matches_sample_package(rfcc_plant_path):
     assert len(temps) == 16 and all(t.interval_sec == 10 for t in temps)
     assert all(t.interval_sec == 1 for t in tags if t.signal not in TEMPS)
     assert all(t.limits is None for t in tags)
-    by_id = plant.tag_by_id()
-    assert by_id["VI-P-1101A"].normal.base == 1.45 and by_id["VI-P-1101A"].normal.noise_sd == 0.03375
-    assert by_id["ZI-E-1202"].decimals == 5 and by_id["FI-B-1201"].decimals == 4
+    by_key = plant.tag_by_key()
+    assert by_key[("P-1101A", "VI-P-1101A")].normal.base == 1.45 and by_key[("P-1101A", "VI-P-1101A")].normal.noise_sd == 0.03375
+    assert by_key[("E-1202", "ZI-E-1202")].decimals == 5 and by_key[("B-1201", "FI-B-1201")].decimals == 4
     equip = plant.equipment_by_id()
     assert equip["B-1201"].driven_by == "E-1202" and equip["C-1401"].driven_by == "T-1401"
     assert plant.equipment_kind("E-1202") == "expander" and plant.equipment_kind("P-1101A") == "pump"

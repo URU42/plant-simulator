@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from common.config_models import (
+    Limits,
     ConfigError,
     PlantConfig,
     RuntimeConfig,
@@ -46,7 +47,7 @@ def test_driven_by_and_correlations_reference_known_ids(plant_path: Path):
         if e.driven_by:
             assert e.driven_by in equip_ids
     for c in plant.correlations:
-        assert plant.tag_unit(c.source) == plant.tag_unit(c.target), "연관 규칙은 같은 Unit 안에서만"
+        assert plant.tag_unit(plant.resolve(c.source)) == plant.tag_unit(plant.resolve(c.target)), "연관 규칙은 같은 Unit 안에서만"
 
 
 def test_unknown_id_in_driven_by_is_reported_by_name(plant_path: Path):
@@ -122,7 +123,7 @@ def test_rfcc_fields_are_optional_or_new():
     tag = plant.all_tags()[0]
     assert plant.plant.signal_model == "rfcc"
     assert tag.limits is None and tag.location is None and tag.description == "베어링 온도"
-    assert tag.decimals == 4 and plant.tag_interval_sec("TI-P-1", 1) == 10
+    assert tag.decimals == 4 and plant.tag_interval_sec(("P-1", "TI-P-1"), 1) == 10
     assert plant.equipment[0].grade is None and plant.equipment_kind("P-1") == "pump"
     assert tag.normal.daily_amp == 0.0 and tag.normal.drift_sd == 0.0
 
@@ -143,4 +144,46 @@ def test_hds_plant_still_loads_with_defaults(plant_path):
     plant = load_plant(plant_path)
     assert plant.plant.signal_model == "hds"
     assert all(t.limits is not None and t.decimals == 3 for t in plant.all_tags())
-    assert plant.tag_interval_sec("VI-C1101", 10) == 10
+    assert plant.tag_interval_sec(("C-1101", "VI-C1101"), 10) == 10
+
+
+# ---------------------------------------------------------------------------
+# 복합키 (설비 ID, 태그명), TagRef, 상·하한 한계값 (다중 공장 설계 §4.1, §4.2)
+# ---------------------------------------------------------------------------
+
+def _two_equipment_same_tag():
+    raw = _rfcc_like()
+    raw["equipment"][0]["tags"][0]["limits"] = {"warn_lo": 3.5}
+    raw["equipment"].append({"equip_id": "F-1", "name": "fan", "type": "PM", "unit_id": "U-1", "seed_key": "e2",
+                             "tags": [{"tag_id": "TI-P-1", "signal": "bearing_temp", "unit": "degC", "seed_key": "r2",
+                                       "normal": {"base": 50, "noise_sd": 0.03}, "normal_ref": "44~60", "limit_basis": "가정값"}]})
+    return raw
+
+
+def test_tag_ids_only_need_to_be_unique_per_equipment():
+    plant = PlantConfig.model_validate(_two_equipment_same_tag())
+    assert plant.tag_keys() == [("P-1", "TI-P-1"), ("F-1", "TI-P-1")]
+    assert plant.tag_by_key()[("F-1", "TI-P-1")].normal_ref == "44~60"
+    assert plant.tag_interval_sec(("F-1", "TI-P-1"), 1) == 1 and plant.tag_interval_sec(("P-1", "TI-P-1"), 1) == 10
+
+
+def test_resolve_tag_refs():
+    plant = PlantConfig.model_validate(_two_equipment_same_tag())
+    assert plant.resolve("F-1/TI-P-1") == ("F-1", "TI-P-1")
+    assert plant.resolve("TI-P-1", equip_hint="F-1") == ("F-1", "TI-P-1")
+    with pytest.raises(ConfigError, match="ambiguous: F-1/TI-P-1, P-1/TI-P-1|ambiguous: P-1/TI-P-1, F-1/TI-P-1"):
+        plant.resolve("TI-P-1")
+    with pytest.raises(ConfigError, match="X-9/TI-P-1"):
+        plant.resolve("X-9/TI-P-1")
+
+
+def test_limits_allow_lower_bounds_and_check_order():
+    Limits(warn_lo=2.02, alarm_lo=1.62)
+    Limits(alarm_lo=115, alarm_hi=140)
+    assert Limits(warn_lo=2.0, alarm_lo=1.5, warn_hi=5.0).lo_levels() == [("Soft", 2.0), ("Alarm", 1.5)]
+    with pytest.raises(ValueError):
+        Limits(warn_lo=1.5, alarm_lo=2.0)        # 하한은 trip < alarm < warn
+    with pytest.raises(ValueError):
+        Limits(warn_lo=5.0, warn_hi=4.0)         # lo 는 hi 보다 작다
+    with pytest.raises(ValueError):
+        Limits()

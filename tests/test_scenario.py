@@ -189,3 +189,26 @@ def test_random_anomalies_skip_tags_without_limits(rfcc_plant_path, rfcc_runtime
     maker = RandomAnomalyMaker(plant, runtime.seed, rate_per_tag_day=5.0)
     epochs = epochs_range(datetime(2026, 11, 9, tzinfo=KST), datetime(2026, 11, 10, tzinfo=KST), 60)
     assert maker.offset("VI-P-1101A", epochs).max() == 0.0
+
+
+# ---------------------------------------------------------------------------
+# 복합키 시나리오 (다중 공장 설계 §4.1, §4.3)
+# ---------------------------------------------------------------------------
+
+def test_event_with_only_tag_id_gets_equipment_filled(plant_path):
+    plant = load_plant(plant_path)
+    cfg = ScenarioConfig.model_validate({"events": [_ramp_event(related=[{"tag_id": "TI-C1101", "ratio": 0.5}])]})
+    cfg.validate_against(plant)
+    assert cfg.events[0].equip_id == "C-1101" and cfg.events[0].related[0].equip_id == "C-1101"
+    assert cfg.events[0].target_keys(plant) == [("C-1101", "VI-C1101")]
+
+
+def test_event_needs_equip_or_tag():
+    with pytest.raises(ValueError, match="equip_id or tag_id"):
+        ScenarioEvent(event_id="E", pattern="ramp", start=datetime(2026, 1, 1, tzinfo=KST), duration="1h")
+
+
+def test_random_quality_config_parses_durations():
+    cfg = ScenarioConfig.model_validate({"random_quality": {"uncertain_rate": 0.00003, "bad_segments_per_tag_week": 1.0,
+                                                            "bad_duration": ["30s", "400s"]}})
+    assert cfg.random_quality.bad_duration == (timedelta(seconds=30), timedelta(seconds=400))
