@@ -8,7 +8,7 @@ from datetime import datetime
 
 import numpy as np
 
-from common.config_models import EquipmentConfig, PlantConfig, RuntimeConfig, TagConfig
+from common.config_models import EquipmentConfig, PlantConfig, RuntimeConfig, TagConfig, TagKey
 from common.message import Sample
 from simulator.signal_model import SignalModel, epochs_range
 
@@ -35,32 +35,33 @@ class SampleGenerator:
         epochs = epochs_range(start, end, self.runtime.sample_interval_sec)
         if len(epochs) == 0:
             return []
-        # 태그별 열: (설비 ID, 태그, 이 태그가 걸리는 epoch 의 위치, 값, 품질, 존재 여부)
-        columns: list[tuple[str, TagConfig, np.ndarray, np.ndarray, list[str], np.ndarray]] = []
+        # 태그별 열: (키, 태그, 이 태그가 걸리는 epoch 의 위치, 값, 품질, 존재 여부)
+        columns: list[tuple[TagKey, TagConfig, np.ndarray, np.ndarray, list[str], np.ndarray]] = []
         for equip in self.equipment:
             for tag in equip.tags:
-                positions = np.flatnonzero(epochs % self.plant.tag_interval_sec(tag.tag_id, self.runtime.sample_interval_sec) == 0)
+                key = (equip.equip_id, tag.tag_id)
+                positions = np.flatnonzero(epochs % self.plant.tag_interval_sec(key, self.runtime.sample_interval_sec) == 0)
                 if len(positions) == 0:
                     continue
-                values, qualities, present = self._tag_series(equip, tag.tag_id, epochs[positions])
-                columns.append((equip.equip_id, tag, positions, values, qualities, present))
+                values, qualities, present = self._tag_series(equip, key, epochs[positions])
+                columns.append((key, tag, positions, values, qualities, present))
 
         tz = start.tzinfo
         rows: list[tuple[int, int, Sample]] = []     # (epoch 위치, 열 번호, 샘플) → 측정 시각 순 정렬용
-        for col, (equip_id, tag, positions, values, qualities, present) in enumerate(columns):
+        for col, ((equip_id, tag_id), tag, positions, values, qualities, present) in enumerate(columns):
             for j, i in enumerate(positions):
                 if not present[j]:
                     continue        # gap: 데이터 끊김
                 q = qualities[j]
-                value = round(float(values[j]), tag.decimals) if q == "Good" else None
+                value = round(float(values[j]), tag.decimals) if q in ("Good", "Uncertain") else None
                 ts = datetime.fromtimestamp(int(epochs[i]), tz)
                 # 값은 이미 검증된 설정에서 나오므로 model_construct 로 빠르게 만든다
-                rows.append((i, col, Sample.model_construct(equip_id=equip_id, tag_id=tag.tag_id, ts=ts, value=value, quality=q)))
+                rows.append((i, col, Sample.model_construct(equip_id=equip_id, tag_id=tag_id, ts=ts, value=value, quality=q)))
         rows.sort(key=lambda r: (r[0], r[1]))
         return [s for _, _, s in rows]
 
-    def _tag_series(self, equip: EquipmentConfig, tag_id: str, epochs: np.ndarray):
+    def _tag_series(self, equip: EquipmentConfig, key: TagKey, epochs: np.ndarray):
         """values, qualities, present 를 돌려준다. 시나리오가 없으면 정상 신호만."""
         if self.scenario is None:
-            return self.model.values(tag_id, epochs), ["Good"] * len(epochs), np.ones(len(epochs), dtype=bool)
-        return self.scenario.apply(self.model, equip, tag_id, epochs)
+            return self.model.values(key, epochs), ["Good"] * len(epochs), np.ones(len(epochs), dtype=bool)
+        return self.scenario.apply(self.model, equip, key, epochs)

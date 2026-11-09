@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from common.config_models import PlantConfig, TagConfig
+from common.config_models import PlantConfig, TagConfig, TagKey
 from simulator import patterns
 from simulator.signal_model import DAY_SEC, _seed_of
 
@@ -19,31 +19,31 @@ CHOICES = ("spike", "step")
 
 class RandomAnomalyMaker:
     def __init__(self, plant: PlantConfig, seed: int, rate_per_tag_day: float) -> None:
-        self._tags: dict[str, TagConfig] = plant.tag_by_id()
+        self._tags: dict[TagKey, TagConfig] = plant.tag_by_key()
         self._seed = seed
         self._rate = rate_per_tag_day
-        self._cache: dict[tuple[str, int], list[tuple[int, int, str, float]]] = {}
+        self._cache: dict[tuple[TagKey, int], list[tuple[int, int, str, float]]] = {}
 
-    def offset(self, tag_id: str, epochs: np.ndarray) -> np.ndarray:
+    def offset(self, key: TagKey, epochs: np.ndarray) -> np.ndarray:
         out = np.zeros(len(epochs))
         if self._rate <= 0 or len(epochs) == 0:
             return out
         for day in range(int(epochs.min() // DAY_SEC) - 1, int(epochs.max() // DAY_SEC) + 1):
-            for start, duration, pattern, magnitude in self._events(tag_id, day):
+            for start, duration, pattern, magnitude in self._events(key, day):
                 active = (epochs >= start) & (epochs < start + duration)
                 if active.any():
                     progress = np.clip((epochs - start) / duration, 0.0, 1.0)
                     out += np.where(active, patterns.shape(pattern, progress, epochs, magnitude), 0.0)
         return out
 
-    def _events(self, tag_id: str, day: int) -> list[tuple[int, int, str, float]]:
+    def _events(self, key: TagKey, day: int) -> list[tuple[int, int, str, float]]:
         """(시작 epoch, 길이 초, 패턴, 크기) 목록. 하루 단위로 만들어 캐시한다."""
-        key = (tag_id, day)
-        if key not in self._cache:
-            tag = self._tags[tag_id]
-            if tag.limits is None:          # 크기를 경고 상한으로 정하므로 한계값 없는 태그에는 넣지 않는다
-                self._cache[key] = []
-                return self._cache[key]
+        cache_key = (key, day)
+        if cache_key not in self._cache:
+            tag = self._tags[key]
+            if tag.limits is None or tag.limits.warn_hi is None:   # 크기를 경고 상한으로 정하므로 상한 없는 태그에는 넣지 않는다
+                self._cache[cache_key] = []
+                return self._cache[cache_key]
             rng = np.random.default_rng(_seed_of(self._seed, tag.seed_key, 3, day))
             events = []
             for _ in range(rng.poisson(self._rate)):
@@ -51,5 +51,5 @@ class RandomAnomalyMaker:
                 duration = int(rng.integers(MIN_DURATION_SEC, MAX_DURATION_SEC))
                 magnitude = (tag.limits.warn_hi - tag.normal.base) * rng.uniform(*MAGNITUDE_RATIO)
                 events.append((start, duration, CHOICES[int(rng.integers(len(CHOICES)))], magnitude))
-            self._cache[key] = events
-        return self._cache[key]
+            self._cache[cache_key] = events
+        return self._cache[cache_key]

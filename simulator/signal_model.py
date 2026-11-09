@@ -15,11 +15,11 @@ from typing import Callable
 
 import numpy as np
 
-from common.config_models import PlantConfig, TagConfig
+from common.config_models import PlantConfig, TagConfig, TagKey
 from common.sim_clock import KST
 
-# 편차 제공자: (tag_id, epoch 초 배열) → 그 태그 자신의 이상 편차 배열. 시나리오 쪽에서 넘겨준다.
-DeviationFn = Callable[[str, np.ndarray], np.ndarray]
+# 편차 제공자: ((equip_id, tag_id), epoch 초 배열) → 그 태그 자신의 이상 편차 배열. 시나리오 쪽에서 넘겨준다.
+DeviationFn = Callable[[TagKey, np.ndarray], np.ndarray]
 
 DRIFT_EPOCH = datetime(2020, 1, 1, tzinfo=KST).timestamp()   # 랜덤 워크의 고정 기준 시각
 DRIFT_BOUND_STEPS = 10          # 랜덤 워크 상·하한 = drift_sd × 이 값
@@ -105,27 +105,27 @@ class TagSignal:
 
 
 class SignalModel:
-    """구성안 전체의 정상 신호 + 연관 규칙."""
+    """구성안 전체의 정상 신호 + 연관 규칙. 태그는 (equip_id, tag_id) 키로 가리킨다."""
 
     def __init__(self, plant: PlantConfig, seed: int, sample_interval_sec: int) -> None:
         self.plant = plant
-        self._signals = {t.tag_id: TagSignal(t, seed, sample_interval_sec) for t in plant.all_tags()}
-        self._incoming: dict[str, list] = {}       # target tag_id → [Correlation]
+        self._signals = {key: TagSignal(t, seed, sample_interval_sec) for key, t in plant.tag_by_key().items()}
+        self._incoming: dict[TagKey, list[tuple[TagKey, float, int]]] = {}   # target → [(source, gain, lag_minutes)]
         for c in plant.correlations:
-            self._incoming.setdefault(c.target, []).append(c)
+            self._incoming.setdefault(plant.resolve(c.target), []).append((plant.resolve(c.source), c.gain, c.lag_minutes))
 
-    def normal_values(self, tag_id: str, epochs: np.ndarray) -> np.ndarray:
-        return self._signals[tag_id].normal(epochs)
+    def normal_values(self, key: TagKey, epochs: np.ndarray) -> np.ndarray:
+        return self._signals[key].normal(epochs)
 
-    def stopped_values(self, tag_id: str, epochs: np.ndarray) -> np.ndarray:
-        return self._signals[tag_id].stopped(epochs)
+    def stopped_values(self, key: TagKey, epochs: np.ndarray) -> np.ndarray:
+        return self._signals[key].stopped(epochs)
 
-    def values(self, tag_id: str, epochs: np.ndarray, deviation: DeviationFn | None = None) -> np.ndarray:
+    def values(self, key: TagKey, epochs: np.ndarray, deviation: DeviationFn | None = None) -> np.ndarray:
         """정상값 + 자신의 이상 편차 + 연관 규칙(원천 태그 편차 × gain, lag 만큼 늦게)."""
-        out = self.normal_values(tag_id, epochs)
+        out = self.normal_values(key, epochs)
         if deviation is None:
             return out
-        out = out + deviation(tag_id, epochs)
-        for c in self._incoming.get(tag_id, ()):
-            out = out + c.gain * deviation(c.source, epochs - c.lag_minutes * 60)
+        out = out + deviation(key, epochs)
+        for source, gain, lag_minutes in self._incoming.get(key, ()):
+            out = out + gain * deviation(source, epochs - lag_minutes * 60)
         return out

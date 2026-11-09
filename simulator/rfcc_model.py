@@ -17,7 +17,7 @@ from datetime import datetime
 
 import numpy as np
 
-from common.config_models import ConfigError, EquipmentConfig, PlantConfig, TagConfig
+from common.config_models import ConfigError, EquipmentConfig, PlantConfig, TagConfig, TagKey
 from common.sim_clock import KST
 from simulator.signal_model import DAY_SEC, SignalModel, _seed_of
 
@@ -29,10 +29,10 @@ AMBIENT_TEMP_C = 25.0           # 정지 상태 온도
 STOPPED_NOISE_RATIO = 0.3       # 정지 상태 잡음 비율
 KST_OFFSET_SEC = int(KST.utcoffset(None).total_seconds())
 
-TEMPERATURES = frozenset({"bearing_temp", "suction_temp", "discharge_temp", "oil_temp"})
+TEMPERATURES = frozenset({"bearing_temp", "suction_temp", "discharge_temp", "oil_temp", "process_temp"})
 SIGNAL_KINDS = TEMPERATURES | {"vibration", "shaft_vibration", "flow", "suction_pressure", "discharge_pressure",
-                               "current", "speed", "axial_position", "oil_pressure", "steam_pressure"}
-AIR_SHAFT_KINDS = frozenset({"blower", "expander"})     # 공기축: 속도 부하 계수 0.12, 나머지 0.25
+                               "differential_pressure", "current", "speed", "axial_position", "oil_pressure", "steam_pressure"}
+AIR_SHAFT_KINDS = frozenset({"blower", "expander", "fan"})     # 공기축: 속도 부하 계수 0.12, 나머지 0.25
 
 # 빠른 성분의 시정수(초)와 흰 잡음 비율. 기본은 z = AR(s, 6) + N(0, 0.12·s)
 _FAST = {kind: (80.0, 0.0) for kind in TEMPERATURES}
@@ -107,19 +107,20 @@ class RfccSignalModel(SignalModel):
         super().__init__(plant, seed, sample_interval_sec)
         self._seed = seed
         self._default_interval = sample_interval_sec
-        self._tags = plant.tag_by_id()
-        self._owner = plant.tag_owner()
+        self._tags = plant.tag_by_key()
+        self._equipment = plant.equipment_by_id()
         self._kind = {e.equip_id: plant.equipment_kind(e.equip_id) for e in plant.equipment}
         self._check_signals()
         self._load = _SlowProcess(_seed_of(seed, "load", _C_LOAD), *LOAD_OU)
         self._ambient = _SlowProcess(_seed_of(seed, "ambient", _C_AMBIENT), *AMBIENT_OU)
         self._local = {e.equip_id: _SlowProcess(_seed_of(seed, e.seed_key, _C_LOCAL), *LOCAL_OU) for e in plant.equipment}
-        self._slow: dict[str, _SlowProcess] = {}                  # tag_id → 진동 느린 성분
-        self._blocks: dict[str, dict[int, np.ndarray]] = {}       # tag_id → {날짜: 빠른 성분 블록}
+        self._slow: dict[str, _SlowProcess] = {}                  # 태그 seed_key → 진동 느린 성분
+        self._blocks: dict[str, dict[int, np.ndarray]] = {}       # 태그 seed_key → {날짜: 빠른 성분 블록}
         self._speed_source = self._resolve_speed_sources()
         self._formula = {
             "vibration": self._vibration, "shaft_vibration": self._vibration,
             "flow": self._flow, "suction_pressure": self._suction_pressure, "discharge_pressure": self._discharge_pressure,
+            "differential_pressure": self._differential_pressure,
             "current": self._current, "speed": self._speed, "axial_position": self._axial_position,
             "oil_pressure": self._oil_pressure, "steam_pressure": self._steam_pressure,
             **{kind: self._temperature for kind in TEMPERATURES},
@@ -127,28 +128,27 @@ class RfccSignalModel(SignalModel):
 
     # --- 검증 -------------------------------------------------------------
     def _check_signals(self) -> None:
-        for tag in self._tags.values():
+        for (equip_id, tag_id), tag in self._tags.items():
             if tag.signal not in SIGNAL_KINDS:
-                raise ConfigError(f"tag {tag.tag_id}: unknown signal kind {tag.signal} for signal_model rfcc")
+                raise ConfigError(f"tag {equip_id}/{tag_id}: unknown signal kind {tag.signal} for signal_model rfcc")
 
-    def _resolve_speed_sources(self) -> dict[str, TagConfig]:
-        """피구동 설비의 speed 태그 → 축을 공유하는 구동기(끝까지 따라간)의 speed 태그."""
-        by_id = self.plant.equipment_by_id()
+    def _resolve_speed_sources(self) -> dict[TagKey, tuple[EquipmentConfig, TagConfig]]:
+        """피구동 설비의 speed 태그 → 축을 공유하는 구동기(끝까지 따라간 설비)와 그 speed 태그."""
         speed_tag = {e.equip_id: next((t for t in e.tags if t.signal == "speed"), None) for e in self.plant.equipment}
-        source: dict[str, TagConfig] = {}
+        source: dict[TagKey, tuple[EquipmentConfig, TagConfig]] = {}
         for e in self.plant.equipment:
             own = speed_tag[e.equip_id]
             if own is None:
                 continue
             driver, seen = e, {e.equip_id}
             while driver.driven_by and speed_tag.get(driver.driven_by) is not None and driver.driven_by not in seen:
-                driver = by_id[driver.driven_by]
+                driver = self._equipment[driver.driven_by]
                 seen.add(driver.equip_id)
             shared = speed_tag[driver.equip_id]
             if shared.normal.base != own.normal.base:
                 raise ConfigError(f"equipment {e.equip_id}: speed base {own.normal.base} differs from driver "
                                   f"{driver.equip_id} ({shared.normal.base}); directly coupled shafts share one speed")
-            source[own.tag_id] = shared
+            source[(e.equip_id, own.tag_id)] = (driver, shared)
         return source
 
     @staticmethod
@@ -157,15 +157,15 @@ class RfccSignalModel(SignalModel):
             raise ConfigError("rfcc signal model cannot generate values before 2026-01-01 (KST), its fixed origin")
 
     # --- 공개 인터페이스 -------------------------------------------------------
-    def normal_values(self, tag_id: str, epochs: np.ndarray) -> np.ndarray:
+    def normal_values(self, key: TagKey, epochs: np.ndarray) -> np.ndarray:
         self._check_epochs(epochs)
-        tag = self._tags[tag_id]
-        return self._formula[tag.signal](tag, self._owner[tag_id], epochs)
+        tag = self._tags[key]
+        return self._formula[tag.signal](tag, self._equipment[key[0]], epochs)
 
-    def stopped_values(self, tag_id: str, epochs: np.ndarray) -> np.ndarray:
+    def stopped_values(self, key: TagKey, epochs: np.ndarray) -> np.ndarray:
         """정지 상태: 온도는 주변 온도, 축 위치는 기준값, 나머지는 0. 잡음은 작게 남긴다."""
         self._check_epochs(epochs)
-        tag = self._tags[tag_id]
+        tag = self._tags[key]
         rest = AMBIENT_TEMP_C if tag.signal in TEMPERATURES else tag.normal.base if tag.signal == "axial_position" else 0.0
         return rest + self._fast(tag, epochs) * STOPPED_NOISE_RATIO
 
@@ -211,7 +211,7 @@ class RfccSignalModel(SignalModel):
 
     def _block(self, tag: TagConfig, day: int, interval: int) -> np.ndarray:
         """하루 블록 = AR(1) 잡음 (+ 흰 잡음). 예열은 전날 혁신값이라 경계에서 끊기지 않는다."""
-        cache = self._blocks.setdefault(tag.tag_id, {})
+        cache = self._blocks.setdefault(tag.seed_key, {})
         if day not in cache:
             tau, white = _FAST.get(tag.signal, _FAST_DEFAULT)
             n = DAY_SEC // interval
@@ -235,11 +235,11 @@ class RfccSignalModel(SignalModel):
 
     # --- 태그 종류별 식 -----------------------------------------------------
     def _vibration(self, tag: TagConfig, equip: EquipmentConfig, epochs: np.ndarray) -> np.ndarray:
-        if tag.tag_id not in self._slow:
+        if tag.seed_key not in self._slow:
             ratio, tau = VIBRATION_SLOW_OU_RATIO
-            self._slow[tag.tag_id] = _SlowProcess(_seed_of(self._seed, tag.seed_key, _C_SLOW), ratio * tag.normal.noise_sd, tau)
+            self._slow[tag.seed_key] = _SlowProcess(_seed_of(self._seed, tag.seed_key, _C_SLOW), ratio * tag.normal.noise_sd, tau)
         b = tag.normal.base
-        return b * (1 + 0.7 * self.local(equip, epochs)) + self._fast(tag, epochs) + self._slow[tag.tag_id].at(epochs)
+        return b * (1 + 0.7 * self.local(equip, epochs)) + self._fast(tag, epochs) + self._slow[tag.seed_key].at(epochs)
 
     def _temperature(self, tag: TagConfig, equip: EquipmentConfig, epochs: np.ndarray) -> np.ndarray:
         """b + LP₂₄₀(k_load·local + k_amb·A) + 느린 잡음. 강제항은 태그 주기 격자에서 예열 구간을 붙여 평가한다."""
@@ -266,13 +266,17 @@ class RfccSignalModel(SignalModel):
             return b - (b - suction.normal.base) * 0.4 * self.local(equip, epochs) + self._fast(tag, epochs)
         return b * (1 + 0.2 * self.local(equip, epochs)) + self._fast(tag, epochs)
 
+    def _differential_pressure(self, tag: TagConfig, equip: EquipmentConfig, epochs: np.ndarray) -> np.ndarray:
+        """차압(팬 전후 등): 부하에 비례."""
+        return tag.normal.base * (1 + 0.2 * self.local(equip, epochs)) + self._fast(tag, epochs)
+
     def _current(self, tag: TagConfig, equip: EquipmentConfig, epochs: np.ndarray) -> np.ndarray:
         return tag.normal.base * (1 + 0.75 * self.local(equip, epochs)) + self._fast(tag, epochs)
 
     def _speed(self, tag: TagConfig, equip: EquipmentConfig, epochs: np.ndarray) -> np.ndarray:
         """축 속도는 공정 부하 L 에만 반응한다. 같은 축의 설비는 구동기 태그로 같은 값을 만든다."""
-        shared = self._speed_source[tag.tag_id]
-        k = 0.12 if self._kind[self._owner[shared.tag_id].equip_id] in AIR_SHAFT_KINDS else 0.25
+        driver, shared = self._speed_source[(equip.equip_id, tag.tag_id)]
+        k = 0.12 if self._kind[driver.equip_id] in AIR_SHAFT_KINDS else 0.25
         return shared.normal.base * (1 + k * self.load(epochs)) + self._fast(shared, epochs)
 
     def _axial_position(self, tag: TagConfig, equip: EquipmentConfig, epochs: np.ndarray) -> np.ndarray:
