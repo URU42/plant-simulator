@@ -41,6 +41,9 @@ class RandomAnomalyMaker:
         key = (tag_id, day)
         if key not in self._cache:
             tag = self._tags[tag_id]
+            if tag.limits is None:          # 크기를 경고 상한으로 정하므로 한계값 없는 태그에는 넣지 않는다
+                self._cache[key] = []
+                return self._cache[key]
             rng = np.random.default_rng(_seed_of(self._seed, tag.seed_key, 3, day))
             events = []
             for _ in range(rng.poisson(self._rate)):

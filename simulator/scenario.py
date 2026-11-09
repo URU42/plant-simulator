@@ -90,12 +90,13 @@ class Scenario:
             values = np.where(stopped, model.stopped_values(tag_id, epochs), values)
 
         for ev in self._sample_events.get(tag_id, ()):
-            active = _mask(epochs, [(ev.start.timestamp(), ev.end.timestamp())])
+            occurrence, active = _event_window(ev, epochs)
             if not active.any():
                 continue
             if ev.pattern == "freeze":
-                frozen = model.values(tag_id, np.array([int(ev.start.timestamp())]), deviation=self.deviation)[0]
-                values = np.where(active, frozen, values)
+                for occ in np.unique(occurrence[active]):      # 회차마다 그 시작 시각의 값으로 멈춘다
+                    frozen = model.values(tag_id, np.array([int(occ)]), deviation=self.deviation)[0]
+                    values = np.where(active & (occurrence == occ), frozen, values)
             elif ev.pattern == "quality":
                 for i in np.flatnonzero(active):
                     qualities[i] = ev.quality
@@ -108,13 +109,19 @@ class Scenario:
         return make_signal_model(self.plant, self.runtime.seed, self.runtime.sample_interval_sec)
 
 
+def _event_window(ev: ScenarioEvent, epochs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(각 epoch 의 회차 시작, 활성 마스크). 회차 길이는 start→end (recovered_at 포함) 와 같다."""
+    occurrence = ev.occurrence_start(epochs)
+    length = ev.end.timestamp() - ev.start.timestamp()
+    return occurrence, (epochs >= occurrence) & (epochs < occurrence + length)
+
+
 def _event_offset(ev: ScenarioEvent, epochs: np.ndarray) -> np.ndarray:
-    """이벤트 구간 안에서의 편차. duration 이 지나면 recovered_at 까지 마지막 값을 유지한다."""
-    start, end = ev.start.timestamp(), ev.end.timestamp()
-    active = (epochs >= start) & (epochs < end)
+    """이벤트 구간 안에서의 편차. duration 이 지나면 recovered_at 까지 마지막 값을 유지한다. repeat_every 면 회차마다."""
+    occurrence, active = _event_window(ev, epochs)
     if not active.any():
         return np.zeros(len(epochs))
-    progress = np.clip((epochs - start) / ev.duration.total_seconds(), 0.0, 1.0)
+    progress = np.clip((epochs - occurrence) / ev.duration.total_seconds(), 0.0, 1.0)
     return np.where(active, patterns.shape(ev.pattern, progress, epochs, ev.magnitude), 0.0)
 
 
