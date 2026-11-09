@@ -1,7 +1,7 @@
 # 구성안: RHDS (상압 잔사유 수첨탈황) (PL-RHDS) — 다중 공장 설계 docs/superpowers/specs/2026-11-09-multi-plant-design.md
 # - 출처: RHDS_VRDS_v3/data/RHDS_*.xlsx 의 `설비 설명`(계층)·`설비 태그`(태그명·설명·단위·정상 기준·경고/알람/정지 상·하한·근거) 시트. 마스터 값은 그대로.
 # - 태그명은 같은 설비 안에서만 고유하다 (복합키 (equip_id, tag_id)). 한계값·정상 기준·근거는 자료 그대로이며 빈 칸은 적지 않았다.
-# - normal.base 는 데이터 첫 6시간 Good·Uncertain 평균, noise_sd 는 첫 1시간 연속 차분 표준편차를 종류별 상수로 나눈 값, decimals 는 데이터의 소수 자릿수.
+# - normal.base 는 데이터 첫 6시간 Good·Uncertain 평균, noise_sd 는 첫 1시간을 추세 제거한 표준편차의 0.9배, decimals 는 데이터의 소수 자릿수.
 # - 온도 10초, 나머지 1초. 신호 모델은 rfcc. seed_key 는 공장 접두어를 붙여 다른 공장과 겹치지 않는다.
 
 plant:
@@ -76,7 +76,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r001,
-          normal: { base: 1.651, noise_sd: 0.05915 } }
+          normal: { base: 1.651, noise_sd: 0.041514 } }
       - { tag_id: TI-B-3101,
           signal: bearing_temp,
           unit: "DEG C",
@@ -86,7 +86,7 @@ equipment:
           interval_sec: 10,
           decimals: 1,
           seed_key: rhds-r002,
-          normal: { base: 63.515, noise_sd: 0.145198 } }
+          normal: { base: 63.515, noise_sd: 0.076839 } }
       - { tag_id: PI-S-3101,
           signal: suction_pressure,
           unit: "bar(g)",
@@ -96,7 +96,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r003,
-          normal: { base: 5.2, noise_sd: 0.016568 } }
+          normal: { base: 5.2, noise_sd: 0.015576 } }
       - { tag_id: PI-D-3101,
           signal: discharge_pressure,
           unit: "bar(g)",
@@ -106,7 +106,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r004,
-          normal: { base: 155.029, noise_sd: 0.100858 } }
+          normal: { base: 155.029, noise_sd: 0.108851 } }
       - { tag_id: FI-3101,
           signal: flow,
           unit: "m3/h",
@@ -116,7 +116,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: rhds-r005,
-          normal: { base: 210.515, noise_sd: 0.387308 } }
+          normal: { base: 210.515, noise_sd: 0.800515 } }
       - { tag_id: II-3101,
           signal: current,
           unit: "A",
@@ -126,7 +126,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: rhds-r006,
-          normal: { base: 165.257, noise_sd: 0.303178 } }
+          normal: { base: 165.257, noise_sd: 0.429892 } }
   # ---------------- UNIT-RHDS-02 보충 수소 압축 ----------------
   - equip_id: C-3102
     name: "보충 수소 압축기 (Make-up Hydrogen Compressor)"
@@ -143,7 +143,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r007,
-          normal: { base: 2.302, noise_sd: 0.083736 } }
+          normal: { base: 2.302, noise_sd: 0.057704 } }
       - { tag_id: TI-B-3102,
           signal: bearing_temp,
           unit: "DEG C",
@@ -153,7 +153,7 @@ equipment:
           interval_sec: 10,
           decimals: 1,
           seed_key: rhds-r008,
-          normal: { base: 61.518, noise_sd: 0.141295 } }
+          normal: { base: 61.518, noise_sd: 0.075302 } }
       - { tag_id: PI-S-3102,
           signal: suction_pressure,
           unit: "bar(g)",
@@ -163,7 +163,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r009,
-          normal: { base: 24.997, noise_sd: 0.030137 } }
+          normal: { base: 24.997, noise_sd: 0.032031 } }
       - { tag_id: PI-D-3102,
           signal: discharge_pressure,
           unit: "bar(g)",
@@ -173,7 +173,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r010,
-          normal: { base: 158.026, noise_sd: 0.118123 } }
+          normal: { base: 158.026, noise_sd: 0.127744 } }
       - { tag_id: TI-S-3102,
           signal: suction_temp,
           unit: "DEG C",
@@ -183,7 +183,7 @@ equipment:
           interval_sec: 10,
           decimals: 1,
           seed_key: rhds-r011,
-          normal: { base: 36.624, noise_sd: 0.130365 } }
+          normal: { base: 36.624, noise_sd: 0.06887 } }
       - { tag_id: TI-D-3102,
           signal: discharge_temp,
           unit: "DEG C",
@@ -193,7 +193,7 @@ equipment:
           interval_sec: 10,
           decimals: 1,
           seed_key: rhds-r012,
-          normal: { base: 117.623, noise_sd: 0.184512 } }
+          normal: { base: 117.623, noise_sd: 0.153669 } }
       - { tag_id: FI-3102,
           signal: flow,
           unit: "Nm3/h",
@@ -203,7 +203,7 @@ equipment:
           interval_sec: 1,
           decimals: 0,
           seed_key: rhds-r013,
-          normal: { base: 12028.495, noise_sd: 21.235716 } }
+          normal: { base: 12028.495, noise_sd: 49.235264 } }
       - { tag_id: SI-3102,
           signal: speed,
           unit: "rpm",
@@ -213,7 +213,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: rhds-r014,
-          normal: { base: 589.993, noise_sd: 0.318218 } }
+          normal: { base: 589.993, noise_sd: 0.231002 } }
   # ---------------- UNIT-RHDS-03 수소 순환 ----------------
   - equip_id: C-3101
     name: "순환가스 압축기 (Recycle Gas Compressor)"
@@ -230,7 +230,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: rhds-r015,
-          normal: { base: 33.021, noise_sd: 1.040492 } }
+          normal: { base: 33.021, noise_sd: 0.742242 } }
       - { tag_id: TI-B-3101,
           signal: bearing_temp,
           unit: "DEG C",
@@ -240,7 +240,7 @@ equipment:
           interval_sec: 10,
           decimals: 1,
           seed_key: rhds-r016,
-          normal: { base: 76.525, noise_sd: 0.139025 } }
+          normal: { base: 76.525, noise_sd: 0.075349 } }
       - { tag_id: ZI-3101,
           signal: axial_position,
           unit: "mm",
@@ -250,7 +250,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: rhds-r017,
-          normal: { base: 0.05, noise_sd: 0.002986 } }
+          normal: { base: 0.05, noise_sd: 0.001409 } }
       - { tag_id: PI-S-3101,
           signal: suction_pressure,
           unit: "bar(g)",
@@ -260,7 +260,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r018,
-          normal: { base: 139.983, noise_sd: 0.067289 } }
+          normal: { base: 139.983, noise_sd: 0.077869 } }
       - { tag_id: PI-D-3101,
           signal: discharge_pressure,
           unit: "bar(g)",
@@ -270,7 +270,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r019,
-          normal: { base: 153.027, noise_sd: 0.075571 } }
+          normal: { base: 153.027, noise_sd: 0.091194 } }
       - { tag_id: TI-S-3101,
           signal: suction_temp,
           unit: "DEG C",
@@ -280,7 +280,7 @@ equipment:
           interval_sec: 10,
           decimals: 1,
           seed_key: rhds-r020,
-          normal: { base: 45.617, noise_sd: 0.110763 } }
+          normal: { base: 45.617, noise_sd: 0.048039 } }
       - { tag_id: TI-D-3101,
           signal: discharge_temp,
           unit: "DEG C",
@@ -290,7 +290,7 @@ equipment:
           interval_sec: 10,
           decimals: 1,
           seed_key: rhds-r021,
-          normal: { base: 67.623, noise_sd: 0.141563 } }
+          normal: { base: 67.623, noise_sd: 0.125332 } }
       - { tag_id: FI-3101,
           signal: flow,
           unit: "Nm3/h",
@@ -300,7 +300,7 @@ equipment:
           interval_sec: 1,
           decimals: 0,
           seed_key: rhds-r022,
-          normal: { base: 150367.09, noise_sd: 190.737122 } }
+          normal: { base: 150367.09, noise_sd: 596.697983 } }
       - { tag_id: SI-3101,
           signal: speed,
           unit: "rpm",
@@ -310,7 +310,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: rhds-r023,
-          normal: { base: 9203.301, noise_sd: 2.684643 } }
+          normal: { base: 9203.301, noise_sd: 5.147074 } }
       - { tag_id: PI-LO-3101,
           signal: oil_pressure,
           unit: "bar(g)",
@@ -320,7 +320,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r024,
-          normal: { base: 2.7, noise_sd: 0.00902 } }
+          normal: { base: 2.7, noise_sd: 0.006831 } }
       - { tag_id: TI-LO-3101,
           signal: oil_temp,
           unit: "DEG C",
@@ -330,7 +330,7 @@ equipment:
           interval_sec: 10,
           decimals: 1,
           seed_key: rhds-r025,
-          normal: { base: 43.665, noise_sd: 0.101399 } }
+          normal: { base: 43.665, noise_sd: 0.048215 } }
   # ---------------- UNIT-RHDS-04 연소공기 공급 ----------------
   - equip_id: F-3101
     name: "가열로 강제통풍 팬 (FD Fan)"
@@ -347,7 +347,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r026,
-          normal: { base: 1.9, noise_sd: 0.071449 } }
+          normal: { base: 1.9, noise_sd: 0.050449 } }
       - { tag_id: TI-B-3101,
           signal: bearing_temp,
           unit: "DEG C",
@@ -357,7 +357,7 @@ equipment:
           interval_sec: 10,
           decimals: 1,
           seed_key: rhds-r027,
-          normal: { base: 54.516, noise_sd: 0.142516 } }
+          normal: { base: 54.516, noise_sd: 0.062049 } }
       - { tag_id: SI-3101,
           signal: speed,
           unit: "rpm",
@@ -367,7 +367,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: rhds-r028,
-          normal: { base: 1461.175, noise_sd: 1.658425 } }
+          normal: { base: 1461.175, noise_sd: 2.15289 } }
       - { tag_id: II-3101,
           signal: current,
           unit: "A",
@@ -377,7 +377,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: rhds-r029,
-          normal: { base: 58.141, noise_sd: 0.223165 } }
+          normal: { base: 58.141, noise_sd: 0.250422 } }
       - { tag_id: FI-3101,
           signal: flow,
           unit: "m3/h",
@@ -387,7 +387,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: rhds-r030,
-          normal: { base: 48043.238, noise_sd: 101.023467 } }
+          normal: { base: 48043.238, noise_sd: 117.877801 } }
       - { tag_id: PDI-3101,
           signal: differential_pressure,
           unit: "Pa",
@@ -397,7 +397,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: rhds-r031,
-          normal: { base: 2203.681, noise_sd: 10.466695 } }
+          normal: { base: 2203.681, noise_sd: 8.873316 } }
   # ---------------- UNIT-RHDS-05 잔사유 이송 ----------------
   - equip_id: P-3102
     name: "고온 잔사유 이송 펌프 (Hot Residue Pump)"
@@ -414,7 +414,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r032,
-          normal: { base: 1.85, noise_sd: 0.065121 } }
+          normal: { base: 1.85, noise_sd: 0.046308 } }
       - { tag_id: TI-B-3102,
           signal: bearing_temp,
           unit: "DEG C",
@@ -424,7 +424,7 @@ equipment:
           interval_sec: 10,
           decimals: 1,
           seed_key: rhds-r033,
-          normal: { base: 72.515, noise_sd: 0.141293 } }
+          normal: { base: 72.515, noise_sd: 0.073057 } }
       - { tag_id: TI-F-3102,
           signal: process_temp,
           unit: "DEG C",
@@ -434,7 +434,7 @@ equipment:
           interval_sec: 10,
           decimals: 1,
           seed_key: rhds-r034,
-          normal: { base: 279.739, noise_sd: 0.166608 } }
+          normal: { base: 279.739, noise_sd: 0.123506 } }
       - { tag_id: PI-S-3102,
           signal: suction_pressure,
           unit: "bar(g)",
@@ -444,7 +444,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r035,
-          normal: { base: 4.6, noise_sd: 0.016551 } }
+          normal: { base: 4.6, noise_sd: 0.016303 } }
       - { tag_id: PI-D-3102,
           signal: discharge_pressure,
           unit: "bar(g)",
@@ -454,7 +454,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r036,
-          normal: { base: 19.001, noise_sd: 0.034111 } }
+          normal: { base: 19.001, noise_sd: 0.035122 } }
       - { tag_id: FI-3102,
           signal: flow,
           unit: "m3/h",
@@ -464,7 +464,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: rhds-r037,
-          normal: { base: 185.451, noise_sd: 0.385921 } }
+          normal: { base: 185.451, noise_sd: 0.75222 } }
       - { tag_id: II-3102,
           signal: current,
           unit: "A",
@@ -474,7 +474,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: rhds-r038,
-          normal: { base: 112.178, noise_sd: 0.274789 } }
+          normal: { base: 112.178, noise_sd: 0.320789 } }
   # ---------------- UNIT-RHDS-06 환류·순환 ----------------
   - equip_id: P-3103
     name: "분별탑 환류 펌프 (Fractionator Reflux Pump)"
@@ -491,7 +491,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r039,
-          normal: { base: 1.351, noise_sd: 0.052093 } }
+          normal: { base: 1.351, noise_sd: 0.035681 } }
       - { tag_id: TI-B-3103,
           signal: bearing_temp,
           unit: "DEG C",
@@ -501,7 +501,7 @@ equipment:
           interval_sec: 10,
           decimals: 1,
           seed_key: rhds-r040,
-          normal: { base: 57.513, noise_sd: 0.13379 } }
+          normal: { base: 57.513, noise_sd: 0.063216 } }
       - { tag_id: PI-S-3103,
           signal: suction_pressure,
           unit: "bar(g)",
@@ -511,7 +511,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r041,
-          normal: { base: 3.1, noise_sd: 0.012939 } }
+          normal: { base: 3.1, noise_sd: 0.011183 } }
       - { tag_id: PI-D-3103,
           signal: discharge_pressure,
           unit: "bar(g)",
@@ -521,7 +521,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r042,
-          normal: { base: 11.001, noise_sd: 0.022274 } }
+          normal: { base: 11.001, noise_sd: 0.023134 } }
       - { tag_id: FI-3103,
           signal: flow,
           unit: "m3/h",
@@ -531,4 +531,4 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: rhds-r043,
-          normal: { base: 95.215, noise_sd: 0.264158 } }
+          normal: { base: 95.215, noise_sd: 0.414413 } }

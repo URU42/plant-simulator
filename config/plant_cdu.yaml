@@ -1,7 +1,7 @@
 # 구성안: CDU (상압증류) (PL-CDU) — 다중 공장 설계 docs/superpowers/specs/2026-11-09-multi-plant-design.md
 # - 출처: cdu-sample/data/CDU_*.xlsx 의 `설비 설명`(계층)·`설비 태그`(태그명·설명·단위·정상 기준·경고/알람/정지 상·하한·근거) 시트. 마스터 값은 그대로.
 # - 태그명은 같은 설비 안에서만 고유하다 (복합키 (equip_id, tag_id)). 한계값·정상 기준·근거는 자료 그대로이며 빈 칸은 적지 않았다.
-# - normal.base 는 데이터 첫 6시간 Good·Uncertain 평균, noise_sd 는 첫 1시간 연속 차분 표준편차를 종류별 상수로 나눈 값, decimals 는 데이터의 소수 자릿수.
+# - normal.base 는 데이터 첫 6시간 Good·Uncertain 평균, noise_sd 는 첫 1시간을 추세 제거한 표준편차의 0.9배, decimals 는 데이터의 소수 자릿수.
 # - 온도 10초, 나머지 1초. 신호 모델은 rfcc. seed_key 는 공장 접두어를 붙여 다른 공장과 겹치지 않는다.
 
 plant:
@@ -65,7 +65,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r001,
-          normal: { base: 1.62006, noise_sd: 0.178314 } }
+          normal: { base: 1.62006, noise_sd: 0.067284 } }
       - { tag_id: VI-8101B,
           signal: vibration,
           unit: "mm/s RMS",
@@ -76,7 +76,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r002,
-          normal: { base: 1.29802, noise_sd: 0.141964 } }
+          normal: { base: 1.29802, noise_sd: 0.053594 } }
       - { tag_id: TI-8101A,
           signal: bearing_temp,
           unit: "DEG C",
@@ -87,7 +87,7 @@ equipment:
           interval_sec: 10,
           decimals: 4,
           seed_key: cdu-r003,
-          normal: { base: 57.58145, noise_sd: 0.343903 } }
+          normal: { base: 57.58145, noise_sd: 0.139434 } }
       - { tag_id: PI-8101A,
           signal: suction_pressure,
           unit: "kg/cm2(g)",
@@ -98,7 +98,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r004,
-          normal: { base: 2.79272, noise_sd: 0.020472 } }
+          normal: { base: 2.79272, noise_sd: 0.008147 } }
       - { tag_id: PI-8101B,
           signal: discharge_pressure,
           unit: "kg/cm2(g)",
@@ -109,7 +109,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r005,
-          normal: { base: 27.94483, noise_sd: 0.206052 } }
+          normal: { base: 27.94483, noise_sd: 0.092463 } }
       - { tag_id: FI-8101A,
           signal: flow,
           unit: "m3/h",
@@ -120,7 +120,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r006,
-          normal: { base: 400.37491, noise_sd: 3.930392 } }
+          normal: { base: 400.37491, noise_sd: 1.577389 } }
       - { tag_id: II-8101A,
           signal: current,
           unit: "A",
@@ -131,7 +131,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r007,
-          normal: { base: 105.43458, noise_sd: 1.025955 } }
+          normal: { base: 105.43458, noise_sd: 0.410921 } }
   # ---------------- UNIT-CDU-02 U-812 ----------------
   - equip_id: P-8102A
     name: "탈염 세정수 펌프 A (Desalter Wash Water Pump A)"
@@ -149,7 +149,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r008,
-          normal: { base: 1.37418, noise_sd: 0.151605 } }
+          normal: { base: 1.37418, noise_sd: 0.056031 } }
       - { tag_id: VI-8102B,
           signal: vibration,
           unit: "mm/s RMS",
@@ -160,7 +160,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r009,
-          normal: { base: 1.15876, noise_sd: 0.127197 } }
+          normal: { base: 1.15876, noise_sd: 0.046541 } }
       - { tag_id: TI-8102A,
           signal: bearing_temp,
           unit: "DEG C",
@@ -171,7 +171,7 @@ equipment:
           interval_sec: 10,
           decimals: 4,
           seed_key: cdu-r010,
-          normal: { base: 50.71225, noise_sd: 0.351205 } }
+          normal: { base: 50.71225, noise_sd: 0.114847 } }
       - { tag_id: PI-8102B,
           signal: discharge_pressure,
           unit: "kg/cm2(g)",
@@ -182,7 +182,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r011,
-          normal: { base: 17.47705, noise_sd: 0.127898 } }
+          normal: { base: 17.47705, noise_sd: 0.05323 } }
       - { tag_id: FI-8102A,
           signal: flow,
           unit: "m3/h",
@@ -193,7 +193,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r012,
-          normal: { base: 40.04873, noise_sd: 0.387847 } }
+          normal: { base: 40.04873, noise_sd: 0.165752 } }
       - { tag_id: II-8102A,
           signal: current,
           unit: "A",
@@ -204,7 +204,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r013,
-          normal: { base: 149.71886, noise_sd: 1.478729 } }
+          normal: { base: 149.71886, noise_sd: 0.570531 } }
   # ---------------- UNIT-CDU-03 U-821 ----------------
   - equip_id: F-8201
     name: "가열로 강제 통풍 팬 (Crude Heater FD Fan)"
@@ -222,7 +222,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r014,
-          normal: { base: 2.06853, noise_sd: 0.226782 } }
+          normal: { base: 2.06853, noise_sd: 0.080754 } }
       - { tag_id: VI-8201B,
           signal: vibration,
           unit: "mm/s RMS",
@@ -233,7 +233,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r015,
-          normal: { base: 1.72743, noise_sd: 0.189185 } }
+          normal: { base: 1.72743, noise_sd: 0.070722 } }
       - { tag_id: TI-8201A,
           signal: bearing_temp,
           unit: "DEG C",
@@ -244,7 +244,7 @@ equipment:
           interval_sec: 10,
           decimals: 4,
           seed_key: cdu-r016,
-          normal: { base: 59.65683, noise_sd: 0.34519 } }
+          normal: { base: 59.65683, noise_sd: 0.129919 } }
       - { tag_id: SI-8201A,
           signal: speed,
           unit: "rpm",
@@ -255,7 +255,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r017,
-          normal: { base: 1188.00524, noise_sd: 1.880081 } }
+          normal: { base: 1188.00524, noise_sd: 0.722087 } }
       - { tag_id: II-8201A,
           signal: current,
           unit: "A",
@@ -266,7 +266,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r018,
-          normal: { base: 46.64873, noise_sd: 0.451406 } }
+          normal: { base: 46.64873, noise_sd: 0.175422 } }
       - { tag_id: FI-8201A,
           signal: flow,
           unit: "Nm3/h",
@@ -277,7 +277,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r019,
-          normal: { base: 118797.58023, noise_sd: 857.354585 } }
+          normal: { base: 118797.58023, noise_sd: 386.324684 } }
       - { tag_id: PDI-8201A,
           signal: differential_pressure,
           unit: "mmH2O",
@@ -288,7 +288,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r020,
-          normal: { base: 185.38668, noise_sd: 1.959658 } }
+          normal: { base: 185.38668, noise_sd: 1.076947 } }
   # ---------------- UNIT-CDU-04 U-831 ----------------
   - equip_id: P-8301A
     name: "중간 순환환류 펌프 A (Middle Pumparound Pump A)"
@@ -306,7 +306,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r021,
-          normal: { base: 1.50279, noise_sd: 0.164224 } }
+          normal: { base: 1.50279, noise_sd: 0.060731 } }
       - { tag_id: VI-8301B,
           signal: vibration,
           unit: "mm/s RMS",
@@ -317,7 +317,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r022,
-          normal: { base: 1.18705, noise_sd: 0.131094 } }
+          normal: { base: 1.18705, noise_sd: 0.048564 } }
       - { tag_id: TI-8301A,
           signal: bearing_temp,
           unit: "DEG C",
@@ -328,7 +328,7 @@ equipment:
           interval_sec: 10,
           decimals: 4,
           seed_key: cdu-r023,
-          normal: { base: 57.87385, noise_sd: 0.341446 } }
+          normal: { base: 57.87385, noise_sd: 0.124816 } }
       - { tag_id: FI-8301A,
           signal: flow,
           unit: "m3/h",
@@ -339,7 +339,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r024,
-          normal: { base: 520.44259, noise_sd: 5.062245 } }
+          normal: { base: 520.44259, noise_sd: 2.007791 } }
       - { tag_id: PI-8301A,
           signal: suction_pressure,
           unit: "kg/cm2(g)",
@@ -350,7 +350,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r025,
-          normal: { base: 2.5999, noise_sd: 0.018712 } }
+          normal: { base: 2.5999, noise_sd: 0.009185 } }
       - { tag_id: PI-8301B,
           signal: discharge_pressure,
           unit: "kg/cm2(g)",
@@ -361,7 +361,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r026,
-          normal: { base: 8.97073, noise_sd: 0.066279 } }
+          normal: { base: 8.97073, noise_sd: 0.027826 } }
       - { tag_id: TI-8301B,
           signal: process_temp,
           unit: "DEG C",
@@ -372,7 +372,7 @@ equipment:
           interval_sec: 10,
           decimals: 4,
           seed_key: cdu-r027,
-          normal: { base: 215.51923, noise_sd: 0.434913 } }
+          normal: { base: 215.51923, noise_sd: 0.191296 } }
   # ---------------- UNIT-CDU-05 U-832 ----------------
   - equip_id: P-8302A
     name: "탑정 환류 펌프 A (Overhead Reflux Pump A)"
@@ -390,7 +390,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r028,
-          normal: { base: 1.27068, noise_sd: 0.139224 } }
+          normal: { base: 1.27068, noise_sd: 0.051148 } }
       - { tag_id: VI-8302B,
           signal: vibration,
           unit: "mm/s RMS",
@@ -401,7 +401,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r029,
-          normal: { base: 1.12685, noise_sd: 0.124533 } }
+          normal: { base: 1.12685, noise_sd: 0.044983 } }
       - { tag_id: TI-8302A,
           signal: bearing_temp,
           unit: "DEG C",
@@ -412,7 +412,7 @@ equipment:
           interval_sec: 10,
           decimals: 4,
           seed_key: cdu-r030,
-          normal: { base: 50.21615, noise_sd: 0.353077 } }
+          normal: { base: 50.21615, noise_sd: 0.130136 } }
       - { tag_id: PI-8302A,
           signal: suction_pressure,
           unit: "kg/cm2(g)",
@@ -423,7 +423,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r031,
-          normal: { base: 0.95014, noise_sd: 0.006871 } }
+          normal: { base: 0.95014, noise_sd: 0.002829 } }
       - { tag_id: PI-8302B,
           signal: discharge_pressure,
           unit: "kg/cm2(g)",
@@ -434,7 +434,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r032,
-          normal: { base: 6.46938, noise_sd: 0.047352 } }
+          normal: { base: 6.46938, noise_sd: 0.020005 } }
       - { tag_id: FI-8302A,
           signal: flow,
           unit: "m3/h",
@@ -445,7 +445,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r033,
-          normal: { base: 295.14223, noise_sd: 2.88231 } }
+          normal: { base: 295.14223, noise_sd: 1.179184 } }
   # ---------------- UNIT-CDU-06 U-833 ----------------
   - equip_id: P-8303A
     name: "상압탑 하부 펌프 A (Atmospheric Bottoms Pump A)"
@@ -463,7 +463,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r034,
-          normal: { base: 1.74439, noise_sd: 0.192175 } }
+          normal: { base: 1.74439, noise_sd: 0.06939 } }
       - { tag_id: VI-8303B,
           signal: vibration,
           unit: "mm/s RMS",
@@ -474,7 +474,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r035,
-          normal: { base: 1.47408, noise_sd: 0.162155 } }
+          normal: { base: 1.47408, noise_sd: 0.06023 } }
       - { tag_id: TI-8303A,
           signal: bearing_temp,
           unit: "DEG C",
@@ -485,7 +485,7 @@ equipment:
           interval_sec: 10,
           decimals: 4,
           seed_key: cdu-r036,
-          normal: { base: 62.41736, noise_sd: 0.3483 } }
+          normal: { base: 62.41736, noise_sd: 0.121002 } }
       - { tag_id: TI-8303B,
           signal: process_temp,
           unit: "DEG C",
@@ -496,7 +496,7 @@ equipment:
           interval_sec: 10,
           decimals: 4,
           seed_key: cdu-r037,
-          normal: { base: 343.30008, noise_sd: 0.571702 } }
+          normal: { base: 343.30008, noise_sd: 0.316408 } }
       - { tag_id: PI-8303A,
           signal: suction_pressure,
           unit: "kg/cm2(g)",
@@ -507,7 +507,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r038,
-          normal: { base: 2.09823, noise_sd: 0.015474 } }
+          normal: { base: 2.09823, noise_sd: 0.006655 } }
       - { tag_id: PI-8303B,
           signal: discharge_pressure,
           unit: "kg/cm2(g)",
@@ -518,7 +518,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r039,
-          normal: { base: 13.96223, noise_sd: 0.103089 } }
+          normal: { base: 13.96223, noise_sd: 0.043564 } }
       - { tag_id: FI-8303A,
           signal: flow,
           unit: "m3/h",
@@ -529,7 +529,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r040,
-          normal: { base: 361.9656, noise_sd: 3.539588 } }
+          normal: { base: 361.9656, noise_sd: 1.407842 } }
   # ---------------- UNIT-CDU-07 U-841 ----------------
   - equip_id: P-8401A
     name: "경유 제품 이송 펌프 A (Diesel Product Transfer Pump A)"
@@ -547,7 +547,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r041,
-          normal: { base: 1.39606, noise_sd: 0.153967 } }
+          normal: { base: 1.39606, noise_sd: 0.057719 } }
       - { tag_id: VI-8401B,
           signal: vibration,
           unit: "mm/s RMS",
@@ -558,7 +558,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r042,
-          normal: { base: 1.13996, noise_sd: 0.123849 } }
+          normal: { base: 1.13996, noise_sd: 0.046497 } }
       - { tag_id: TI-8401A,
           signal: bearing_temp,
           unit: "DEG C",
@@ -569,7 +569,7 @@ equipment:
           interval_sec: 10,
           decimals: 4,
           seed_key: cdu-r043,
-          normal: { base: 54.01407, noise_sd: 0.347744 } }
+          normal: { base: 54.01407, noise_sd: 0.13323 } }
       - { tag_id: FI-8401A,
           signal: flow,
           unit: "m3/h",
@@ -580,7 +580,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r044,
-          normal: { base: 210.01069, noise_sd: 2.040526 } }
+          normal: { base: 210.01069, noise_sd: 0.811656 } }
       - { tag_id: PI-8401B,
           signal: discharge_pressure,
           unit: "kg/cm2(g)",
@@ -591,7 +591,7 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r045,
-          normal: { base: 10.47437, noise_sd: 0.076973 } }
+          normal: { base: 10.47437, noise_sd: 0.038805 } }
       - { tag_id: II-8401A,
           signal: current,
           unit: "A",
@@ -602,4 +602,4 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r046,
-          normal: { base: 40.10115, noise_sd: 0.394017 } }
+          normal: { base: 40.10115, noise_sd: 0.166415 } }

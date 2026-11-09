@@ -42,3 +42,17 @@ def test_master_values_match_excel_samples(config_dir):
 def test_plants_yaml_lists_six(config_dir):
     from collector.plants import load_plants
     assert [p.key for p in load_plants(config_dir / "plants.yaml").plants] == ["hds", "rfcc", "cdu", "hou", "rhds", "vrds"]
+
+
+def test_normal_noise_leaves_margin_below_warning_limits(config_dir):
+    """정상 태그의 잡음이 경고 한계에 닿을 만큼 크면 안 된다: |한계 − 기준값| ≥ 6·noise_sd (리뷰 Important 4)."""
+    worst = []
+    for key in ("cdu", "hou", "rhds", "vrds"):
+        for (equip_id, tag_id), t in load_plant(config_dir / f"plant_{key}.yaml").tag_by_key().items():
+            if t.limits is None:
+                continue
+            for limit in (t.limits.warn_hi, t.limits.warn_lo, t.limits.alarm_hi, t.limits.alarm_lo):
+                if limit is not None:
+                    worst.append((abs(limit - t.normal.base) / t.normal.noise_sd, key, equip_id, tag_id))
+    z, *where = min(worst)
+    assert z >= 6, (z, *where)
