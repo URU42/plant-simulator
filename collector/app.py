@@ -66,7 +66,8 @@ async def _catch_up(ctx: PlantContext) -> None:
 # --- 조회 ---------------------------------------------------------------------
 @router.get("/")
 async def plant_page(ctx: PlantContext = Depends(context)):
-    return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
+    # 디버깅 화면은 자주 바뀌므로 브라우저가 캐시하지 않게 한다
+    return FileResponse(STATIC_DIR / "index.html", media_type="text/html", headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/health")

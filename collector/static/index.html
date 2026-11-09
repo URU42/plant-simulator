@@ -37,7 +37,8 @@
 
 <script>
 (function () {
-  const rows = new Map();          // tag_id → { tr, tds, decimals }
+  const rows = new Map();          // "equip_id|tag_id" → { tr, tds, decimals }. 태그명은 설비 사이에서 겹칠 수 있다
+  const keyOf = (s) => `${s.equip_id}|${s.tag_id}`;
   let received = 0, simNowMs = 0;
 
   const kst = (iso) => iso ? new Date(iso).toLocaleString("sv-SE", { timeZone: "Asia/Seoul" }) : "—";
@@ -56,7 +57,7 @@
       thead.appendChild(hr); table.appendChild(thead);
       const tbody = el("tbody");
       for (const t of e.tags) {
-        const tr = el("tr"); tr.id = "tag-" + t.tag_id;
+        const tr = el("tr"); tr.id = `tag-${e.equip_id}-${t.tag_id}`;
         const tds = {
           id: el("td", null, t.tag_id), desc: el("td", null, t.description || ""), value: el("td", "num value", "—"),
           unit: el("td", null, t.unit), quality: el("td", "quality", "—"), ts: el("td", "num", "—"), iv: el("td", "num", t.interval_sec + "s"),
@@ -64,7 +65,7 @@
         if (t.limits) tds.value.title = "한계값 " + Object.entries(t.limits).map(([k, v]) => `${k}=${v}`).join(", ");
         for (const k of ["id", "desc", "value", "unit", "quality", "ts", "iv"]) tr.appendChild(tds[k]);
         tbody.appendChild(tr);
-        rows.set(t.tag_id, { tr, tds, decimals: t.decimals });
+        rows.set(`${e.equip_id}|${t.tag_id}`, { tr, tds, decimals: t.decimals });
       }
       table.appendChild(tbody); section.appendChild(table); main.appendChild(section);
     }
@@ -72,7 +73,7 @@
 
   // 한 샘플(또는 /current 행)로 행을 갱신한다. status 가 있으면(/current) NoData 표시에 쓴다.
   function update(s, flash) {
-    const row = rows.get(s.tag_id);
+    const row = rows.get(keyOf(s));
     if (!row) return;
     const good = s.quality === "Good" && s.value != null;
     row.tds.value.textContent = good ? Number(s.value).toFixed(row.decimals) : "—";
@@ -100,8 +101,8 @@
       // 백필 묶음은 한 이벤트에 수십만 샘플이 온다. 태그마다 가장 늦은 샘플 하나만 반영한다.
       const latest = new Map();
       for (const s of samples) {
-        const prev = latest.get(s.tag_id);
-        if (!prev || s.ts > prev.ts) latest.set(s.tag_id, s);
+        const prev = latest.get(keyOf(s));
+        if (!prev || s.ts > prev.ts) latest.set(keyOf(s), s);
       }
       for (const s of latest.values()) { s.status = undefined; update(s, true); }
     });

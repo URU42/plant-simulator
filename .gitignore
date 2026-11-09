@@ -227,3 +227,8 @@ data/*.db-*
 
 # RFCC 샘플 자료 (1.5 GB, 참고용. 구성안은 config/plant_rfcc.yaml 로 옮겼다)
 rfcc-20261109/
+
+# 샘플 자료 묶음 (참고용, 합 1 GB. 구성안은 config/plant_*.yaml 로 옮겼다)
+cdu-sample/
+hou-plant-sample/
+RHDS_VRDS_v3/
