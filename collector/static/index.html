@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>plant-simulator · 현재값</title>
-<!-- 디버깅 화면 (설계 §4.6). /equipment 로 표를 만들고 /current 로 채운 뒤 /stream(SSE) 으로 1초마다 갱신한다. 의존성 없음. -->
+<!-- 디버깅 화면 (RFCC 설계 §4.6, 다중 공장 §4.7). 공장 접두어 아래에서 상대 경로 equipment / current / stream 을 쓴다. 의존성 없음. -->
 <style>
   :root { --bg: #fff; --fg: #1a1a1a; --muted: #6b6b6b; --line: #e3e3e3; --head: #f5f5f5; --flash: #fff3b0; --bad: #c0392b; }
   body { margin: 0; padding: 16px 24px 48px; font: 14px/1.4 -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
@@ -28,7 +28,7 @@
 </head>
 <body>
 <header>
-  <h1>plant-simulator · 현재값</h1>
+  <h1 id="title">plant-simulator · 현재값</h1>
   <span class="meta">sim_now(KST) <b id="sim-now">—</b></span>
   <span class="meta">SSE <b id="status" class="down">연결 중</b></span>
   <span class="meta">받은 샘플 <b id="count">0</b></span>
@@ -61,6 +61,7 @@
           id: el("td", null, t.tag_id), desc: el("td", null, t.description || ""), value: el("td", "num value", "—"),
           unit: el("td", null, t.unit), quality: el("td", "quality", "—"), ts: el("td", "num", "—"), iv: el("td", "num", t.interval_sec + "s"),
         };
+        if (t.limits) tds.value.title = "한계값 " + Object.entries(t.limits).map(([k, v]) => `${k}=${v}`).join(", ");
         for (const k of ["id", "desc", "value", "unit", "quality", "ts", "iv"]) tr.appendChild(tds[k]);
         tbody.appendChild(tr);
         rows.set(t.tag_id, { tr, tds, decimals: t.decimals });
@@ -89,7 +90,7 @@
 
   function connect() {
     const status = document.getElementById("status");
-    const es = new EventSource("/stream");                 // 끊기면 EventSource 가 스스로 다시 연결한다
+    const es = new EventSource("stream");                  // 공장 접두어 기준 상대 경로. 끊기면 스스로 다시 연결한다
     es.onopen = () => { status.textContent = "연결됨"; status.className = "ok"; };
     es.onerror = () => { status.textContent = "재연결 중"; status.className = "down"; };
     es.addEventListener("samples", (ev) => {
@@ -106,9 +107,13 @@
     });
   }
 
-  fetch("/equipment").then((r) => r.json()).then((equipment) => {
+  fetch("health").then((r) => r.json()).then((h) => {
+    document.getElementById("title").textContent = `${h.plant_name || h.plant_id} · 현재값`;
+    document.title = `${h.plant_id} · 현재값`;
+  }).catch(() => {});
+  fetch("equipment").then((r) => r.json()).then((equipment) => {
     buildTables(equipment);
-    return fetch("/current").then((r) => r.json());
+    return fetch("current").then((r) => r.json());
   }).then((current) => {
     for (const s of current) update(s, false);
     connect();

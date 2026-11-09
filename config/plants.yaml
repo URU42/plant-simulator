@@ -1,0 +1,9 @@
+# 수집 서버가 띄우는 공장 목록 (다중 공장 설계 §4.7). key 가 URL 접두어다: /cdu/ingest, /cdu/current, /cdu/ …
+# 공장마다 DB 파일을 따로 쓴다. 시뮬레이터는 --collector-url http://localhost:8000/<key> 로 보낸다.
+plants:
+  - { key: hds,  plant: config/plant_hds.yaml,  runtime: config/runtime.yaml,      scenario: config/scenario_dev.yaml,  db: data/hds.db }
+  - { key: rfcc, plant: config/plant_rfcc.yaml, runtime: config/runtime_rfcc.yaml, scenario: config/scenario_rfcc.yaml, db: data/rfcc.db }
+  - { key: cdu,  plant: config/plant_cdu.yaml,  runtime: config/runtime_cdu.yaml,  scenario: config/scenario_cdu.yaml,  db: data/cdu.db }
+  - { key: hou,  plant: config/plant_hou.yaml,  runtime: config/runtime_hou.yaml,  scenario: config/scenario_hou.yaml,  db: data/hou.db }
+  - { key: rhds, plant: config/plant_rhds.yaml, runtime: config/runtime_rhds.yaml, scenario: config/scenario_rhds.yaml, db: data/rhds.db }
+  - { key: vrds, plant: config/plant_vrds.yaml, runtime: config/runtime_vrds.yaml, scenario: config/scenario_vrds.yaml, db: data/vrds.db }

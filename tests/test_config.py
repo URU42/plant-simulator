@@ -75,7 +75,7 @@ def test_runtime_defaults(runtime_path: Path):
     assert rt.speed == 60
     assert rt.backfill_days == 90
     assert rt.seed == 20261108
-    assert rt.collector_url == "http://localhost:8000"
+    assert rt.collector_url == "http://localhost:8000/hds"
     assert rt.raw_retention_days == 7
 
 
