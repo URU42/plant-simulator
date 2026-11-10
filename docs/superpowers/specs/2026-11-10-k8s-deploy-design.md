@@ -87,7 +87,7 @@ HTTP 전송 경로(`HttpSender`)는 그대로 남아 compose·테스트·외부 
 | --- | --- |
 | `deployment.yaml` | `plant-sim`, replicas 1, strategy Recreate. 컨테이너 `image: harbor.uru42.space/uru42/plant-simulator:<TAG>`(kustomize 로 바꿈). args `--plants config/plants.k8s.yaml --with-simulators --time-mode backfill --backfill-days 1 --port 8000`. env `ROOT_PATH=/plant-sim`, `INGEST_TOKEN`(Secret `plant-sim` 의 키 `ingest-token`, optional), `CORS_ORIGINS`(선택), `SIM_SCENARIO_DIR=/app/private`. resources requests 200m/512Mi, limits 500m/1Gi. PVC 를 `/app/data` 에, Secret `plant-sim-scenarios`(optional) 를 `/app/private` 에 마운트. startupProbe `GET /health` 30초 간격 × 60회(첫 백필 30분까지 허용, timeout 10초), readinessProbe `GET /health` 10초(timeout 5초), livenessProbe `GET /health` 30초(timeout 10초, 실패 5회). 백필 창이 10분이고 창마다 양보하므로 프로브가 백필 중에도 응답을 받는다 |
 | `service.yaml` | ClusterIP `plant-sim`, 8000 |
-| `pvc.yaml` | `plant-sim-data`, `ebs-sc`, RWO, 20Gi |
+| `pvc.yaml` | `plant-sim-data`, `ebs-sc`, RWO, 10Gi (원시값 3.5 GB 고정 + 집계 2 GB/년; 처음 20Gi 는 과했다) |
 | `ingress.yaml` | nginx, host `u4-2.skala-us.com`, path `/plant-sim(/|$)(.*)` → `/$2`(rewrite-target), 주석: `proxy-buffering: "off"`, `proxy-read-timeout: "3600"`, `proxy-send-timeout: "3600"` |
 | `secret.example.yaml` | `plant-sim`(ingest-token)·`plant-sim-scenarios`(scenario_<key>.yaml) Secret 모양(값은 비움). 실제 값은 커밋하지 않는다 |
 | `kustomization.yaml` | 위 리소스, `images:` 로 이미지 이름·태그 치환 |
