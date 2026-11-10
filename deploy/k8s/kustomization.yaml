@@ -1,0 +1,13 @@
+# kubectl apply -k deploy/k8s -n u4-2
+# 이미지는 아래 images 의 newName/newTag 를 Harbor 주소·태그로 바꾼다 (secret.example.yaml 은 참고용이라 포함하지 않는다).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+images:
+  - name: harbor.example.com/u4-2/plant-simulator
+    newName: harbor.example.com/u4-2/plant-simulator
+    newTag: latest

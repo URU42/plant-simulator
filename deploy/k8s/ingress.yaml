@@ -1,0 +1,22 @@
+# https://u4-2.skala-us.com/plant-sim/... → 파드의 /... (접두어 제거). SSE(/stream) 를 위해 버퍼링 끄고 타임아웃을 길게.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: plant-sim
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: u4-2.skala-us.com
+      http:
+        paths:
+          - path: /plant-sim(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: plant-sim
+                port: { name: http }
