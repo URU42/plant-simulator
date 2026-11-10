@@ -253,7 +253,7 @@ Unit 별로 프로세스를 나눠도 같은 값이 나오고, 같은 시드로 
 실제 배포는 그 저장소를 바라보는 쪽이 하므로, `deploy/k8s` 의 파일 전부(`kustomization.yaml`, `plant-sim-*.yaml`)를 GitOps 저장소의 `k8s/plant-sim/` 에 복사해 둔다(렌더 결과에 `harbor.uru42.space/uru42/plant-simulator` 가 있어야 파이프라인이 통과한다). 손으로 하려면:
 
 ```bash
-# 1. 이미지 (PC 에서; Harbor 가 인터넷에서 닿으면 .github/workflows/build-image.yml 로도 가능)
+# 1. 이미지 (PC 에서 빌드·push)
 docker build --platform linux/amd64 -t harbor.uru42.space/uru42/plant-simulator:<TAG> . && docker push harbor.uru42.space/uru42/plant-simulator:<TAG>
 # 2. kustomization.yaml 의 images.newTag 를 그 태그로 바꾼다 (주소는 harbor.uru42.space/uru42 로 적혀 있다)
 # 3. Secret (선택, 외부에서 /ingest 로 쓸 때만): kubectl -n u4-2 create secret generic plant-sim --from-literal=ingest-token='<긴 문자열>'

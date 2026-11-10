@@ -98,7 +98,7 @@ HTTP 전송 경로(`HttpSender`)는 그대로 남아 compose·테스트·외부 
 
 - `Dockerfile` 은 그대로(이미 `config/` 를 복사한다). `deploy/k8s/` 는 복사하지 않는다.
 - 기본 경로는 PC 빌드: `docker build --platform linux/amd64 -t harbor.uru42.space/uru42/plant-simulator:<TAG> . && docker push …` 를 README 에 적는다.
-- `.github/workflows/build-image.yml`: `workflow_dispatch` 와 태그 push 때 `docker/build-push-action` 으로 `linux/amd64` 이미지를 Harbor 로 push. 저장소 secrets(`HARBOR_REGISTRY`, `HARBOR_PROJECT`, `HARBOR_USERNAME`, `HARBOR_PASSWORD`). Harbor 가 사내망 전용이면 GitHub 호스티드 러너에서 닿지 않으므로 self-hosted 러너가 필요하다는 주석을 워크플로와 README 에 적는다. **내 판단**: 워크플로는 만들되 PC 빌드를 기본으로 안내한다.
+- CI/CD 는 팀의 Jenkins(`Jenkinsfile`: rootless-docker 에이전트, Harbor 로봇 자격, being-gitops `k8s/plant-sim` 태그 갱신)로 한다. GitHub Actions 워크플로는 쓰지 않는다(사용자 결정, 2026-11-10).
 
 ### 4.6a compose
 
