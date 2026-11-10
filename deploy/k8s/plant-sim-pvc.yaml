@@ -1,0 +1,10 @@
+# 다섯 공장의 SQLite 파일. 하루 보관 기준 약 3.5 GB 에서 머문다.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: plant-sim-data
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: ebs-sc
+  resources:
+    requests: { storage: 20Gi }

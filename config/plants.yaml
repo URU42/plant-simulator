@@ -1,7 +1,8 @@
 # 수집 서버가 띄우는 공장 목록 (다중 공장 설계 §4.7). key 가 URL 접두어다: /cdu/ingest, /cdu/current, /cdu/ …
 # 공장마다 DB 파일을 따로 쓴다. 시뮬레이터는 --collector-url http://localhost:8000/<key> 로 보낸다.
+# 수첨탈황(hds)은 RHDS·VRDS 로 대체돼 배포 목록에서 뺐다. 구성안 파일(plant_hds.yaml 등)은 테스트 자산으로 남아 있어
+# 필요하면 { key: hds, plant: config/plant_hds.yaml, runtime: config/runtime.yaml, scenario: config/scenario_dev.yaml, db: data/hds.db } 를 다시 넣으면 된다.
 plants:
-  - { key: hds,  plant: config/plant_hds.yaml,  runtime: config/runtime.yaml,      scenario: config/scenario_dev.yaml,  db: data/hds.db }
   - { key: rfcc, plant: config/plant_rfcc.yaml, runtime: config/runtime_rfcc.yaml, scenario: config/scenario_rfcc.yaml, db: data/rfcc.db }
   - { key: cdu,  plant: config/plant_cdu.yaml,  runtime: config/runtime_cdu.yaml,  scenario: config/scenario_cdu.yaml,  db: data/cdu.db }
   - { key: hou,  plant: config/plant_hou.yaml,  runtime: config/runtime_hou.yaml,  scenario: config/scenario_hou.yaml,  db: data/hou.db }

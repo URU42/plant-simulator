@@ -24,7 +24,7 @@ from simulator.signal_model import DAY_SEC, SignalModel, _seed_of
 RFCC_EPOCH = datetime(2026, 1, 1, tzinfo=KST).timestamp()   # 느린 성분 매듭의 고정 기준 시각
 KNOT_SEC = 600                  # 느린 성분 격자
 KERNEL_TAUS = 5                 # AR(1)·지연 커널을 자르는 길이 (시정수의 배수)
-BLOCK_CACHE_DAYS = 2            # 태그당 캐시하는 빠른 성분 블록 수
+BLOCK_CACHE_DAYS = 1            # 태그당 캐시하는 빠른 성분 블록 수 (전날 블록은 예열 혁신값만 다시 만들면 되므로 하루면 충분)
 AMBIENT_TEMP_C = 25.0           # 정지 상태 온도
 STOPPED_NOISE_RATIO = 0.3       # 정지 상태 잡음 비율
 KST_OFFSET_SEC = int(KST.utcoffset(None).total_seconds())

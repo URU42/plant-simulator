@@ -6,16 +6,19 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from collector.jobs import JobRunner
+from collector.ingest import IngestResult, Rejection
+from collector.jobs import MAX_WINDOWS_PER_ADVANCE, JobRunner
 from collector.plants import PlantEntry
 from collector.seed_master import seed_master
 from collector.storage import Storage
 from collector.stream import Broadcaster
 from common.config_models import PlantConfig, RuntimeConfig, TagKey, load_plant, load_runtime
+from common.message import Sample
 from common.timefmt import from_db, to_db
 
 NO_DATA_SEND_INTERVALS = 3      # 전송 주기(또는 더 긴 태그 주기) 3번 동안 안 들어오면 NoData (기획서 6.2)
@@ -32,6 +35,11 @@ class PlantContext:
     listing: list[dict]                       # GET /equipment 응답 (계층 순서)
     tag_keys: set[TagKey]
     catch_up_task: asyncio.Task | None = field(default=None)
+    simulator_scenarios: list[str] = field(default_factory=list)   # 통합 실행에서 시뮬레이터에만 준 시나리오 파일 (로그·테스트용, API 에는 내지 않는다)
+    simulator_error: str | None = field(default=None)               # 통합 실행의 생성기 태스크가 예외로 끝났을 때
+    # 저장·배치 전진은 워커 스레드에서도 돌 수 있다(통합 실행). 한 공장의 SQLite 트랜잭션이 겹치지 않도록 락으로 직렬화한다.
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    loop: asyncio.AbstractEventLoop | None = field(default=None)    # SSE 발행을 루프 스레드로 넘기기 위해
 
     @classmethod
     def open(cls, entry: PlantEntry) -> "PlantContext":
@@ -43,13 +51,82 @@ class PlantContext:
         if entry.scenario:
             from collector.seed_history import seed_history   # 시나리오 → 정비·고장 이력 (개발용)
             seed_history(storage, entry.scenario, plant)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
         return cls(key=entry.key, plant=plant, runtime=runtime, storage=storage, jobs=JobRunner(storage, plant, runtime),
-                   broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime), tag_keys=storage.tag_keys())
+                   broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime), tag_keys=storage.tag_keys(), loop=loop)
 
     def close(self) -> None:
         if self.catch_up_task:
             self.catch_up_task.cancel()
         self.storage.close()
+
+    # --- 수신 핵심 (HTTP 라우트와 LocalSender 가 함께 쓴다) -------------------------
+    def receive(self, batch_id: str, source_id: str, samples: list[Sample], received_at: str,
+                rejections: list[Rejection] = ()) -> IngestResult:
+        """검증을 마친 샘플을 저장하고 배치를 전진시킨다. 같은 batch_id 는 저장하지 않고, 보관 기간 밖 행은 거절한다."""
+        reasons = list(rejections)
+        oldest = self.oldest_allowed()
+        accepted: list[Sample] = []
+        for i, s in enumerate(samples):
+            if oldest is not None and to_db(s.ts) < oldest:
+                reasons.append(Rejection(index=i, tag_id=s.tag_id, reason=f"ts {s.ts.isoformat()} is older than raw retention"))
+            else:
+                accepted.append(s)
+        rows = [(s.equip_id, s.tag_id, to_db(s.ts), s.value, s.quality) for s in accepted]
+        with self.lock:
+            if self.storage.batch_seen(batch_id):
+                return IngestResult(batch_id=batch_id, duplicate=True, accepted=len(accepted), stored=0,
+                                    rejected=len(reasons), reasons=reasons)
+            stored = self.storage.store_batch(batch_id, source_id, received_at, rows)
+            behind = self.jobs.advance(self.storage.sim_now()) >= MAX_WINDOWS_PER_ADVANCE if accepted else False
+        if behind:
+            self.start_catch_up()
+        if accepted and self.broadcaster.has_subscribers():   # 구독자가 없으면 직렬화도 하지 않는다
+            self._publish([s.model_dump(mode="json") for s in accepted])
+        return IngestResult(batch_id=batch_id, duplicate=False, accepted=len(accepted), stored=stored,
+                            rejected=len(reasons), reasons=reasons)
+
+    def _on_loop_thread(self) -> bool:
+        """지금 이 공장의 이벤트 루프 스레드 위에 있는가 (워커 스레드면 False)."""
+        try:
+            return asyncio.get_running_loop() is self.loop
+        except RuntimeError:
+            return False
+
+    def _publish(self, data: list[dict]) -> None:
+        """SSE 큐는 루프 스레드에서만 만진다. 워커 스레드에서 왔으면 루프로 넘긴다."""
+        if self.loop is not None and self.loop.is_running() and not self._on_loop_thread():
+            self.loop.call_soon_threadsafe(self.broadcaster.publish, "samples", data)
+        else:
+            self.broadcaster.publish("samples", data)
+
+    def _advance_locked(self) -> int:
+        with self.lock:
+            return self.jobs.advance(self.storage.sim_now())
+
+    def receive_local(self, batch_id: str, source_id: str, samples: list[Sample]) -> IngestResult:
+        """같은 프로세스의 생성기가 보낸 묶음. 받은 시각은 지금."""
+        return self.receive(batch_id, source_id, samples, to_db(datetime.now(timezone.utc)))
+
+    def start_catch_up(self) -> None:
+        """밀린 구간이 상한을 넘으면 요청을 붙잡지 않고 백그라운드에서 이어서 따라잡는다. 이벤트 루프가 없으면(테스트) 그 자리에서 끝낸다."""
+        loop = self.loop if self.loop is not None and self.loop.is_running() else None
+        if loop is None:
+            while self._advance_locked():
+                pass
+            return
+        if self._on_loop_thread():
+            if not self.catching_up:
+                self.catch_up_task = asyncio.create_task(self.catch_up())
+        else:
+            loop.call_soon_threadsafe(self.start_catch_up)
+
+    async def catch_up(self) -> None:
+        while await asyncio.to_thread(self._advance_locked):
+            pass
 
     # --- 조회 도우미 ---------------------------------------------------------
     @property
@@ -59,7 +136,7 @@ class PlantContext:
     def health(self) -> dict:
         return {"key": self.key, "plant_id": self.plant.plant.plant_id, "plant_name": self.plant.plant.name,
                 "last_received_at": self.storage.last_received_at(), "sim_now": self.storage.sim_now(),
-                "catching_up": self.catching_up}
+                "catching_up": self.catching_up, "simulator_error": self.simulator_error}
 
     def oldest_allowed(self) -> str | None:
         """시뮬레이터 현재 시각 기준 보관 기간 밖의 행은 받지 않는다. 백필을 다시 돌려도 DB가 부풀지 않는다."""

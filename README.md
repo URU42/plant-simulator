@@ -1,11 +1,11 @@
 # plant-simulator
 
-Skadi 앞단 데이터 생성기. 가상 공장 여섯 곳의 설비 센서 값을 끊임없이 만들어 중앙 수집 서버로 보내고,
-수집 서버가 공장마다 SQLite 파일 하나에 저장·집계·알람 판정한다. Skadi 화면과 AI Agent는 이 DB를 읽기만 한다.
+Skadi 앞단 데이터 생성기. 가상 공장 다섯 곳(+ 테스트용 수첨탈황)의 설비 센서 값을 끊임없이 만들어 중앙 수집 서버로 보내고,
+수집 서버가 공장마다 SQLite 파일 하나에 저장·집계·알람 판정한다. Skadi 화면·backend·AI Agent 는 HTTP API 로 읽는다.
 
 | 키(경로) | plant_id | 공장 | 설비 · 태그 | 주기 | 근거 |
 | --- | --- | --- | --- | --- | --- |
-| `/hds/` | PL-HDS | 수첨탈황 | 20 · 46 | 10초, 1분 묶음 | [기획서](plant-simulator-plan.md) |
+| (`/hds/`) | PL-HDS | 수첨탈황 — 배포 목록에서 뺐다(RHDS·VRDS 로 대체). 구성안·테스트는 남아 있다 | 20 · 46 | 10초, 1분 묶음 | [기획서](plant-simulator-plan.md) |
 | `/rfcc/` | PL-RFCC | RFCC 회전기계 | 12 · 81 | 온도 10초 · 나머지 1초 | [RFCC 설계](docs/superpowers/specs/2026-11-09-rfcc-simulator-design.md), 샘플 `rfcc-20261109/` |
 | `/cdu/` | PL-CDU | 상압증류 | 7 · 46 | 온도 10초 · 나머지 1초 | [다중 공장 설계](docs/superpowers/specs/2026-11-09-multi-plant-design.md), 샘플 `cdu-sample/` |
 | `/hou/` | PL-HOU | 수첨분해 | 7 · 61 | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `hou-plant-sample/` |
@@ -15,15 +15,16 @@ Skadi 앞단 데이터 생성기. 가상 공장 여섯 곳의 설비 센서 값�
 샘플 묶음 폴더는 git 밖이다. 거기서 옮긴 마스터 값(계층, 설비, 태그명, 설명, 단위, 정상 기준, 경고/알람/정지 상·하한, 근거)이 `config/plant_*.yaml` 에 그대로 있다.
 
 ```text
-[config/plant_X.yaml · runtime_X.yaml · scenario_X.yaml]  × 6
+[config/plants.yaml → plant_X.yaml · runtime_X.yaml · scenario_X.yaml] × 5
         │
         ▼
-[설비 시뮬레이터 × 6]  ── HTTP POST /{공장}/ingest ──▶  [중앙 수집 서버 (FastAPI, config/plants.yaml)]
-  1초·10초마다 값 생성                                   │  공장마다 저장 · 집계 · 알람 · 보관 삭제
-                                                         ▼
-                                              data/{공장}.db (SQLite, WAL) × 6
-                                                         ▲
-                          [Skadi 화면 · AI Agent] (읽기만)   [GET /{공장}/ 디버깅 화면 (SSE)]
+[수집 서버 (FastAPI) ──┬── 통합 실행: 공장별 생성기가 같은 프로세스에서 LocalSender 로 넣는다 (--with-simulators, k8s·compose 기본)
+                       └── 분리 실행: 시뮬레이터 프로세스가 HTTP POST /{공장}/ingest 로 보낸다 (compose --profile split)]
+        │  공장마다 저장 · 집계 · 알람 · 보관 삭제
+        ▼
+  data/{공장}.db (SQLite, WAL) × 5
+        ▲
+[Skadi 화면 · backend · AI Agent] (HTTP API)   [GET /{공장}/ 디버깅 화면 (SSE)]
 ```
 
 | 역할 | 기술 |
@@ -31,11 +32,11 @@ Skadi 앞단 데이터 생성기. 가상 공장 여섯 곳의 설비 센서 값�
 | 설비 시뮬레이터 | Python 3.11, asyncio, NumPy |
 | 설정 파일 | YAML + Pydantic (시작 시 검증) |
 | 전송 | httpx (HTTP POST). 전송부를 분리해 두어 MQTT로 교체 가능 |
-| 중앙 수집 서버 | FastAPI + Uvicorn. 공장 목록 파일 하나로 여러 공장을 `/{공장}/…` 아래에 같은 모양으로 서빙 |
+| 중앙 수집 서버 | FastAPI + Uvicorn. 공장 목록 파일 하나로 여러 공장을 `/{공장}/…` 아래에 같은 모양으로 서빙. `--with-simulators` 면 생성기까지 한 프로세스 |
 | 저장 | SQLite (WAL 모드), 공장마다 파일 하나 |
 | 집계·알람 배치 | 수집 서버 안에서 측정 시각 기준으로 실행 (별도 스케줄러 없음) |
 | 실시간 화면 갱신 | SSE (`GET /{공장}/stream`). 디버깅용 현재값 페이지 `GET /{공장}/` 는 의존성 없는 HTML 한 장 |
-| 실행 | 스크립트 또는 Docker Compose (`restart: always`) |
+| 실행 | 스크립트, Docker Compose, k8s(`deploy/k8s`, 파드 하나 500m/1Gi) |
 
 ## 빠른 시작
 
@@ -44,13 +45,19 @@ uv sync            # 의존성 설치 (Python 3.11+, uv)
 uv run pytest      # 테스트
 ```
 
-터미널 1: 수집 서버 (공장 목록의 여섯 공장을 모두 열고 8000 포트로 뜬다)
+가장 간단한 실행은 통합 실행이다. 수집 서버가 공장 목록의 다섯 공장을 열고 생성기까지 같은 프로세스에서 돌린다.
+
+```bash
+uv run python -m collector.app --plants config/plants.yaml --with-simulators --time-mode backfill
+```
+
+분리 실행(기획서의 모양)은 터미널 1 에 수집 서버, 터미널 2~ 에 공장마다 시뮬레이터 하나.
 
 ```bash
 uv run python -m collector.app --plants config/plants.yaml
 ```
 
-터미널 2~: 공장마다 시뮬레이터 하나. 예를 들어 CDU 는
+예를 들어 CDU 는
 
 ```bash
 # 백필: 지난 하루를 1시간 묶음으로 보낸 뒤 실시간으로 이어진다 (공장당 약 1~2분).
@@ -66,16 +73,18 @@ uv run python -m simulator.main --plant config/plant_cdu.yaml --runtime config/r
 
 브라우저: `http://localhost:8000/` 은 공장 목록, `http://localhost:8000/cdu/` 는 그 공장의 현재값이 1초마다 갱신되는 디버깅 화면(값·품질·측정 시각만).
 
-Docker Compose 로 수집 서버 1 + 시뮬레이터 6 을 함께 (기본이 백필):
+Docker Compose 기본은 통합 실행 컨테이너 하나(`plant-sim`). 분리 실행(수집 서버 1 + 시뮬레이터 5)은 `split` 프로필이다. DB 는 네임드 볼륨 `plant-data` 에 둔다.
+macOS Docker Desktop 의 바인드 마운트(`./data`) 위에서는 SQLite WAL 파일이 손상된 적이 있어 쓰지 않는다. 파일이 필요하면 `docker compose cp plant-sim:/app/data/cdu.db ./data/` 로 꺼낸다.
 
 ```bash
-docker compose up --build -d
+docker compose up --build -d                    # 통합 실행 1 컨테이너
+docker compose --profile split up --build -d    # 분리 실행 6 컨테이너
 ```
 
 확인:
 
 ```bash
-curl localhost:8000/health                                   # 여섯 공장의 sim_now · catching_up
+curl localhost:8000/health                                   # 다섯 공장의 sim_now · catching_up
 curl localhost:8000/rhds/equipment                           # 계층 순서의 설비·태그·한계값
 curl localhost:8000/rhds/current
 curl localhost:8000/rhds/equipment/P-3101/tags/TI-B-3101/current
@@ -90,20 +99,26 @@ curl -N localhost:8000/rfcc/stream
 | --- | --- | --- | --- |
 | 수집 서버 | `--plants` | `PLANTS_CONFIG` | `config/plants.yaml` |
 | 수집 서버 | `--host`, `--port` | `HOST`, `PORT` | `0.0.0.0`, `8000` |
+| 수집 서버 | `--with-simulators` | `WITH_SIMULATORS` | 꺼짐. 켜면 공장 목록의 생성기를 같은 프로세스에서 돌린다 |
+| 수집 서버 | `--time-mode`, `--backfill-days` | | 통합 실행에서 각 공장 runtime 값을 덮어쓴다 |
+| 수집 서버 | | `ROOT_PATH` | 경로 접두어(예: `/plant-sim`). 루트 링크·리다이렉트·`/docs` 가 붙인다 |
+| 수집 서버 | | `CORS_ORIGINS` | 쉼표 구분. 있으면 GET 에 CORS 헤더 |
+| 수집 서버 | | `INGEST_TOKEN` | 있으면 외부 `POST /ingest` 는 헤더 `X-Ingest-Token` 필수. 통합 실행인데 없으면 외부 `/ingest` 는 닫힌다(403). 통합 실행의 생성기는 거치지 않는다. 시뮬레이터 `HttpSender` 도 같은 변수를 읽어 헤더를 붙인다 |
+| 수집 서버 | | `SIM_SCENARIO_DIR` | 있으면 그 안의 `scenario_<key>.yaml` 을 그 공장의 시뮬레이터에만 더 준다(평가용, 이력에는 안 들어감) |
 | 시뮬레이터 | `--plant` | `PLANT_CONFIG` | `config/plant_hds.yaml` |
 | 시뮬레이터 | `--runtime` | `RUNTIME_CONFIG` | `config/runtime.yaml` |
 | 시뮬레이터 | `--scenario` (여러 번 가능) | `SCENARIO_CONFIG` (쉼표 구분) | 없음 |
 | 시뮬레이터 | `--time-mode` | | `runtime.yaml` 의 `time_mode` |
 | 시뮬레이터 | `--collector-url` | `COLLECTOR_URL` | `runtime.yaml` 의 `collector_url` |
 
-- 평가용 시나리오(비공개)는 시뮬레이터에만 `--scenario` 를 한 번 더 주어 함께 적용한다. 수집 서버에는 공장 목록의 개발용 파일만 들어간다.
+- 평가용 시나리오(비공개)는 분리 실행에서는 시뮬레이터에만 `--scenario` 를 한 번 더, 통합 실행에서는 `SIM_SCENARIO_DIR` 로 준다. 수집 서버의 이력 적재에는 공장 목록의 개발용 파일만 들어간다.
 - Unit 단위로 나눠 돌리려면 runtime 파일을 복사해 `units: [UNIT-CDU-01]`, `source_id: SIM-CDU-1` 처럼 바꾸고 프로세스를 여러 개 띄운다. 값은 한 프로세스로 돌릴 때와 같다.
 
 ## 설정 파일
 
 | 파일 | 내용 |
 | --- | --- |
-| `config/plants.yaml` | 수집 서버가 여는 공장 목록: `key`(URL 접두어), 구성안·실행·시나리오 파일, DB 파일 |
+| `config/plants.yaml` | 수집 서버가 여는 공장 목록: `key`(URL 접두어), 구성안·실행·시나리오 파일, DB 파일. `plants.k8s.yaml` 은 DB 경로가 `/app/data/` 인 k8s 용 |
 | `config/plant_{hds,rfcc,cdu,hou,rhds,vrds}.yaml` | 구성안: 계층, 설비 유형(`kind`), 표준 태그, 설비, 태그(설명·단위·주기·자릿수·한계값·`normal_ref`·`limit_basis`·`seed_key`·정상 신호 모델), 연관 규칙, `signal_model` |
 | `config/runtime*.yaml` | 실행 설정: Unit 목록, `source_id`, 주기, 시간 모드, 가속 배율, 백필 기간, 시드, 수집 서버 주소(공장 접두어 포함), 원시 값 보관 기간 |
 | `config/scenario_*.yaml` | 개발용 이상·정비·품질 이벤트, 우연한 잡음 알람·품질 저하 비율 |
@@ -200,6 +215,7 @@ Unit 별로 프로세스를 나눠도 같은 값이 나오고, 같은 시드로 
 | `GET /{공장}/equipment/{equip_id}/tags/{tag_id}/current` | 태그 현재값. 전송 주기와 태그 주기 중 긴 쪽의 3배 동안 안 들어오면 `status: NoData` |
 | `GET /{공장}/timeseries?equip_id=&tag_id=&from=&to=&interval=1h` | 집계 시계열 (`10m` / `1h`) |
 | `GET /{공장}/alarms?equip_id=&from=&to=` | 알람 목록 (`direction` hi / lo) |
+| `GET /{공장}/maintenance?equip_id=` · `GET /{공장}/failures?equip_id=` | 정비·고장 이력 (개발용 시나리오에서 적재) |
 | `GET /{공장}/stream` | SSE 로 새 값 실시간 전달 |
 
 ## DB (`data/{공장}.db`)
@@ -218,7 +234,47 @@ Unit 별로 프로세스를 나눠도 같은 값이 나오고, 같은 시드로 
 - **예전 DB 파일(v1, 태그 ID 단일 키)은 열 수 없다.** 수집 서버가 파일 경로와 함께 옮기거나 지우라고 알리고 멈춘다. `data/old/` 로 옮긴 뒤 백필을 다시 돌린다.
 - 보관: 10분 배치가 끝날 때마다 `raw_retention_days` 보다 오래된 `ts_raw` 행(측정 시각 기준)과 `ingest_batch` 행(받은 시각 기준)을 지운다. 집계는 남긴다.
 - 용량(하루 백필 뒤 실측, 행당 약 180 B): rfcc 1.1 GB · hou 0.7 GB · cdu 0.6 GB · rhds 0.5 GB · vrds 0.5 GB. 다섯 1초 공장을 하루 보관하면 합계 약 3.5 GB 에서 머문다. SQLite 파일은 지워도 줄지 않고 최고점에서 고정된다. 수첨탈황은 7일 보관(90일 백필 뒤 약 0.5 GB).
-- 수집 서버는 프로세스 하나다. compose 로 여섯 공장이 동시에 첫 백필을 하면 SQLite 쓰기가 직렬화돼 다섯 1초 공장의 하루 백필이 함께 끝나기까지 약 5분 걸렸고(수첨탈황 90일은 그 뒤로도 수 분), 먼저 실시간에 들어간 공장의 1초 전송은 재시도로 버틴다. 정상 상태(초당 약 6 요청)에는 여유가 있다.
+- 수집 서버는 프로세스 하나다. 통합 실행에서는 동시에 저장하는 공장을 둘로 제한하고(나머지는 기다린다) 값 계산·저장을 워커 스레드에서 돌린다. 분리 실행으로 다섯 공장이 동시에 첫 백필을 하면 SQLite 쓰기가 직렬화돼 하루 백필이 함께 끝나기까지 약 2~5분 걸렸고, 먼저 실시간에 들어간 공장의 1초 전송은 재시도로 버틴다.
+
+## k8s 배포 (`deploy/k8s`)
+
+네임스페이스 `u4-2`(CPU 2 · 4Gi 를 frontend·backend·agent 와 공유)에 **파드 하나**로 올린다. 수집 서버가 다섯 공장의 생성기를 같은 프로세스에서 돌린다.
+
+| 항목 | 값 |
+| --- | --- |
+| 자원 | requests 200m/512Mi, limits 500m/1Gi |
+| 스토리지 | PVC `plant-sim-data` 20Gi(gp3, RWO, 매니페스트에 포함). 다섯 공장 SQLite, 하루 보관 약 3.5 GB 에서 고정 |
+| 외부 | Ingress `https://u4-2.skala-us.com/plant-sim/…` (접두어 제거, SSE 용 버퍼링 off·타임아웃 3600s). 조회·화면·SSE |
+| 내부 | `http://plant-sim.u4-2.svc.cluster.local:8000/{공장}/…` (접두어 없음, CORS 불필요) |
+| 쓰기 보호 | 통합 실행에서 외부 `POST /ingest` 는 기본적으로 닫혀 있다(403). 열려면 Secret `plant-sim` 의 `ingest-token` 을 만들고 보내는 쪽이 `X-Ingest-Token` 을 붙인다 |
+| 프로브 | startupProbe 30초×60회(첫 백필 30분까지), readiness 10초, liveness 30초. 값 계산·저장은 워커 스레드에서 돌고 조회 핸들러는 스레드풀에서 돌아 백필 중에도 응답한다. 생성기 태스크가 죽으면 `/health` 가 503 이 되어 liveness 가 다시 띄운다 |
+
+이미지 빌드·push·배포는 `Jenkinsfile` 로 자동화돼 있다: `rootless-docker` 에이전트에서 테스트(uv 이미지 안) → 빌드(`test-<빌드번호>-<커밋8자리>`) → Harbor push(`harbor-jenkins-robot`) → GitOps 저장소 `URU42/being-gitops` 의 `k8s/plant-sim/kustomization.yaml` 이미지 태그 갱신(`gitops-github-pat`).
+실제 배포는 그 저장소를 바라보는 쪽이 하므로, `deploy/k8s` 의 파일 전부(`kustomization.yaml`, `plant-sim-*.yaml`)를 GitOps 저장소의 `k8s/plant-sim/` 에 복사해 둔다(렌더 결과에 `harbor.uru42.space/uru42/plant-simulator` 가 있어야 파이프라인이 통과한다). 손으로 하려면:
+
+```bash
+# 1. 이미지 (PC 에서 빌드·push)
+docker build --platform linux/amd64 -t harbor.uru42.space/uru42/plant-simulator:<TAG> . && docker push harbor.uru42.space/uru42/plant-simulator:<TAG>
+# 2. kustomization.yaml 의 images.newTag 를 그 태그로 바꾼다 (주소는 harbor.uru42.space/uru42 로 적혀 있다)
+# 3. Secret (선택, 외부에서 /ingest 로 쓸 때만): kubectl -n u4-2 create secret generic plant-sim --from-literal=ingest-token='<긴 문자열>'
+#    평가용 시나리오 (선택): kubectl -n u4-2 create secret generic plant-sim-scenarios --from-file=scenario_cdu.yaml=<파일>
+# 4. 적용·확인
+kubectl apply -k deploy/k8s -n u4-2
+kubectl -n u4-2 rollout status deploy/plant-sim
+curl https://u4-2.skala-us.com/plant-sim/health
+```
+
+- 첫 기동은 다섯 공장 하루치 백필이다. CPU 500m 에서 수 분~십수 분 걸리며 그동안 `/health` 의 `sim_now` 가 전진한다.
+- 백필 기간을 늘리려면(`--backfill-days`) PVC 의 DB 파일을 지우고 다시 채워야 한다. 재개는 마지막 시각부터만 이어 간다.
+- 다른 파드는 DB 파일을 직접 읽을 수 없다(RWO). HTTP API(`/current`, `/timeseries`, `/alarms`, `/maintenance`, `/failures`, `/stream`)를 쓴다.
+- 실측 (다섯 공장 통합 실행, 하루 백필):
+
+  | 조건 | 백필 중 `/health` 응답 | 하루 백필 | 메모리 |
+  | --- | --- | --- | --- |
+  | 로컬 Mac, 제한 없음 | 0.1초 이하 | 약 7분 | Python RSS 약 250 MB |
+  | `docker run --cpus 0.5 --memory 1g` (배포 한도) | 0.1~3.7초, 대개 2~3초 (CPU 쿼터를 백필과 나눠 쓴다) | 약 15분 | cgroup 기준 785~812 MiB (SQLite 파일 캐시 포함, 회수 가능) |
+
+  그래서 readiness·liveness 의 timeout 은 10초, startupProbe 는 30분이다. 백필이 끝나면 응답은 수 ms 로 돌아온다. 더 빨리 띄우려면 limits cpu 를 1 로 올린다.
 
 ## 폴더
 
@@ -226,7 +282,8 @@ Unit 별로 프로세스를 나눠도 같은 값이 나오고, 같은 시드로 
 config/      plants.yaml · plant_*.yaml · runtime*.yaml · scenario_*.yaml
 common/      config_models(복합키·TagRef·한계값) · scenario_models · message(v1) · sim_clock · timefmt
 simulator/   signal_model(hds) · rfcc_model · patterns · scenario · random_anomalies · random_quality · generator · sender · main
-collector/   app(라우트) · plants(공장 목록) · plant_context(공장별 문맥) · ingest · storage · schema.sql · jobs · seed_master · seed_history · stream · static/index.html
+collector/   app(라우트) · plants(공장 목록) · plant_context(공장별 문맥·수신 핵심) · embedded(통합 실행) · settings · ingest · storage · schema.sql · jobs · seed_master · seed_history · stream · static/index.html
+deploy/k8s/  kustomization · plant-sim-{deployment,service,pvc,ingress}.yaml · plant-sim-secret.example.yaml (being-gitops k8s/plant-sim 으로 복사)
 docs/        superpowers/specs (RFCC · 다중 공장 설계) · superpowers/plans (구현 계획)
 tests/       기획서 9.2 단계별 완료 기준 + 설계 §5 테스트
 ```

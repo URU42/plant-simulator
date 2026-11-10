@@ -1,14 +1,15 @@
-"""전송부 (교체 가능). 지금은 HTTP POST /ingest, 나중에 MQTT로 바꿀 수 있게 인터페이스를 둔다."""
+"""전송부 (교체 가능). HTTP POST /ingest 가 기본이고, 통합 실행에서는 같은 프로세스의 수집 함수를 바로 부른다(LocalSender)."""
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 import httpx
 
-from common.message import IngestBatch
+from common.message import IngestBatch, Sample
 from common.timefmt import from_db
 
 log = logging.getLogger(__name__)
@@ -38,11 +39,16 @@ class HttpSender:
     """
 
     def __init__(self, collector_url: str, retries: int | None = None, backoff_sec: float = 2.0,
-                 timeout_sec: float = 30.0, transport: httpx.AsyncBaseTransport | None = None) -> None:
+                 timeout_sec: float = 30.0, transport: httpx.AsyncBaseTransport | None = None,
+                 ingest_token: str | None = None) -> None:
         self._base = collector_url.rstrip("/")
         self._retries = retries
         self._backoff = backoff_sec
         self._client = httpx.AsyncClient(timeout=timeout_sec, transport=transport)
+        self._headers = {"content-type": "application/json"}
+        token = ingest_token if ingest_token is not None else os.environ.get("INGEST_TOKEN")
+        if token:                                   # 수집 서버가 토큰을 요구하면 같은 헤더를 붙인다
+            self._headers["X-Ingest-Token"] = token
 
     async def send(self, batch: IngestBatch) -> dict[str, Any]:
         body = batch.model_dump_json()
@@ -50,8 +56,7 @@ class HttpSender:
         while True:
             attempt += 1
             try:
-                r = await self._client.post(self._base + "/ingest", content=body,
-                                            headers={"content-type": "application/json"})
+                r = await self._client.post(self._base + "/ingest", content=body, headers=self._headers)
                 r.raise_for_status()
                 return r.json()
             except (httpx.HTTPError, ValueError) as e:
@@ -72,6 +77,32 @@ class HttpSender:
 
     async def close(self) -> None:
         await self._client.aclose()
+
+
+class LocalSender:
+    """같은 프로세스의 수집 함수를 바로 부른다 (통합 실행). JSON 직렬화·재검증 없이 Sample 을 그대로 넘긴다."""
+
+    def __init__(self, receive: Callable[[str, str, list[Sample]], Any], sim_now: Callable[[], str | None],
+                 limiter: asyncio.Semaphore | None = None) -> None:
+        self._receive = receive
+        self._sim_now = sim_now
+        self._limiter = limiter          # 여러 공장이 동시에 백필할 때 한꺼번에 저장하는 수를 제한한다 (메모리 피크·GIL 경합)
+
+    async def send(self, batch: IngestBatch) -> dict[str, Any]:
+        # 저장·배치 전진은 워커 스레드에서. 백필처럼 기다림 없는 구간에서도 이벤트 루프(조회 API·프로브)가 비어 있다
+        if self._limiter is not None:
+            async with self._limiter:
+                r = await asyncio.to_thread(self._receive, batch.batch_id, batch.source_id, batch.samples)
+        else:
+            r = await asyncio.to_thread(self._receive, batch.batch_id, batch.source_id, batch.samples)
+        return {"batch_id": r.batch_id, "stored": r.stored, "rejected": r.rejected}
+
+    async def collector_time(self) -> datetime | None:
+        sim_now = self._sim_now()
+        return from_db(sim_now) if sim_now else None
+
+    async def close(self) -> None:
+        return None
 
 
 class MemorySender:

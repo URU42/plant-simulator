@@ -1,0 +1,68 @@
+# plant-sim: 수집 서버 + 다섯 공장 생성기를 한 프로세스로 (k8s 설계 §4.5). SQLite 가 PVC(RWO) 에 있으므로 replicas 1, Recreate.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plant-sim
+  labels: { app: plant-sim }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: plant-sim }
+  template:
+    metadata:
+      labels: { app: plant-sim }
+    spec:
+      containers:
+        - name: plant-sim
+          image: harbor.uru42.space/uru42/plant-simulator:latest   # 태그는 kustomization.yaml 의 images 로 바꾼다
+          args:
+            - python
+            - -m
+            - collector.app
+            - --plants
+            - config/plants.k8s.yaml
+            - --with-simulators
+            - --time-mode
+            - backfill
+            - --backfill-days
+            - "1"
+            - --port
+            - "8000"
+          ports:
+            - { name: http, containerPort: 8000 }
+          env:
+            - { name: ROOT_PATH, value: /plant-sim }          # Ingress 접두어. 루트 링크·리다이렉트·/docs 가 붙인다
+            - { name: WITH_SIMULATORS, value: "1" }
+            - { name: SIM_SCENARIO_DIR, value: /app/private }  # 평가용 시나리오 Secret (선택)
+            - name: INGEST_TOKEN                               # 있으면 외부 /ingest 는 X-Ingest-Token 필수
+              valueFrom:
+                secretKeyRef: { name: plant-sim, key: ingest-token, optional: true }
+            - name: CORS_ORIGINS                               # 브라우저 frontend 가 다른 origin 이면 적는다
+              valueFrom:
+                configMapKeyRef: { name: plant-sim, key: cors-origins, optional: true }
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits: { cpu: 500m, memory: 1Gi }
+          startupProbe:                                       # 첫 백필(다섯 공장 하루치) 30분까지 허용
+            httpGet: { path: /health, port: http }
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 60
+          readinessProbe:                                      # 첫 백필 중 CPU 500m 에서 응답이 1~4초까지 늘어난다 (실측)
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          volumeMounts:
+            - { name: data, mountPath: /app/data }
+            - { name: private, mountPath: /app/private, readOnly: true }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: plant-sim-data }
+        - name: private
+          secret: { secretName: plant-sim-scenarios, optional: true }

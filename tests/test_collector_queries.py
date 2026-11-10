@@ -60,3 +60,13 @@ def test_large_time_jump_is_caught_up_in_background(client):
         time.sleep(0.05)
     assert st.query("SELECT COUNT(DISTINCT bucket_start) FROM ts_10m")[0][0] == 5 * 144
     assert client.get("/plant/health").json()["catching_up"] is False
+
+
+def test_history_endpoints(plant_path, runtime_path, scenario_path):
+    """정비·고장 이력 조회 (k8s 설계 §4.2a): DB 를 직접 못 읽는 다른 파드를 위해."""
+    with TestClient(create_single_app(plant_path, runtime_path, ":memory:", scenario_path=scenario_path)) as c:
+        m = c.get("/plant/maintenance").json()
+        assert len(m) == 3 and m[0]["work_order_id"] and "start_ts" in m[0]
+        assert [x["equip_id"] for x in c.get("/plant/maintenance", params={"equip_id": "C-1101"}).json()] == ["C-1101"]
+        f = c.get("/plant/failures", params={"equip_id": "P-4101"}).json()
+        assert f and f[0]["failure_id"] == "FL-DEV-005"

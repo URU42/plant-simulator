@@ -1,0 +1,8 @@
+# k8s 통합 실행용 공장 목록 (k8s 설계 §4.3). DB 는 PVC 가 마운트되는 /app/data 아래.
+# 실행: python -m collector.app --plants config/plants.k8s.yaml --with-simulators --time-mode backfill --backfill-days 1
+plants:
+  - { key: rfcc, plant: config/plant_rfcc.yaml, runtime: config/runtime_rfcc.yaml, scenario: config/scenario_rfcc.yaml, db: /app/data/rfcc.db }
+  - { key: cdu,  plant: config/plant_cdu.yaml,  runtime: config/runtime_cdu.yaml,  scenario: config/scenario_cdu.yaml,  db: /app/data/cdu.db }
+  - { key: hou,  plant: config/plant_hou.yaml,  runtime: config/runtime_hou.yaml,  scenario: config/scenario_hou.yaml,  db: /app/data/hou.db }
+  - { key: rhds, plant: config/plant_rhds.yaml, runtime: config/runtime_rhds.yaml, scenario: config/scenario_rhds.yaml, db: /app/data/rhds.db }
+  - { key: vrds, plant: config/plant_vrds.yaml, runtime: config/runtime_vrds.yaml, scenario: config/scenario_vrds.yaml, db: /app/data/vrds.db }

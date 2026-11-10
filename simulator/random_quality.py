@@ -13,7 +13,7 @@ from common.config_models import PlantConfig, TagConfig, TagKey
 from common.scenario_models import RandomQuality
 from simulator.signal_model import DAY_SEC, _seed_of
 
-BLOCK_CACHE_DAYS = 2
+BLOCK_CACHE_DAYS = 1
 _C_QUALITY = 4          # 시드 파생용 성분 번호 (random_anomalies 는 3)
 
 
