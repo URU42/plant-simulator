@@ -1,5 +1,7 @@
 # 명령 하나로 수집 서버 1 + 공장별 시뮬레이터 6 을 띄운다: docker compose up --build -d
-# 죽어도 다시 살아나 계속 생성한다 (restart: always). DB 파일은 공장마다 ./data/<key>.db 에 남는다.
+# 죽어도 다시 살아나 계속 생성한다 (restart: always). DB 파일은 공장마다 네임드 볼륨 plant-data 의 <key>.db 에 남는다.
+# 바인드 마운트(./data)를 쓰지 않는 이유: macOS Docker Desktop 의 바인드 마운트 위에서 SQLite WAL 이 손상된 적이 있다.
+# 파일을 꺼내려면 docker compose cp collector:/app/data/cdu.db ./data/ 처럼 복사한다.
 # SIM_TIME_MODE 기본 backfill: 각 공장이 runtime 의 backfill_days 를 채운 뒤 실시간으로 이어진다(hds 90일, 나머지 1일).
 # 재시작하면 수집 서버의 마지막 시각부터 이어서 보내므로 다시 채우지 않는다.
 services:
@@ -8,7 +10,7 @@ services:
     command: python -m collector.app --plants config/plants.yaml --port 8000
     ports: ["8000:8000"]
     volumes:
-      - ./data:/app/data
+      - plant-data:/app/data
       - ./config:/app/config:ro
     restart: always
     healthcheck:
@@ -88,3 +90,6 @@ services:
       collector:
         condition: service_healthy
     restart: always
+
+volumes:
+  plant-data:

@@ -66,7 +66,8 @@ uv run python -m simulator.main --plant config/plant_cdu.yaml --runtime config/r
 
 브라우저: `http://localhost:8000/` 은 공장 목록, `http://localhost:8000/cdu/` 는 그 공장의 현재값이 1초마다 갱신되는 디버깅 화면(값·품질·측정 시각만).
 
-Docker Compose 로 수집 서버 1 + 시뮬레이터 6 을 함께 (기본이 백필):
+Docker Compose 로 수집 서버 1 + 시뮬레이터 6 을 함께 (기본이 백필). DB 는 네임드 볼륨 `plant-data` 에 둔다.
+macOS Docker Desktop 의 바인드 마운트(`./data`) 위에서는 SQLite WAL 파일이 손상된 적이 있어 쓰지 않는다. 파일이 필요하면 `docker compose cp collector:/app/data/cdu.db ./data/` 로 꺼낸다.
 
 ```bash
 docker compose up --build -d
