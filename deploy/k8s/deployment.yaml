@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: plant-sim
-          image: harbor.example.com/u4-2/plant-simulator:latest   # kustomization.yaml 의 images 로 바꾼다
+          image: harbor.uru42.space/uru42/plant-simulator:latest   # 태그는 kustomization.yaml 의 images 로 바꾼다
           args:
             - python
             - -m

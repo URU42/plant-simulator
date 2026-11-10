@@ -251,8 +251,8 @@ Unit 별로 프로세스를 나눠도 같은 값이 나오고, 같은 시드로 
 
 ```bash
 # 1. 이미지 (PC 에서; Harbor 가 인터넷에서 닿으면 .github/workflows/build-image.yml 로도 가능)
-docker build --platform linux/amd64 -t <HARBOR>/u4-2/plant-simulator:<TAG> . && docker push <HARBOR>/u4-2/plant-simulator:<TAG>
-# 2. deploy/k8s/kustomization.yaml 의 images 를 그 주소·태그로 바꾼다
+docker build --platform linux/amd64 -t harbor.uru42.space/uru42/plant-simulator:<TAG> . && docker push harbor.uru42.space/uru42/plant-simulator:<TAG>
+# 2. deploy/k8s/kustomization.yaml 의 images.newTag 를 그 태그로 바꾼다 (주소는 harbor.uru42.space/uru42 로 적혀 있다)
 # 3. Secret (선택): kubectl -n u4-2 create secret generic plant-sim --from-literal=ingest-token='<긴 문자열>'
 #    평가용 시나리오 (선택): kubectl -n u4-2 create secret generic plant-sim-scenarios --from-file=scenario_cdu.yaml=<파일>
 # 4. 적용·확인
