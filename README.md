@@ -264,7 +264,14 @@ curl https://u4-2.skala-us.com/plant-sim/health
 - 첫 기동은 다섯 공장 하루치 백필이다. CPU 500m 에서 수 분~십수 분 걸리며 그동안 `/health` 의 `sim_now` 가 전진한다.
 - 백필 기간을 늘리려면(`--backfill-days`) PVC 의 DB 파일을 지우고 다시 채워야 한다. 재개는 마지막 시각부터만 이어 간다.
 - 다른 파드는 DB 파일을 직접 읽을 수 없다(RWO). HTTP API(`/current`, `/timeseries`, `/alarms`, `/maintenance`, `/failures`, `/stream`)를 쓴다.
-- 실측(로컬 Mac, 다섯 공장 통합 실행): 백필 중 `/health` 응답 0.1초 이하(생성·저장이 워커 스레드에서 돌아 루프가 비어 있다), 다섯 공장 하루 백필 약 7분, 백필 뒤 Python 프로세스 RSS 약 250 MB(`docker stats` 는 SQLite 파일 캐시까지 세어 약 740 MiB 로 보인다. 캐시는 회수 가능하다). CPU 500m 에서는 백필이 2~3배 더 걸린다.
+- 실측 (다섯 공장 통합 실행, 하루 백필):
+
+  | 조건 | 백필 중 `/health` 응답 | 하루 백필 | 메모리 |
+  | --- | --- | --- | --- |
+  | 로컬 Mac, 제한 없음 | 0.1초 이하 | 약 7분 | Python RSS 약 250 MB |
+  | `docker run --cpus 0.5 --memory 1g` (배포 한도) | 0.1~3.7초, 대개 2~3초 (CPU 쿼터를 백필과 나눠 쓴다) | 약 15분 | cgroup 기준 785~812 MiB (SQLite 파일 캐시 포함, 회수 가능) |
+
+  그래서 readiness·liveness 의 timeout 은 10초, startupProbe 는 30분이다. 백필이 끝나면 응답은 수 ms 로 돌아온다. 더 빨리 띄우려면 limits cpu 를 1 로 올린다.
 
 ## 폴더
 

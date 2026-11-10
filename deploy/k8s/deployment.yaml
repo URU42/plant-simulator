@@ -49,10 +49,10 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 60
-          readinessProbe:
+          readinessProbe:                                      # 첫 백필 중 CPU 500m 에서 응답이 1~4초까지 늘어난다 (실측)
             httpGet: { path: /health, port: http }
             periodSeconds: 10
-            timeoutSeconds: 5
+            timeoutSeconds: 10
           livenessProbe:
             httpGet: { path: /health, port: http }
             periodSeconds: 30
