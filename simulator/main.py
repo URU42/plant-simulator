@@ -47,7 +47,7 @@ class Simulator:
             await asyncio.sleep(0)      # 백필처럼 기다림이 없는 시계에서도 같은 루프의 다른 작업(조회 API 등)에 양보한다
 
     async def _send_window(self, start: datetime, end: datetime) -> None:
-        samples = self.generator.generate(start, end)
+        samples = await asyncio.to_thread(self.generator.generate, start, end)   # 값 계산은 루프 밖에서
         self.seq += 1
         sent_at = self.clock.now()
         batch = IngestBatch(source_id=self.runtime.source_id, batch_id=make_batch_id(end, self.runtime.source_id, self.seq),

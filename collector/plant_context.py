@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -35,6 +36,9 @@ class PlantContext:
     tag_keys: set[TagKey]
     catch_up_task: asyncio.Task | None = field(default=None)
     simulator_scenarios: list[str] = field(default_factory=list)   # 통합 실행에서 시뮬레이터에만 준 시나리오 파일
+    # 저장·배치 전진은 워커 스레드에서도 돌 수 있다(통합 실행). 한 공장의 SQLite 트랜잭션이 겹치지 않도록 락으로 직렬화한다.
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    loop: asyncio.AbstractEventLoop | None = field(default=None)    # SSE 발행을 루프 스레드로 넘기기 위해
 
     @classmethod
     def open(cls, entry: PlantEntry) -> "PlantContext":
@@ -46,8 +50,12 @@ class PlantContext:
         if entry.scenario:
             from collector.seed_history import seed_history   # 시나리오 → 정비·고장 이력 (개발용)
             seed_history(storage, entry.scenario, plant)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
         return cls(key=entry.key, plant=plant, runtime=runtime, storage=storage, jobs=JobRunner(storage, plant, runtime),
-                   broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime), tag_keys=storage.tag_keys())
+                   broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime), tag_keys=storage.tag_keys(), loop=loop)
 
     def close(self) -> None:
         if self.catch_up_task:
@@ -66,39 +74,58 @@ class PlantContext:
                 reasons.append(Rejection(index=i, tag_id=s.tag_id, reason=f"ts {s.ts.isoformat()} is older than raw retention"))
             else:
                 accepted.append(s)
-        if self.storage.batch_seen(batch_id):
-            return IngestResult(batch_id=batch_id, duplicate=True, accepted=len(accepted), stored=0,
-                                rejected=len(reasons), reasons=reasons)
         rows = [(s.equip_id, s.tag_id, to_db(s.ts), s.value, s.quality) for s in accepted]
-        stored = self.storage.store_batch(batch_id, source_id, received_at, rows)
-        if accepted:
-            if self.jobs.advance(self.storage.sim_now()) >= MAX_WINDOWS_PER_ADVANCE:
-                self.start_catch_up()
-            if self.broadcaster.has_subscribers():         # 구독자가 없으면 직렬화도 하지 않는다
-                self.broadcaster.publish("samples", [s.model_dump(mode="json") for s in accepted])
+        with self.lock:
+            if self.storage.batch_seen(batch_id):
+                return IngestResult(batch_id=batch_id, duplicate=True, accepted=len(accepted), stored=0,
+                                    rejected=len(reasons), reasons=reasons)
+            stored = self.storage.store_batch(batch_id, source_id, received_at, rows)
+            behind = self.jobs.advance(self.storage.sim_now()) >= MAX_WINDOWS_PER_ADVANCE if accepted else False
+        if behind:
+            self.start_catch_up()
+        if accepted and self.broadcaster.has_subscribers():   # 구독자가 없으면 직렬화도 하지 않는다
+            self._publish([s.model_dump(mode="json") for s in accepted])
         return IngestResult(batch_id=batch_id, duplicate=False, accepted=len(accepted), stored=stored,
                             rejected=len(reasons), reasons=reasons)
+
+    def _on_loop_thread(self) -> bool:
+        """지금 이 공장의 이벤트 루프 스레드 위에 있는가 (워커 스레드면 False)."""
+        try:
+            return asyncio.get_running_loop() is self.loop
+        except RuntimeError:
+            return False
+
+    def _publish(self, data: list[dict]) -> None:
+        """SSE 큐는 루프 스레드에서만 만진다. 워커 스레드에서 왔으면 루프로 넘긴다."""
+        if self.loop is not None and self.loop.is_running() and not self._on_loop_thread():
+            self.loop.call_soon_threadsafe(self.broadcaster.publish, "samples", data)
+        else:
+            self.broadcaster.publish("samples", data)
+
+    def _advance_locked(self) -> int:
+        with self.lock:
+            return self.jobs.advance(self.storage.sim_now())
 
     def receive_local(self, batch_id: str, source_id: str, samples: list[Sample]) -> IngestResult:
         """같은 프로세스의 생성기가 보낸 묶음. 받은 시각은 지금."""
         return self.receive(batch_id, source_id, samples, to_db(datetime.now(timezone.utc)))
 
     def start_catch_up(self) -> None:
-        """밀린 구간이 상한을 넘으면 요청을 붙잡지 않고 백그라운드에서 이어서 따라잡는다. 이벤트 루프 밖(테스트)에서는 그 자리에서 끝낸다."""
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            while self.jobs.advance(self.storage.sim_now()):
+        """밀린 구간이 상한을 넘으면 요청을 붙잡지 않고 백그라운드에서 이어서 따라잡는다. 이벤트 루프가 없으면(테스트) 그 자리에서 끝낸다."""
+        loop = self.loop if self.loop is not None and self.loop.is_running() else None
+        if loop is None:
+            while self._advance_locked():
                 pass
             return
-        if not self.catching_up:
-            self.catch_up_task = asyncio.create_task(self.catch_up())
+        if self._on_loop_thread():
+            if not self.catching_up:
+                self.catch_up_task = asyncio.create_task(self.catch_up())
+        else:
+            loop.call_soon_threadsafe(self.start_catch_up)
 
     async def catch_up(self) -> None:
-        while True:
-            await asyncio.sleep(0)                      # 다른 요청이 끼어들 틈을 준다
-            if self.jobs.advance(self.storage.sim_now()) == 0:
-                return
+        while await asyncio.to_thread(self._advance_locked):
+            pass
 
     # --- 조회 도우미 ---------------------------------------------------------
     @property

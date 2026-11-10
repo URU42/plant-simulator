@@ -15,7 +15,6 @@ from common.timefmt import from_db
 log = logging.getLogger(__name__)
 
 MAX_BACKOFF_SEC = 60.0
-LOCAL_PAUSE_SEC = 0.05      # 통합 실행: 묶음마다 이벤트 루프에 이만큼 틈을 줘 조회 요청이 한 번에 끝나게 한다
 
 
 class SendError(Exception):
@@ -88,8 +87,8 @@ class LocalSender:
         self._sim_now = sim_now
 
     async def send(self, batch: IngestBatch) -> dict[str, Any]:
-        r = self._receive(batch.batch_id, batch.source_id, batch.samples)
-        await asyncio.sleep(LOCAL_PAUSE_SEC)       # 백필 창 사이에 다른 작업(프로브·조회·SSE)이 끝까지 돌 시간
+        # 저장·배치 전진은 워커 스레드에서. 백필처럼 기다림 없는 구간에서도 이벤트 루프(조회 API·프로브)가 비어 있다
+        r = await asyncio.to_thread(self._receive, batch.batch_id, batch.source_id, batch.samples)
         return {"batch_id": r.batch_id, "stored": r.stored, "rejected": r.rejected}
 
     async def collector_time(self) -> datetime | None:

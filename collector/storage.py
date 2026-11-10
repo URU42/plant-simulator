@@ -3,10 +3,12 @@
 수집 서버가 DB에 닿는 유일한 곳이다. 시계열 DB로 바꿀 때 이 모듈만 바꾼다.
 시각은 common.timefmt 규칙(UTC ISO 문자열)으로 저장한다. 태그는 (equip_id, tag_id) 복합키.
 스키마 버전은 schema_meta 에 적는다. 예전 버전(v1, 태그 ID 단일 키) 파일은 바꿀 수 없으므로 열지 않고 알린다.
+연결 하나를 이벤트 루프 스레드(조회)와 워커 스레드(통합 실행의 저장·배치)가 함께 쓰므로 모든 접근을 재진입 락으로 직렬화한다.
 """
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -19,6 +21,7 @@ SCHEMA_VERSION = 2
 class Storage:
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = str(db_path)
+        self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         if self.db_path != ":memory:":
@@ -46,30 +49,36 @@ class Storage:
 
     # --- 범용 ---------------------------------------------------------------
     def execute(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
-        return self._conn.execute(sql, tuple(params))
+        with self._lock:
+            return self._conn.execute(sql, tuple(params))
 
     def executemany(self, sql: str, rows: Iterable[tuple]) -> sqlite3.Cursor:
-        return self._conn.executemany(sql, rows)
+        with self._lock:
+            return self._conn.executemany(sql, rows)
 
     def query(self, sql: str, params: Iterable[Any] = ()) -> list[tuple]:
-        return [tuple(r) for r in self._conn.execute(sql, tuple(params)).fetchall()]
+        with self._lock:
+            return [tuple(r) for r in self._conn.execute(sql, tuple(params)).fetchall()]
 
     def query_dicts(self, sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
-        return [dict(r) for r in self._conn.execute(sql, tuple(params)).fetchall()]
+        with self._lock:
+            return [dict(r) for r in self._conn.execute(sql, tuple(params)).fetchall()]
 
     def count(self, table: str) -> int:
-        return self._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        with self._lock:
+            return self._conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
     def transaction(self) -> "_Tx":
-        return _Tx(self._conn)
+        """BEGIN~COMMIT 동안 락을 쥔다. 다른 스레드의 읽기는 트랜잭션이 끝날 때까지 기다린다."""
+        return _Tx(self._conn, self._lock)
 
     # --- 수집 ---------------------------------------------------------------
     def batch_seen(self, batch_id: str) -> bool:
-        return self._conn.execute("SELECT 1 FROM ingest_batch WHERE batch_id = ?", (batch_id,)).fetchone() is not None
+        return self.query("SELECT 1 FROM ingest_batch WHERE batch_id = ?", (batch_id,)) != []
 
     def tag_keys(self) -> set[TagKey]:
         """마스터에 있는 (equip_id, tag_id)."""
-        return {(r[0], r[1]) for r in self._conn.execute("SELECT equip_id, tag_id FROM equipment_tag")}
+        return {(r[0], r[1]) for r in self.query("SELECT equip_id, tag_id FROM equipment_tag")}
 
     def store_batch(self, batch_id: str, source_id: str, received_at: str, rows: list[tuple]) -> int:
         """rows: (equip_id, tag_id, ts, value, quality). 같은 키·시각은 한 번만 저장하고 저장 건수를 돌려준다."""
@@ -100,18 +109,22 @@ class Storage:
 
     def sim_now(self) -> str | None:
         """수신한 측정 시각의 최대값 = 수집 서버가 보는 시뮬레이터 현재 시각."""
-        return self._conn.execute("SELECT MAX(ts) FROM tag_current").fetchone()[0]
+        return self.query("SELECT MAX(ts) FROM tag_current")[0][0]
 
     def last_received_at(self) -> str | None:
-        return self._conn.execute("SELECT MAX(received_at) FROM ingest_batch").fetchone()[0]
+        return self.query("SELECT MAX(received_at) FROM ingest_batch")[0][0]
 
 
 class _Tx:
-    def __init__(self, conn: sqlite3.Connection) -> None:
-        self._conn = conn
+    def __init__(self, conn: sqlite3.Connection, lock: threading.RLock) -> None:
+        self._conn, self._lock = conn, lock
 
     def __enter__(self) -> None:
+        self._lock.acquire()
         self._conn.execute("BEGIN")
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        self._conn.execute("ROLLBACK" if exc_type else "COMMIT")
+        try:
+            self._conn.execute("ROLLBACK" if exc_type else "COMMIT")
+        finally:
+            self._lock.release()

@@ -51,7 +51,7 @@ async def post_ingest(batch: RawBatch, request: Request, ctx: PlantContext = Dep
     if not schema_supported(batch.schema_version):
         raise HTTPException(400, f"unsupported schema_version {batch.schema_version}")
     accepted, rejected = validate_samples(batch.samples, ctx.tag_keys)
-    return ctx.receive(batch.batch_id, batch.source_id, accepted, to_db(datetime.now(timezone.utc)), rejected)
+    return await asyncio.to_thread(ctx.receive, batch.batch_id, batch.source_id, accepted, to_db(datetime.now(timezone.utc)), rejected)
 
 
 # --- 조회 ---------------------------------------------------------------------
