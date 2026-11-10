@@ -115,6 +115,20 @@ async def alarms(equip_id: str | None = None, from_: str | None = Query(default=
     return ctx.storage.query_dicts(f"SELECT * FROM alarm_detail WHERE {' AND '.join(where)} ORDER BY occurred_at DESC", params)
 
 
+@router.get("/maintenance")
+async def maintenance(equip_id: str | None = None, ctx: PlantContext = Depends(context)):
+    """정비 이력 (개발용 시나리오에서 적재). 다른 파드는 DB 를 직접 읽지 못하므로 API 로 연다."""
+    where, params = ("WHERE equip_id = ?", [equip_id]) if equip_id else ("", [])
+    return ctx.storage.query_dicts(f"SELECT * FROM maintenance_history {where} ORDER BY start_ts", params)
+
+
+@router.get("/failures")
+async def failures(equip_id: str | None = None, ctx: PlantContext = Depends(context)):
+    """고장 이력 (개발용 시나리오에서 적재)."""
+    where, params = ("WHERE equip_id = ?", [equip_id]) if equip_id else ("", [])
+    return ctx.storage.query_dicts(f"SELECT * FROM failure_history {where} ORDER BY start_ts", params)
+
+
 @router.get("/stream")
 async def stream(ctx: PlantContext = Depends(context)):
     return StreamingResponse(ctx.broadcaster.subscribe(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
