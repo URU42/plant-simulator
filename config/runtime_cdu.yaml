@@ -1,0 +1,11 @@
+# CDU 구성안 실행 설정 (다중 공장 설계 §4.5). runtime_rfcc.yaml 과 같고 source_id · seed · collector_url 만 다르다.
+units: [all]
+source_id: SIM-CDU
+sample_interval_sec: 1       # 값 생성 주기. 온도 태그는 구성안의 interval_sec(10)을 따른다
+send_interval_sec: 1         # 묶어서 보내는 주기. 화면이 1초마다 갱신된다
+time_mode: live              # backfill / live / accelerated
+speed: 60
+backfill_days: 1             # 원시값을 하루까지 되돌아본다
+seed: 20261101               # 샘플 생성기 generate_cdu_data.py 의 시드
+collector_url: http://localhost:8000/cdu   # 수집 서버의 공장 접두어까지
+raw_retention_days: 1        # 10분마다 이보다 오래된 원시값을 지운다

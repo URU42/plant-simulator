@@ -1,7 +1,8 @@
 """SQLite 저장 접근부 (교체 가능).
 
 수집 서버가 DB에 닿는 유일한 곳이다. 시계열 DB로 바꿀 때 이 모듈만 바꾼다.
-시각은 common.timefmt 규칙(UTC ISO 문자열)으로 저장한다.
+시각은 common.timefmt 규칙(UTC ISO 문자열)으로 저장한다. 태그는 (equip_id, tag_id) 복합키.
+스키마 버전은 schema_meta 에 적는다. 예전 버전(v1, 태그 ID 단일 키) 파일은 바꿀 수 없으므로 열지 않고 알린다.
 """
 from __future__ import annotations
 
@@ -9,36 +10,36 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+from common.config_models import ConfigError, TagKey
 
-# 예전 스키마로 만든 DB 파일에 뒤늦게 추가된 컬럼. CREATE TABLE IF NOT EXISTS 는 기존 테이블을 바꾸지 않으므로 여기서 붙인다.
-ADDED_COLUMNS: dict[str, dict[str, str]] = {
-    "equipment_tag": {"description": "TEXT", "interval_sec": "INTEGER", "decimals": "INTEGER NOT NULL DEFAULT 3"},
-}
+SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+SCHEMA_VERSION = 2
 
 
 class Storage:
     def __init__(self, db_path: str | Path) -> None:
-        self._conn = sqlite3.connect(str(db_path), check_same_thread=False, isolation_level=None)
+        self.db_path = str(db_path)
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
-        if str(db_path) != ":memory:":
+        if self.db_path != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._check_version()
         self._conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
-        self.db_path = str(db_path)
-        self._migrate()
+        if self._conn.execute("SELECT COUNT(*) FROM schema_meta").fetchone()[0] == 0:
+            self._conn.execute("INSERT INTO schema_meta (version) VALUES (?)", (SCHEMA_VERSION,))
 
-    def _migrate(self) -> None:
-        """예전 DB 파일에 빠진 컬럼을 끝에 덧붙인다 (순서가 schema.sql 과 다르므로 INSERT 는 컬럼 이름을 적는다)."""
-        for table, columns in ADDED_COLUMNS.items():
-            existing = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
-            for name, ddl in columns.items():
-                if name not in existing:
-                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
-
-    def not_null_columns(self, table: str) -> set[str]:
-        """NOT NULL 인 컬럼 이름. 예전 스키마는 한계값·등급이 NOT NULL 이었다."""
-        return {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})") if r["notnull"]}
+    def _check_version(self) -> None:
+        """테이블이 이미 있는 파일은 버전이 맞아야 한다. 새 파일은 그냥 지나간다."""
+        tables = {r[0] for r in self._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if "equipment_tag" not in tables:
+            return
+        found = self._conn.execute("SELECT MAX(version) FROM schema_meta").fetchone()[0] if "schema_meta" in tables else 1
+        if found is None or found < SCHEMA_VERSION:
+            self._conn.close()
+            raise ConfigError(f"DB {self.db_path} was created by an older schema (v{found or 1}); this version needs "
+                              f"v{SCHEMA_VERSION} (composite tag key). Move or delete the file, or point this plant's "
+                              f"db in plants.yaml to a new file")
 
     def close(self) -> None:
         self._conn.close()
@@ -66,29 +67,26 @@ class Storage:
     def batch_seen(self, batch_id: str) -> bool:
         return self._conn.execute("SELECT 1 FROM ingest_batch WHERE batch_id = ?", (batch_id,)).fetchone() is not None
 
-    def tag_ids(self) -> set[str]:
-        return {r[0] for r in self._conn.execute("SELECT tag_id FROM equipment_tag")}
-
-    def tag_owner(self) -> dict[str, str]:
-        """tag_id → equip_id."""
-        return dict(self.query("SELECT tag_id, equip_id FROM equipment_tag"))
+    def tag_keys(self) -> set[TagKey]:
+        """마스터에 있는 (equip_id, tag_id)."""
+        return {(r[0], r[1]) for r in self._conn.execute("SELECT equip_id, tag_id FROM equipment_tag")}
 
     def store_batch(self, batch_id: str, source_id: str, received_at: str, rows: list[tuple]) -> int:
-        """rows: (tag_id, ts, equip_id, value, quality). 같은 (tag_id, ts)는 한 번만 저장하고 저장 건수를 돌려준다."""
+        """rows: (equip_id, tag_id, ts, value, quality). 같은 키·시각은 한 번만 저장하고 저장 건수를 돌려준다."""
         with self.transaction():
             before = self._conn.total_changes
             self._conn.executemany(
-                "INSERT OR IGNORE INTO ts_raw (tag_id, ts, equip_id, value, quality, batch_id, received_at) "
+                "INSERT OR IGNORE INTO ts_raw (equip_id, tag_id, ts, value, quality, batch_id, received_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [(*r, batch_id, received_at) for r in rows],
             )
             stored = self._conn.total_changes - before
             # 현재값: 측정 시각이 더 새로운 행만 반영한다 (시각 순서가 뒤바뀐 행 허용)
             self._conn.executemany(
-                "INSERT INTO tag_current (tag_id, equip_id, ts, value, quality, received_at) VALUES (?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(tag_id) DO UPDATE SET equip_id = excluded.equip_id, ts = excluded.ts, value = excluded.value, "
+                "INSERT INTO tag_current (equip_id, tag_id, ts, value, quality, received_at) VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(equip_id, tag_id) DO UPDATE SET ts = excluded.ts, value = excluded.value, "
                 "quality = excluded.quality, received_at = excluded.received_at WHERE excluded.ts > tag_current.ts",
-                [(r[0], r[2], r[1], r[3], r[4], received_at) for r in rows],
+                [(*r, received_at) for r in rows],
             )
             self._conn.execute(
                 "INSERT INTO ingest_batch (batch_id, source_id, received_at, stored) VALUES (?, ?, ?, ?)",
@@ -96,8 +94,8 @@ class Storage:
             )
         return stored
 
-    def current(self, tag_id: str) -> dict[str, Any] | None:
-        rows = self.query_dicts("SELECT * FROM tag_current WHERE tag_id = ?", (tag_id,))
+    def current(self, key: TagKey) -> dict[str, Any] | None:
+        rows = self.query_dicts("SELECT * FROM tag_current WHERE equip_id = ? AND tag_id = ?", key)
         return rows[0] if rows else None
 
     def sim_now(self) -> str | None:

@@ -1,6 +1,8 @@
 """시나리오 적용 (기획서 5.4~5.6): 이상 패턴, 연관 전파, 정비, 우연한 잡음 알람."""
 from datetime import datetime, timedelta
 
+import re
+
 import numpy as np
 import pytest
 
@@ -13,6 +15,13 @@ from simulator.scenario import Scenario, load_scenarios
 from simulator.signal_model import epochs_range
 
 T0 = datetime(2026, 10, 20, 0, 0, tzinfo=KST)
+
+
+def K(tag_id: str):
+    """HDS 태그명 → (equip_id, tag_id). VI-C1101 → ("C-1101", "VI-C1101"). 테스트 편의용."""
+    code, rest = tag_id.split("-", 1)
+    m = re.match(r"^([A-Z]+)(\d+)$", rest)
+    return f"{m.group(1)}-{m.group(2)}", tag_id
 
 
 def _scenario(plant, **overrides):
@@ -50,10 +59,10 @@ def test_ramp_raises_tag_and_correlated_temperature_follows(plant_path):
     model = sc.model_for_tests()
     equip = plant.equipment_by_id()["C-1101"]
     epochs = epochs_range(T0 - timedelta(hours=1), T0 + timedelta(days=2, hours=2), 10)
-    vi, q, present = sc.apply(model, equip, "VI-C1101", epochs)
-    ti, _, _ = sc.apply(model, equip, "TI-C1101", epochs)
-    plain_vi = model.values("VI-C1101", epochs)
-    plain_ti = model.values("TI-C1101", epochs)
+    vi, q, present = sc.apply(model, equip, K("VI-C1101"), epochs)
+    ti, _, _ = sc.apply(model, equip, K("TI-C1101"), epochs)
+    plain_vi = model.values(K("VI-C1101"), epochs)
+    plain_ti = model.values(K("TI-C1101"), epochs)
     end = (T0 + timedelta(days=2)).timestamp()
     assert np.allclose(vi[epochs < T0.timestamp()], plain_vi[epochs < T0.timestamp()])
     last = end - 10                                                            # 구간은 [start, end) 반열림
@@ -70,8 +79,8 @@ def test_event_holds_until_recovered_at_then_returns_to_normal(plant_path):
     model = sc.model_for_tests()
     equip = plant.equipment_by_id()["C-1101"]
     epochs = epochs_range(T0 + timedelta(days=3), T0 + timedelta(days=5), 10)
-    vi, _, _ = sc.apply(model, equip, "VI-C1101", epochs)
-    delta = vi - model.values("VI-C1101", epochs)
+    vi, _, _ = sc.apply(model, equip, K("VI-C1101"), epochs)
+    delta = vi - model.values(K("VI-C1101"), epochs)
     assert np.allclose(delta[epochs < recovered.timestamp()], 3.0)
     assert np.allclose(delta[epochs >= recovered.timestamp()], 0.0)
 
@@ -85,10 +94,10 @@ def test_related_and_spread_to_driven(plant_path):
     by_id = plant.equipment_by_id()
     epochs = epochs_range(T0 + timedelta(hours=1), T0 + timedelta(hours=2), 10)
     for tag_id, equip_id, expected in [("VI-M4101", "M-4101", 1.0), ("VI-P4101", "P-4101", 0.5), ("VI-G4101", "G-4101", 0.6)]:
-        v, _, _ = sc.apply(model, by_id[equip_id], tag_id, epochs)
-        assert np.allclose(v - model.values(tag_id, epochs), expected), tag_id
-    v, _, _ = sc.apply(model, by_id["C-4101"], "VI-C4101", epochs)      # 두 단계 건너서는 번지지 않는다
-    assert np.allclose(v - model.values("VI-C4101", epochs), 0.0)
+        v, _, _ = sc.apply(model, by_id[equip_id], (equip_id, tag_id), epochs)
+        assert np.allclose(v - model.values((equip_id, tag_id), epochs), expected), tag_id
+    v, _, _ = sc.apply(model, by_id["C-4101"], K("VI-C4101"), epochs)      # 두 단계 건너서는 번지지 않는다
+    assert np.allclose(v - model.values(K("VI-C4101"), epochs), 0.0)
 
 
 def test_freeze_quality_gap_patterns(plant_path):
@@ -101,12 +110,12 @@ def test_freeze_quality_gap_patterns(plant_path):
     model = sc.model_for_tests()
     by_id = plant.equipment_by_id()
     epochs = epochs_range(T0, T0 + timedelta(hours=1), 10)
-    frozen, _, _ = sc.apply(model, by_id["P-4101"], "TI-P4101", epochs)
+    frozen, _, _ = sc.apply(model, by_id["P-4101"], K("TI-P4101"), epochs)
     assert np.ptp(frozen) == 0.0
-    _, q, _ = sc.apply(model, by_id["C-6101"], "TI-C6101", epochs)
+    _, q, _ = sc.apply(model, by_id["C-6101"], K("TI-C6101"), epochs)
     assert set(q) == {"ScanOff"}
     for tag_id in ("VI-P6101", "TI-P6101"):
-        _, _, present = sc.apply(model, by_id["P-6101"], tag_id, epochs)
+        _, _, present = sc.apply(model, by_id["P-6101"], ("P-6101", tag_id), epochs)
         assert not present.any()
     samples = SampleGenerator(plant, RuntimeConfig(), sc).generate(T0, T0 + timedelta(minutes=1))
     assert not any(s.equip_id == "P-6101" for s in samples)
@@ -120,10 +129,10 @@ def test_maintenance_stops_equipment(plant_path):
     model = sc.model_for_tests()
     equip = plant.equipment_by_id()["C-1101"]
     epochs = epochs_range(T0 - timedelta(hours=1), T0 + timedelta(hours=7), 10)
-    vi, _, _ = sc.apply(model, equip, "VI-C1101", epochs)
+    vi, _, _ = sc.apply(model, equip, K("VI-C1101"), epochs)
     inside = (epochs >= T0.timestamp()) & (epochs < (T0 + timedelta(hours=6)).timestamp())
     assert vi[inside].max() < 0.5 and vi[~inside].min() > 1.5
-    ti, _, _ = sc.apply(model, equip, "TI-C1101", epochs)
+    ti, _, _ = sc.apply(model, equip, K("TI-C1101"), epochs)
     assert ti[inside].max() < 30
 
 
@@ -133,13 +142,13 @@ def test_random_anomalies_are_deterministic_and_sparse(plant_path):
     model = sc.model_for_tests()
     equip = plant.equipment_by_id()["C-1101"]
     epochs = epochs_range(T0, T0 + timedelta(days=10), 10)
-    v1, _, _ = sc.apply(model, equip, "VI-C1101", epochs)
-    v2, _, _ = Scenario(sc.configs, plant, RuntimeConfig()).apply(model, equip, "VI-C1101", epochs)
+    v1, _, _ = sc.apply(model, equip, K("VI-C1101"), epochs)
+    v2, _, _ = Scenario(sc.configs, plant, RuntimeConfig()).apply(model, equip, K("VI-C1101"), epochs)
     np.testing.assert_array_equal(v1, v2)
     exceed = (v1 > 4.5).sum()
     assert 0 < exceed < len(epochs) * 0.1
     quiet = _scenario(plant)
-    assert not (quiet.apply(model, equip, "VI-C1101", epochs)[0] > 4.5).any()
+    assert not (quiet.apply(model, equip, K("VI-C1101"), epochs)[0] > 4.5).any()
 
 
 def test_dev_scenario_file_loads_and_matches_plant(plant_path, scenario_path):
@@ -162,10 +171,10 @@ def test_repeat_every_repeats_the_event_weekly(rfcc_plant_path, rfcc_runtime_pat
     first = datetime(2026, 11, 2, 5, 10, tzinfo=KST)
     e1 = epochs_range(first, first + timedelta(minutes=40), 1)
     e2 = e1 + 7 * 86400
-    np.testing.assert_allclose(sc.deviation("VI-P-1101A", e1), sc.deviation("VI-P-1101A", e2))
-    assert sc.deviation("VI-P-1101A", e1).max() > 1.8                                   # magnitude 1.85
-    assert sc.deviation("PS-P-1101A", e1).min() < -0.8                                  # ratio −0.4595
-    assert sc.deviation("VI-P-1101A", e1 + 3 * 86400).max() == 0.0                      # 회차 사이는 0
+    np.testing.assert_allclose(sc.deviation(("P-1101A", "VI-P-1101A"), e1), sc.deviation(("P-1101A", "VI-P-1101A"), e2))
+    assert sc.deviation(("P-1101A", "VI-P-1101A"), e1).max() > 1.8                                   # magnitude 1.85
+    assert sc.deviation(("P-1101A", "PS-P-1101A"), e1).min() < -0.8                                  # ratio −0.4595
+    assert sc.deviation(("P-1101A", "VI-P-1101A"), e1 + 3 * 86400).max() == 0.0                      # 회차 사이는 0
 
 
 def test_repeat_every_rejects_recovered_at():
@@ -180,7 +189,7 @@ def test_quality_event_repeats(rfcc_plant_path, rfcc_runtime_path, rfcc_scenario
     equip = plant.equipment_by_id()["P-1302A"]
     start = datetime(2026, 11, 2, 23, 13, 20, tzinfo=KST) + timedelta(days=14)
     epochs = epochs_range(start - timedelta(seconds=5), start + timedelta(seconds=65), 1)
-    _, qualities, _ = sc.apply(sc.model_for_tests(), equip, "VI-P-1302A", epochs)
+    _, qualities, _ = sc.apply(sc.model_for_tests(), equip, ("P-1302A", "VI-P-1302A"), epochs)
     assert qualities[:5] == ["Good"] * 5 and qualities[5:65] == ["Bad"] * 60 and qualities[65:] == ["Good"] * 5
 
 
@@ -188,4 +197,64 @@ def test_random_anomalies_skip_tags_without_limits(rfcc_plant_path, rfcc_runtime
     plant, runtime = load_plant(rfcc_plant_path), load_runtime(rfcc_runtime_path)
     maker = RandomAnomalyMaker(plant, runtime.seed, rate_per_tag_day=5.0)
     epochs = epochs_range(datetime(2026, 11, 9, tzinfo=KST), datetime(2026, 11, 10, tzinfo=KST), 60)
-    assert maker.offset("VI-P-1101A", epochs).max() == 0.0
+    assert maker.offset(("P-1101A", "VI-P-1101A"), epochs).max() == 0.0
+
+
+# ---------------------------------------------------------------------------
+# 복합키 시나리오 (다중 공장 설계 §4.1, §4.3)
+# ---------------------------------------------------------------------------
+
+def test_event_with_only_tag_id_gets_equipment_filled(plant_path):
+    plant = load_plant(plant_path)
+    cfg = ScenarioConfig.model_validate({"events": [_ramp_event(related=[{"tag_id": "TI-C1101", "ratio": 0.5}])]})
+    cfg.validate_against(plant)
+    assert cfg.events[0].equip_id == "C-1101" and cfg.events[0].related[0].equip_id == "C-1101"
+    assert cfg.events[0].target_keys(plant) == [("C-1101", "VI-C1101")]
+
+
+def test_event_needs_equip_or_tag():
+    with pytest.raises(ValueError, match="equip_id or tag_id"):
+        ScenarioEvent(event_id="E", pattern="ramp", start=datetime(2026, 1, 1, tzinfo=KST), duration="1h")
+
+
+def test_random_quality_config_parses_durations():
+    cfg = ScenarioConfig.model_validate({"random_quality": {"uncertain_rate": 0.00003, "bad_segments_per_tag_week": 1.0,
+                                                            "bad_duration": ["30s", "400s"]}})
+    assert cfg.random_quality.bad_duration == (timedelta(seconds=30), timedelta(seconds=400))
+
+
+def test_random_quality_is_deterministic_and_near_rate(rfcc_plant_path, rfcc_runtime_path):
+    from common.scenario_models import RandomQuality
+    from simulator.random_quality import RandomQualityMaker
+    plant, runtime = load_plant(rfcc_plant_path), load_runtime(rfcc_runtime_path)
+    cfg = RandomQuality(uncertain_rate=0.001, bad_segments_per_tag_week=7.0, bad_duration=("30s", "400s"))
+    maker = RandomQualityMaker(plant, runtime.seed, cfg)
+    key = ("P-1101A", "VI-P-1101A")
+    epochs = epochs_range(datetime(2026, 11, 9, tzinfo=KST), datetime(2026, 11, 16, tzinfo=KST), 1)   # 7일
+    q = maker.qualities(key, epochs, 1)
+    again = maker.qualities(key, epochs[:86400], 1)
+    np.testing.assert_array_equal(q[:86400], again)
+    bad, unc = (q == "Bad").sum(), (q == "Uncertain").sum()
+    assert 2 * 30 <= bad <= 14 * 400                      # 주당 7개 구간 ± poisson
+    assert 0.0004 * len(q) < unc < 0.002 * len(q)
+    quiet = RandomQualityMaker(plant, runtime.seed, RandomQuality())
+    assert quiet.qualities(key, epochs[:3600], 1) is None
+
+
+def test_explicit_equip_id_is_never_overridden(rfcc_plant_path):
+    """설비를 직접 적었는데 그 설비에 태그가 없으면 다른 설비로 옮기지 말고 멈춘다 (리뷰 Important 1)."""
+    plant = load_plant(rfcc_plant_path)
+    ev = {"event_id": "E", "equip_id": "P-1101A", "tag_id": "VX-B-1201", "pattern": "step", "start": "2026-11-01T00:00:00+09:00",
+          "duration": "1h", "magnitude": 1.0}
+    with pytest.raises(ConfigError, match="E.*P-1101A.*VX-B-1201"):
+        ScenarioConfig.model_validate({"events": [ev]}).validate_against(plant)
+    ev2 = ev | {"tag_id": "B-1201/VX-B-1201"}                              # EQUIP/TAG 가 적힌 설비와 다르다
+    with pytest.raises(ConfigError, match="E.*P-1101A"):
+        ScenarioConfig.model_validate({"events": [ev2]}).validate_against(plant)
+    ev3 = {"event_id": "E", "equip_id": "P-1101A", "tag_id": "VI-P-1101A", "pattern": "step", "start": "2026-11-01T00:00:00+09:00",
+           "duration": "1h", "magnitude": 1.0, "related": [{"equip_id": "P-1101A", "tag_id": "VX-B-1201", "ratio": 0.5}]}
+    with pytest.raises(ConfigError, match="related.*P-1101A.*VX-B-1201"):
+        ScenarioConfig.model_validate({"events": [ev3]}).validate_against(plant)
+    ok = ev3 | {"related": [{"tag_id": "VX-B-1201", "ratio": 0.5}]}         # 설비를 안 적은 related 는 공장 안에서 유일하면 찾는다
+    cfg = ScenarioConfig.model_validate({"events": [ok]}); cfg.validate_against(plant)
+    assert cfg.events[0].related[0].equip_id == "B-1201"

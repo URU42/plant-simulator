@@ -1,12 +1,11 @@
-# 명령 하나로 두 프로세스를 띄운다: docker compose up --build
-# 죽어도 다시 살아나 계속 생성한다 (restart: always). DB 파일은 ./data/ 에 남는다.
-# 기본은 RFCC 구성안(1초 데이터). 수첨탈황 구성안으로 돌리려면:
-#   PLANT_CONFIG=config/plant_hds.yaml RUNTIME_CONFIG=config/runtime.yaml SCENARIO_CONFIG=config/scenario_dev.yaml DB_PATH=data/plant.db docker compose up
+# 명령 하나로 수집 서버 1 + 공장별 시뮬레이터 6 을 띄운다: docker compose up --build -d
+# 죽어도 다시 살아나 계속 생성한다 (restart: always). DB 파일은 공장마다 ./data/<key>.db 에 남는다.
+# SIM_TIME_MODE 기본 backfill: 각 공장이 runtime 의 backfill_days 를 채운 뒤 실시간으로 이어진다(hds 90일, 나머지 1일).
+# 재시작하면 수집 서버의 마지막 시각부터 이어서 보내므로 다시 채우지 않는다.
 services:
   collector:
     build: .
-    command: python -m collector.app --plant ${PLANT_CONFIG:-config/plant_rfcc.yaml} --runtime ${RUNTIME_CONFIG:-config/runtime_rfcc.yaml}
-             --scenario ${SCENARIO_CONFIG:-config/scenario_rfcc.yaml} --db ${DB_PATH:-data/rfcc.db} --port 8000
+    command: python -m collector.app --plants config/plants.yaml --port 8000
     ports: ["8000:8000"]
     volumes:
       - ./data:/app/data
@@ -18,14 +17,71 @@ services:
       timeout: 3s
       retries: 5
 
-  simulator:
+  sim-hds:
     build: .
-    # SIM_TIME_MODE 기본 backfill: 지난 하루(runtime 의 backfill_days)를 채운 뒤 실시간으로 이어진다.
-    # 재시작하면 수집 서버의 마지막 시각부터 이어서 보내므로 다시 채우지 않는다.
-    command: python -m simulator.main --plant ${PLANT_CONFIG:-config/plant_rfcc.yaml} --runtime ${RUNTIME_CONFIG:-config/runtime_rfcc.yaml}
-             --scenario ${SCENARIO_CONFIG:-config/scenario_rfcc.yaml} --time-mode ${SIM_TIME_MODE:-backfill}
+    command: python -m simulator.main --plant config/plant_hds.yaml --runtime config/runtime.yaml --scenario config/scenario_dev.yaml --time-mode ${SIM_TIME_MODE:-backfill}
     environment:
-      COLLECTOR_URL: http://collector:8000
+      COLLECTOR_URL: http://collector:8000/hds
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      collector:
+        condition: service_healthy
+    restart: always
+
+  sim-rfcc:
+    build: .
+    command: python -m simulator.main --plant config/plant_rfcc.yaml --runtime config/runtime_rfcc.yaml --scenario config/scenario_rfcc.yaml --time-mode ${SIM_TIME_MODE:-backfill}
+    environment:
+      COLLECTOR_URL: http://collector:8000/rfcc
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      collector:
+        condition: service_healthy
+    restart: always
+
+  sim-cdu:
+    build: .
+    command: python -m simulator.main --plant config/plant_cdu.yaml --runtime config/runtime_cdu.yaml --scenario config/scenario_cdu.yaml --time-mode ${SIM_TIME_MODE:-backfill}
+    environment:
+      COLLECTOR_URL: http://collector:8000/cdu
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      collector:
+        condition: service_healthy
+    restart: always
+
+  sim-hou:
+    build: .
+    command: python -m simulator.main --plant config/plant_hou.yaml --runtime config/runtime_hou.yaml --scenario config/scenario_hou.yaml --time-mode ${SIM_TIME_MODE:-backfill}
+    environment:
+      COLLECTOR_URL: http://collector:8000/hou
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      collector:
+        condition: service_healthy
+    restart: always
+
+  sim-rhds:
+    build: .
+    command: python -m simulator.main --plant config/plant_rhds.yaml --runtime config/runtime_rhds.yaml --scenario config/scenario_rhds.yaml --time-mode ${SIM_TIME_MODE:-backfill}
+    environment:
+      COLLECTOR_URL: http://collector:8000/rhds
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      collector:
+        condition: service_healthy
+    restart: always
+
+  sim-vrds:
+    build: .
+    command: python -m simulator.main --plant config/plant_vrds.yaml --runtime config/runtime_vrds.yaml --scenario config/scenario_vrds.yaml --time-mode ${SIM_TIME_MODE:-backfill}
+    environment:
+      COLLECTOR_URL: http://collector:8000/vrds
     volumes:
       - ./config:/app/config:ro
     depends_on:

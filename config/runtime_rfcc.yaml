@@ -7,5 +7,5 @@ time_mode: live              # backfill / live / accelerated
 speed: 60                    # accelerated 모드 배율
 backfill_days: 1             # 백필 기간. 원시값을 하루까지 되돌아본다
 seed: 61109                  # 샘플 자료 생성기의 시드
-collector_url: http://localhost:8000
+collector_url: http://localhost:8000/rfcc   # 수집 서버의 공장 접두어까지
 raw_retention_days: 1        # 원시 값 보관 기간. 10분마다 이보다 오래된 행을 지운다

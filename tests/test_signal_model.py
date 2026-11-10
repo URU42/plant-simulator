@@ -1,6 +1,8 @@
 """정상 신호 모델과 연관 규칙 (기획서 5.1, 5.2, 5.7)."""
 from datetime import datetime, timedelta
 
+import re
+
 import numpy as np
 
 from common.config_models import load_plant
@@ -9,6 +11,13 @@ from simulator.signal_model import SignalModel, epochs_range
 
 SEED = 20261108
 START = datetime(2026, 8, 1, tzinfo=KST)
+
+
+def K(tag_id: str):
+    """HDS 태그명 → (equip_id, tag_id). VI-C1101 → ("C-1101", "VI-C1101"). 테스트 편의용."""
+    code, rest = tag_id.split("-", 1)
+    m = re.match(r"^([A-Z]+)(\d+)$", rest)
+    return f"{m.group(1)}-{m.group(2)}", tag_id
 
 
 def _model(plant_path):
@@ -20,8 +29,8 @@ def test_seven_days_stay_below_warn_limit(plant_path):
     plant, model = _model(plant_path)
     epochs = epochs_range(START, START + timedelta(days=7), 10)
     assert len(epochs) == 7 * 8640
-    for tag in plant.all_tags():
-        values = model.values(tag.tag_id, epochs)
+    for key, tag in plant.tag_by_key().items():
+        values = model.values(key, epochs)
         assert values.shape == epochs.shape
         assert values.max() < tag.limits.warn_hi, tag.tag_id
         assert abs(values.mean() - tag.normal.base) < tag.limits.warn_hi * 0.05, tag.tag_id
@@ -29,20 +38,20 @@ def test_seven_days_stay_below_warn_limit(plant_path):
 
 def test_same_seed_same_values_regardless_of_chunking(plant_path):
     plant, model = _model(plant_path)
-    whole = model.values("VI-C1101", epochs_range(START, START + timedelta(hours=3), 10))
-    part1 = model.values("VI-C1101", epochs_range(START, START + timedelta(hours=1), 10))
-    part2 = model.values("VI-C1101", epochs_range(START + timedelta(hours=1), START + timedelta(hours=3), 10))
+    whole = model.values(K("VI-C1101"), epochs_range(START, START + timedelta(hours=3), 10))
+    part1 = model.values(K("VI-C1101"), epochs_range(START, START + timedelta(hours=1), 10))
+    part2 = model.values(K("VI-C1101"), epochs_range(START + timedelta(hours=1), START + timedelta(hours=3), 10))
     np.testing.assert_array_equal(whole, np.concatenate([part1, part2]))
     other = SignalModel(plant, seed=SEED, sample_interval_sec=10)
-    np.testing.assert_array_equal(whole, other.values("VI-C1101", epochs_range(START, START + timedelta(hours=3), 10)))
+    np.testing.assert_array_equal(whole, other.values(K("VI-C1101"), epochs_range(START, START + timedelta(hours=3), 10)))
 
 
 def test_different_seed_or_tag_gives_different_values(plant_path):
     plant, model = _model(plant_path)
     epochs = epochs_range(START, START + timedelta(hours=1), 10)
-    a = model.values("VI-C1101", epochs)
-    b = SignalModel(plant, seed=SEED + 1, sample_interval_sec=10).values("VI-C1101", epochs)
-    c = model.values("VI-C2101", epochs)
+    a = model.values(K("VI-C1101"), epochs)
+    b = SignalModel(plant, seed=SEED + 1, sample_interval_sec=10).values(K("VI-C1101"), epochs)
+    c = model.values(K("VI-C2101"), epochs)
     assert not np.array_equal(a, b)
     assert not np.array_equal(a - a.mean(), c - c.mean())
 
@@ -57,16 +66,16 @@ def test_seed_follows_seed_key_not_tag_id(plant_path):
     raw["correlations"][0]["source"] = "VI-RENAMED"      # 규칙 파일의 참조도 함께 고친다 (3.4 바꿀 때 고칠 곳)
     renamed = SignalModel(PlantConfig.model_validate(raw), seed=SEED, sample_interval_sec=10)
     epochs = epochs_range(START, START + timedelta(hours=1), 10)
-    np.testing.assert_array_equal(original.values("VI-C1101", epochs), renamed.values("VI-RENAMED", epochs))
+    np.testing.assert_array_equal(original.values(K("VI-C1101"), epochs), renamed.values(("C-1101", "VI-RENAMED"), epochs))
 
 
 def test_stopped_equipment_values(plant_path):
     plant, model = _model(plant_path)
     epochs = epochs_range(START, START + timedelta(hours=1), 10)
-    assert model.stopped_values("VI-C1101", epochs).max() < 0.5      # 진동은 0 근처
-    temp = model.stopped_values("TI-C1101", epochs)
+    assert model.stopped_values(K("VI-C1101"), epochs).max() < 0.5      # 진동은 0 근처
+    temp = model.stopped_values(K("TI-C1101"), epochs)
     assert temp.max() < 35 and temp.min() > 15                       # 온도는 주변 온도 쪽
-    assert model.stopped_values("PI-C1101", epochs).max() < 0.5      # 압력은 0 근처
+    assert model.stopped_values(K("PI-C1101"), epochs).max() < 0.5      # 압력은 0 근처
 
 
 def test_correlation_propagates_source_deviation_with_lag(plant_path):
@@ -75,17 +84,17 @@ def test_correlation_propagates_source_deviation_with_lag(plant_path):
     t0 = START + timedelta(hours=2)
     epochs = epochs_range(START, START + timedelta(hours=5), 10)
 
-    def deviation(tag_id: str, ep: np.ndarray) -> np.ndarray:
-        if tag_id == "VI-C1101":
+    def deviation(key, ep: np.ndarray) -> np.ndarray:
+        if key == ("C-1101", "VI-C1101"):
             return np.where(ep >= t0.timestamp(), 1.0, 0.0)
         return np.zeros_like(ep, dtype=float)
 
-    plain = model.values("TI-C1101", epochs)
-    with_dev = model.values("TI-C1101", epochs, deviation=deviation)
+    plain = model.values(K("TI-C1101"), epochs)
+    with_dev = model.values(K("TI-C1101"), epochs, deviation=deviation)
     delta = with_dev - plain
     before = epochs < (t0 + timedelta(minutes=60)).timestamp()
     np.testing.assert_allclose(delta[before], 0.0)
     np.testing.assert_allclose(delta[~before], 1.8)
     # 원천 태그 자신에게는 편차가 그대로 더해진다
-    np.testing.assert_allclose(model.values("VI-C1101", epochs, deviation=deviation) - model.values("VI-C1101", epochs),
+    np.testing.assert_allclose(model.values(K("VI-C1101"), epochs, deviation=deviation) - model.values(K("VI-C1101"), epochs),
                                np.where(epochs >= t0.timestamp(), 1.0, 0.0))

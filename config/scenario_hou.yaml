@@ -1,0 +1,48 @@
+# HOU 개발용 시나리오 (다중 공장 설계 §4.6). 출처: hou-plant-sample/평가전용/시나리오_정답.md. 매주 반복.
+# 운전 변경(C-2201 부하 증가)은 넣지 않는다. 계측 품질 저하(Bad 구간·Uncertain)는 random_quality 로 넣는다.
+events:
+  # 환류 펌프 캐비테이션 징후 (알람 수준, 정지 미도달): 진동 +3.0(→ 약 4.9, 알람 4.5 초과), 흡입압력 −2.0(→ 약 2.3, 알람 하한 2.5 미만), 유량 −10 %
+  - event_id: EV-HOU-001
+    equip_id: P-2601
+    tag_id: VI-2601A
+    pattern: swell
+    start: 2026-11-02T21:00:00+09:00
+    duration: 38h
+    repeat_every: 7d
+    magnitude: 3.0
+    related:
+      - { tag_id: PI-2601A, ratio: -0.667 }       # −2.0 / 3.0
+      - { tag_id: FI-2601, ratio: -3.27 }         # −0.1·98.08 / 3.0
+    description: 흡입압력 서서히 하락, 진동 불규칙 증가, 유량 변동. 캐비테이션 징후
+
+  # FD/ID 팬 반구동측 베어링 (경고 수준): 온도 +28(→ 약 81 °C), 진동 +1.4(→ 약 3.3)
+  - event_id: EV-HOU-002
+    equip_id: FN-2401
+    tag_id: TI-2401B
+    pattern: swell
+    start: 2026-11-01T20:00:00+09:00
+    duration: 63h
+    repeat_every: 7d
+    magnitude: 28
+    related:
+      - { tag_id: VI-2401B, ratio: 0.05 }         # +1.4 / 28
+    description: 반구동측 베어링 온도·진동 완만 상승. 유량·전류·RPM 정상. 경고 초과, 알람 미도달
+
+  # 윤활유 펌프 유량 Scan Off 30분 (점검 중 가정)
+  - event_id: EV-HOU-003
+    equip_id: P-2501
+    tag_id: FI-2501
+    pattern: quality
+    quality: ScanOff
+    start: 2026-11-03T22:00:00+09:00
+    duration: 30m
+    repeat_every: 7d
+
+random_anomalies:
+  rate_per_tag_day: 0
+
+# HOU 생성기 규칙: 샘플당 Uncertain 3e-5 (10초 태그 ×10), 태그당 0~2회의 Bad 구간(30~400초)
+random_quality:
+  uncertain_rate: 0.00003
+  bad_segments_per_tag_week: 1.0
+  bad_duration: [30s, 400s]

@@ -9,6 +9,11 @@ from common.sim_clock import KST
 from simulator.rfcc_model import RFCC_EPOCH, RfccSignalModel, ar1_series, lowpass
 from simulator.signal_model import epochs_range
 
+def K(tag_id: str):
+    """RFCC 태그명 → (equip_id, tag_id). VI-P-1101A → ("P-1101A", "VI-P-1101A"). 테스트 편의용."""
+    return tag_id.split("-", 1)[1], tag_id
+
+
 T0 = datetime(2026, 11, 9, 0, 0, tzinfo=KST)
 
 
@@ -38,7 +43,7 @@ def test_lowpass_has_unit_dc_gain():
 
 def test_values_do_not_depend_on_chunking(model):
     whole = epochs_range(T0, T0 + timedelta(hours=2), 1)
-    for tag in ("VI-P-1101A", "TI-P-1101A", "SI-C-1401", "FI-B-1201"):
+    for tag in map(K, ("VI-P-1101A", "TI-P-1101A", "SI-C-1401", "FI-B-1201")):
         one = model.normal_values(tag, whole)
         two = np.concatenate([model.normal_values(tag, whole[:3600]), model.normal_values(tag, whole[3600:])])
         single = np.array([model.normal_values(tag, whole[i:i + 1])[0] for i in (0, 1234, 7199)])
@@ -49,40 +54,40 @@ def test_values_do_not_depend_on_chunking(model):
 def test_midnight_is_continuous(model):
     plant = model.plant
     for tag_id in ("VI-P-1101A", "FI-P-1101A", "TI-P-1101A", "SI-B-1201"):
-        tag = plant.tag_by_id()[tag_id]
+        tag = plant.tag_by_key()[K(tag_id)]
         step = tag.interval_sec or 1
-        before = model.normal_values(tag_id, np.array([int(T0.timestamp()) - step]))[0]
-        after = model.normal_values(tag_id, np.array([int(T0.timestamp())]))[0]
+        before = model.normal_values(K(tag_id), np.array([int(T0.timestamp()) - step]))[0]
+        after = model.normal_values(K(tag_id), np.array([int(T0.timestamp())]))[0]
         assert abs(after - before) < 10 * tag.normal.noise_sd + 1e-9, tag_id
 
 
 def test_driven_equipment_shares_driver_speed(model):
     epochs = epochs_range(T0, T0 + timedelta(minutes=5), 1)
-    np.testing.assert_allclose(model.normal_values("SI-B-1201", epochs), model.normal_values("SI-E-1202", epochs))
-    np.testing.assert_allclose(model.normal_values("SI-C-1401", epochs), model.normal_values("SI-T-1401", epochs))
-    assert not np.allclose(model.normal_values("SI-B-1201", epochs), model.normal_values("SI-C-1401", epochs))
+    np.testing.assert_allclose(model.normal_values(K("SI-B-1201"), epochs), model.normal_values(K("SI-E-1202"), epochs))
+    np.testing.assert_allclose(model.normal_values(K("SI-C-1401"), epochs), model.normal_values(K("SI-T-1401"), epochs))
+    assert not np.allclose(model.normal_values(K("SI-B-1201"), epochs), model.normal_values(K("SI-C-1401"), epochs))
 
 
 def test_values_stay_near_baseline_over_a_day(model):
     epochs = epochs_range(T0, T0 + timedelta(days=1), 10)
-    by_id = model.plant.tag_by_id()
+    by_key = model.plant.tag_by_key()
     for tag_id, tol in (("VI-P-1101A", 0.25), ("TI-P-1101A", 3.0), ("PS-P-1101A", 0.1), ("FI-P-1101A", 15), ("II-P-1101A", 10)):
-        v = model.normal_values(tag_id, epochs)
-        assert abs(v.mean() - by_id[tag_id].normal.base) < tol, tag_id
+        v = model.normal_values(K(tag_id), epochs)
+        assert abs(v.mean() - by_key[K(tag_id)].normal.base) < tol, tag_id
         assert np.isfinite(v).all()
 
 
 def test_stopped_values(model):
     epochs = epochs_range(T0, T0 + timedelta(minutes=1), 1)
-    assert abs(model.stopped_values("VI-P-1101A", epochs).mean()) < 0.1
-    assert abs(model.stopped_values("TI-P-1101A", epochs).mean() - 25.0) < 1.0
-    assert abs(model.stopped_values("ZI-E-1202", epochs).mean() - 0.04) < 0.01
-    assert abs(model.stopped_values("SI-C-1401", epochs).mean()) < 1.0
+    assert abs(model.stopped_values(K("VI-P-1101A"), epochs).mean()) < 0.1
+    assert abs(model.stopped_values(K("TI-P-1101A"), epochs).mean() - 25.0) < 1.0
+    assert abs(model.stopped_values(K("ZI-E-1202"), epochs).mean() - 0.04) < 0.01
+    assert abs(model.stopped_values(K("SI-C-1401"), epochs).mean()) < 1.0
 
 
 def test_epoch_before_fixed_origin_is_rejected(model):
     with pytest.raises(ConfigError, match="2026-01-01"):
-        model.normal_values("VI-P-1101A", np.array([int(RFCC_EPOCH) - 1]))
+        model.normal_values(K("VI-P-1101A"), np.array([int(RFCC_EPOCH) - 1]))
 
 
 def test_unknown_signal_kind_and_speed_mismatch_are_reported(rfcc_plant_path, rfcc_runtime_path):
@@ -93,18 +98,43 @@ def test_unknown_signal_kind_and_speed_mismatch_are_reported(rfcc_plant_path, rf
     with pytest.raises(ConfigError, match="unknown signal kind humidity"):
         RfccSignalModel(bad, rt.seed, rt.sample_interval_sec)
     bad = plant.model_copy(deep=True)
-    bad.tag_by_id()["SI-B-1201"].normal.base = 5300
+    bad.tag_by_key()[K("SI-B-1201")].normal.base = 5300
     with pytest.raises(ConfigError, match="B-1201"):
         RfccSignalModel(bad, rt.seed, rt.sample_interval_sec)
 
 
 def test_fast_noise_is_continuous_across_block_boundaries(model):
     """빠른 성분 블록 경계(UTC 자정)의 한 스텝 차이가 블록 안의 한 스텝 차이와 같은 크기여야 한다 (τ 80, τ 12 태그)."""
-    by_id = model.plant.tag_by_id()
+    by_key = model.plant.tag_by_key()
     for tag_id in ("TI-P-1101A", "ZI-E-1202"):
-        step = by_id[tag_id].interval_sec
+        step = by_key[K(tag_id)].interval_sec
         boundaries = np.array([int(T0.timestamp()) // 86400 * 86400 + d * 86400 for d in range(30)])     # 30일의 UTC 자정
-        at_boundary = np.abs(model.normal_values(tag_id, boundaries) - model.normal_values(tag_id, boundaries - step))
-        inside = model.normal_values(tag_id, np.arange(boundaries[0] + 3600, boundaries[0] + 3600 + 3000 * step, step))
+        at_boundary = np.abs(model.normal_values(K(tag_id), boundaries) - model.normal_values(K(tag_id), boundaries - step))
+        inside = model.normal_values(K(tag_id), np.arange(boundaries[0] + 3600, boundaries[0] + 3600 + 3000 * step, step))
         typical = np.abs(np.diff(inside)).mean()
         assert at_boundary.mean() < 1.5 * typical, (tag_id, at_boundary.mean(), typical)
+
+
+def test_new_signal_kinds(rfcc_plant_path, rfcc_runtime_path):
+    rt = load_runtime(rfcc_runtime_path)
+    plant = load_plant(rfcc_plant_path).model_copy(deep=True)
+    tags = plant.equipment[0].tags
+    tags[2].signal = "differential_pressure"      # PS-P-1101A 를 차압으로
+    tags[1].signal = "process_temp"               # TI-P-1101A 를 공정 온도로
+    model = RfccSignalModel(plant, rt.seed, 1)
+    epochs = epochs_range(T0, T0 + timedelta(minutes=10), 10)
+    assert abs(model.normal_values(("P-1101A", "PS-P-1101A"), epochs).mean() - 3.2) < 0.2
+    assert abs(model.stopped_values(("P-1101A", "PS-P-1101A"), epochs).mean()) < 0.1
+    assert abs(model.normal_values(("P-1101A", "TI-P-1101A"), epochs).mean() - 66) < 3
+    assert abs(model.stopped_values(("P-1101A", "TI-P-1101A"), epochs).mean() - 25) < 1
+
+
+def test_same_tag_name_on_two_equipment_gives_different_values(rfcc_plant_path, rfcc_runtime_path):
+    rt = load_runtime(rfcc_runtime_path)
+    plant = load_plant(rfcc_plant_path).model_copy(deep=True)
+    plant.equipment[1].tags[2].tag_id = "TI-P-1101A"         # B-1201 의 온도 태그 이름을 P-1101A 와 같게
+    model = RfccSignalModel(plant, rt.seed, 1)
+    epochs = epochs_range(T0, T0 + timedelta(minutes=10), 10)
+    a = model.normal_values(("P-1101A", "TI-P-1101A"), epochs)
+    b = model.normal_values(("B-1201", "TI-P-1101A"), epochs)
+    assert abs(a.mean() - 66) < 3 and abs(b.mean() - 78) < 3

@@ -37,3 +37,8 @@ def rfcc_runtime_path() -> Path:
 @pytest.fixture(scope="session")
 def rfcc_scenario_path() -> Path:
     return CONFIG_DIR / "scenario_rfcc.yaml"
+
+
+@pytest.fixture(scope="session")
+def config_dir() -> Path:
+    return CONFIG_DIR

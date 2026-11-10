@@ -15,8 +15,7 @@ from common.timefmt import to_db
 def seed_history(storage: Storage, scenario_path: str | Path, plant: PlantConfig | None = None) -> None:
     cfg = ScenarioConfig.model_validate(load_yaml(scenario_path))
     if plant is not None:
-        cfg.validate_against(plant)
-    tag_owner = dict(storage.query("SELECT tag_id, equip_id FROM equipment_tag"))
+        cfg.validate_against(plant)             # 비어 있던 equip_id 가 채워진다
     with storage.transaction():
         storage.executemany(
             "INSERT OR REPLACE INTO maintenance_history (work_order_id, equip_id, start_ts, end_ts, description) VALUES (?, ?, ?, ?, ?)",
@@ -24,5 +23,5 @@ def seed_history(storage: Storage, scenario_path: str | Path, plant: PlantConfig
         storage.executemany(
             "INSERT OR REPLACE INTO failure_history (failure_id, equip_id, tag_id, start_ts, end_ts, work_order_id, doc_id, description) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            [(e.failure_id, e.equip_id or tag_owner.get(e.tag_id), e.tag_id, to_db(e.start), to_db(e.end),
+            [(e.failure_id, e.equip_id, e.tag_id, to_db(e.start), to_db(e.end),
               e.work_order_id, e.doc_id, e.description) for e in cfg.events if e.failure_id])

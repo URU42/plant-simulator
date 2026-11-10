@@ -1,0 +1,780 @@
+# 구성안: HOU (수첨분해) (PL-HOU) — 다중 공장 설계 docs/superpowers/specs/2026-11-09-multi-plant-design.md
+# - 출처: hou-plant-sample/data/HOU_*.xlsx 의 `설비 설명`(계층)·`설비 태그`(태그명·설명·단위·정상 기준·경고/알람/정지 상·하한·근거) 시트. 마스터 값은 그대로.
+# - 태그명은 같은 설비 안에서만 고유하다 (복합키 (equip_id, tag_id)). 한계값·정상 기준·근거는 자료 그대로이며 빈 칸은 적지 않았다.
+# - normal.base 는 데이터 첫 6시간 Good·Uncertain 평균, noise_sd 는 첫 1시간을 추세 제거한 표준편차의 0.9배, decimals 는 데이터의 소수 자릿수.
+# - 온도 10초, 나머지 1초. 신호 모델은 rfcc. seed_key 는 공장 접두어를 붙여 다른 공장과 겹치지 않는다.
+
+plant:
+  plant_id: PL-HOU
+  name: "HOU (수첨분해)"
+  config_version: 1
+  signal_model: rfcc
+  unit_groups:
+    - id: UG-HOU-01
+      name: "원료 공급"
+      units:
+        - { id: UNIT-HOU-01, name: "원료 가압·공급" }
+    - id: UG-HOU-02
+      name: "수소 공급"
+      units:
+        - { id: UNIT-HOU-02, name: "보충 수소 압축" }
+    - id: UG-HOU-03
+      name: "수첨반응"
+      units:
+        - { id: UNIT-HOU-03, name: "수소 순환" }
+        - { id: UNIT-HOU-04, name: "반응기 가열" }
+    - id: UG-HOU-04
+      name: "기액 분리·순환"
+      units:
+        - { id: UNIT-HOU-05, name: "압축기 지원" }
+    - id: UG-HOU-05
+      name: "생성물 분별"
+      units:
+        - { id: UNIT-HOU-06, name: "분별탑 환류" }
+        - { id: UNIT-HOU-07, name: "미전환유 순환" }
+
+# 설비 유형 매핑. kind 는 신호 모델이 보는 기계 종류
+equipment_types:
+  - { type: PM, name: 펌프, prefix: P, kind: pump }
+  - { type: CC, name: 압축기, prefix: C, kind: compressor }
+  - { type: FN, name: 팬, prefix: F, kind: fan }
+
+# 표준 태그 (신호 종류 · 대표 접두어 · 대표 단위). 태그별 실제 단위는 각 태그에 적는다
+signals:
+  - { signal: vibration, prefix: VI, unit: "mm/s RMS", name: 케이싱 진동 속도 }
+  - { signal: bearing_temp, prefix: TI, unit: "DEG C", name: 베어링 온도 }
+  - { signal: suction_pressure, prefix: PI, unit: "kg/cm2(g)", name: 흡입 압력 }
+  - { signal: discharge_pressure, prefix: PI, unit: "kg/cm2(g)", name: 토출 압력 }
+  - { signal: flow, prefix: FI, unit: "m3/h", name: 유량 }
+  - { signal: current, prefix: II, unit: "A", name: 모터 전류 }
+  - { signal: suction_temp, prefix: TI, unit: "DEG C", name: 흡입 온도 }
+  - { signal: discharge_temp, prefix: TI, unit: "DEG C", name: 토출 온도 }
+  - { signal: speed, prefix: SI, unit: "rpm", name: 회전속도 }
+  - { signal: shaft_vibration, prefix: VI, unit: "um pk-pk", name: 축 상대 진동 }
+  - { signal: axial_position, prefix: ZI, unit: "mm", name: 축방향 위치 }
+  - { signal: differential_pressure, prefix: PDI, unit: "mmH2O", name: 차압 }
+  - { signal: oil_pressure, prefix: PI, unit: "kg/cm2(g)", name: 윤활유 압력 }
+  - { signal: oil_temp, prefix: TI, unit: "DEG C", name: 윤활유 온도 }
+  - { signal: process_temp, prefix: TI, unit: "DEG C", name: 공정 유체 온도 }
+
+equipment:
+  # ---------------- UNIT-HOU-01 원료 가압·공급 ----------------
+  - equip_id: P-2101
+    name: "고압 원료 공급 펌프 (High Pressure Feed Pump)"
+    type: PM
+    unit_id: UNIT-HOU-01
+    seed_key: hou-e01
+    tags:
+      - { tag_id: VI-2101A,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 구동측 진동",
+          limits: { warn_hi: 3.5, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "2.1",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r001,
+          normal: { base: 2.1434, noise_sd: 0.074277 } }
+      - { tag_id: VI-2101B,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 반구동측 진동",
+          limits: { warn_hi: 3.5, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "1.7",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r002,
+          normal: { base: 1.7428, noise_sd: 0.073337 } }
+      - { tag_id: TI-2101A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 구동측 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "68",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r003,
+          normal: { base: 67.381, noise_sd: 0.117118 } }
+      - { tag_id: TI-2101B,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 반구동측 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "63",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r004,
+          normal: { base: 62.306, noise_sd: 0.122373 } }
+      - { tag_id: PI-2101A,
+          signal: suction_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 흡입압력",
+          limits: { alarm_lo: 4.5, alarm_hi: 9, trip_lo: 3.5 },
+          normal_ref: "6.5",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r005,
+          normal: { base: 6.5749, noise_sd: 0.062861 } }
+      - { tag_id: PI-2101B,
+          signal: discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 토출압력",
+          limits: { alarm_lo: 170, alarm_hi: 198, trip_hi: 205 },
+          normal_ref: "185",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r006,
+          normal: { base: 184.895, noise_sd: 0.308442 } }
+      - { tag_id: FI-2101,
+          signal: flow,
+          unit: "m3/h",
+          description: "펌프 토출 유량",
+          limits: { alarm_lo: 130, alarm_hi: 215, trip_lo: 100 },
+          normal_ref: "182",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r007,
+          normal: { base: 182.459, noise_sd: 0.941228 } }
+      - { tag_id: II-2101,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { alarm_hi: 195, trip_hi: 210 },
+          normal_ref: "168",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r008,
+          normal: { base: 168.841, noise_sd: 0.710774 } }
+  # ---------------- UNIT-HOU-02 보충 수소 압축 ----------------
+  - equip_id: C-2201
+    name: "보충 수소 압축기 (Make-up Hydrogen Compressor)"
+    type: CC
+    unit_id: UNIT-HOU-02
+    seed_key: hou-e02
+    tags:
+      - { tag_id: VI-2201A,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "크랭크 프레임 진동",
+          limits: { warn_hi: 8, alarm_hi: 11, trip_hi: 18 },
+          normal_ref: "4.2",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r009,
+          normal: { base: 4.2418, noise_sd: 0.147429 } }
+      - { tag_id: VI-2201B,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "실린더 진동",
+          limits: { warn_hi: 8.5, alarm_hi: 11, trip_hi: 18 },
+          normal_ref: "5.8",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r010,
+          normal: { base: 5.6861, noise_sd: 0.192093 } }
+      - { tag_id: TI-2201A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "메인 베어링 온도",
+          limits: { warn_hi: 85, alarm_hi: 95, trip_hi: 105 },
+          normal_ref: "72",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r011,
+          normal: { base: 70.87, noise_sd: 0.067496 } }
+      - { tag_id: TI-2201B,
+          signal: suction_temp,
+          unit: "DEG C",
+          description: "흡입 온도",
+          limits: { alarm_hi: 55 },
+          normal_ref: "38",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r012,
+          normal: { base: 36.532, noise_sd: 0.175884 } }
+      - { tag_id: TI-2201C,
+          signal: discharge_temp,
+          unit: "DEG C",
+          description: "토출 온도",
+          limits: { warn_hi: 135, alarm_hi: 145, trip_hi: 160 },
+          normal_ref: "118",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r013,
+          normal: { base: 116.435, noise_sd: 0.159594 } }
+      - { tag_id: PI-2201A,
+          signal: suction_pressure,
+          unit: "kg/cm2(g)",
+          description: "흡입압력",
+          limits: { alarm_lo: 19, alarm_hi: 28, trip_lo: 16 },
+          normal_ref: "24",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r014,
+          normal: { base: 23.9476, noise_sd: 0.126499 } }
+      - { tag_id: PI-2201B,
+          signal: discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "토출압력",
+          limits: { alarm_lo: 150, alarm_hi: 178, trip_hi: 185 },
+          normal_ref: "165",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r015,
+          normal: { base: 164.749, noise_sd: 0.382931 } }
+      - { tag_id: FI-2201,
+          signal: flow,
+          unit: "Nm3/h",
+          description: "토출 가스 유량",
+          limits: { alarm_lo: 26000, alarm_hi: 46000, trip_lo: 20000 },
+          normal_ref: "38000",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 0,
+          seed_key: hou-r016,
+          normal: { base: 37981.839, noise_sd: 179.657183 } }
+      - { tag_id: SI-2201,
+          signal: speed,
+          unit: "rpm",
+          description: "압축기 회전속도",
+          limits: { alarm_lo: 300, alarm_hi: 360, trip_hi: 375 },
+          normal_ref: "330",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: hou-r017,
+          normal: { base: 330.336, noise_sd: 0.432264 } }
+  # ---------------- UNIT-HOU-03 수소 순환 ----------------
+  - equip_id: C-2301
+    name: "수소 순환 압축기 (Recycle Gas Compressor)"
+    type: CC
+    unit_id: UNIT-HOU-03
+    seed_key: hou-e03
+    tags:
+      - { tag_id: VI-2301A,
+          signal: shaft_vibration,
+          unit: "um pk-pk",
+          description: "구동측 축 진동 (X)",
+          limits: { warn_hi: 22, alarm_hi: 28, trip_hi: 38 },
+          normal_ref: "14",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r018,
+          normal: { base: 13.781, noise_sd: 0.491248 } }
+      - { tag_id: VI-2301B,
+          signal: shaft_vibration,
+          unit: "um pk-pk",
+          description: "구동측 축 진동 (Y)",
+          limits: { warn_hi: 22, alarm_hi: 28, trip_hi: 38 },
+          normal_ref: "13",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r019,
+          normal: { base: 13.396, noise_sd: 0.467369 } }
+      - { tag_id: VI-2301C,
+          signal: shaft_vibration,
+          unit: "um pk-pk",
+          description: "반구동측 축 진동 (X)",
+          limits: { warn_hi: 22, alarm_hi: 28, trip_hi: 38 },
+          normal_ref: "12",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r020,
+          normal: { base: 11.664, noise_sd: 0.464449 } }
+      - { tag_id: VI-2301D,
+          signal: shaft_vibration,
+          unit: "um pk-pk",
+          description: "반구동측 축 진동 (Y)",
+          limits: { warn_hi: 22, alarm_hi: 28, trip_hi: 38 },
+          normal_ref: "12",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r021,
+          normal: { base: 12.075, noise_sd: 0.492825 } }
+      - { tag_id: TI-2301A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "구동측 저널 베어링 패드 온도",
+          limits: { warn_hi: 100, alarm_hi: 115, trip_hi: 125 },
+          normal_ref: "82",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r022,
+          normal: { base: 81.033, noise_sd: 0.105882 } }
+      - { tag_id: TI-2301B,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "반구동측 저널 베어링 패드 온도",
+          limits: { warn_hi: 100, alarm_hi: 115, trip_hi: 125 },
+          normal_ref: "79",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r023,
+          normal: { base: 77.932, noise_sd: 0.164345 } }
+      - { tag_id: ZI-2301,
+          signal: axial_position,
+          unit: "mm",
+          description: "축방향 위치",
+          limits: { warn_hi: 0.2, alarm_lo: -0.3, alarm_hi: 0.3, trip_lo: -0.5, trip_hi: 0.5 },
+          normal_ref: "0.06",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r024,
+          normal: { base: 0.0558, noise_sd: 0.004221 } }
+      - { tag_id: PI-2301A,
+          signal: suction_pressure,
+          unit: "kg/cm2(g)",
+          description: "흡입압력",
+          limits: { alarm_lo: 115, alarm_hi: 140 },
+          normal_ref: "128",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r025,
+          normal: { base: 128.041, noise_sd: 0.126732 } }
+      - { tag_id: PI-2301B,
+          signal: discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "토출압력",
+          limits: { alarm_lo: 128, alarm_hi: 155 },
+          normal_ref: "142",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r026,
+          normal: { base: 141.867, noise_sd: 0.238085 } }
+      - { tag_id: TI-2301C,
+          signal: suction_temp,
+          unit: "DEG C",
+          description: "흡입 온도",
+          limits: { alarm_hi: 70 },
+          normal_ref: "55",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r027,
+          normal: { base: 53.813, noise_sd: 0.213549 } }
+      - { tag_id: TI-2301D,
+          signal: discharge_temp,
+          unit: "DEG C",
+          description: "토출 온도",
+          limits: { warn_hi: 95, alarm_hi: 105, trip_hi: 115 },
+          normal_ref: "78",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r028,
+          normal: { base: 76.678, noise_sd: 0.132925 } }
+      - { tag_id: FI-2301,
+          signal: flow,
+          unit: "Nm3/h",
+          description: "순환 가스 유량",
+          limits: { alarm_lo: 215000, alarm_hi: 330000, trip_lo: 190000 },
+          normal_ref: "285000",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 0,
+          seed_key: hou-r029,
+          normal: { base: 284272.633, noise_sd: 1304.342017 } }
+      - { tag_id: SI-2301,
+          signal: speed,
+          unit: "rpm",
+          description: "회전속도",
+          limits: { alarm_lo: 4600, alarm_hi: 5517, trip_hi: 5700 },
+          normal_ref: "5300",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: hou-r030,
+          normal: { base: 5290.014, noise_sd: 5.121095 } }
+  # ---------------- UNIT-HOU-04 반응기 가열 ----------------
+  - equip_id: FN-2401
+    name: "반응기 가열로 연소공기·배기 팬 (FD/ID Fan)"
+    type: FN
+    unit_id: UNIT-HOU-04
+    seed_key: hou-e04
+    tags:
+      - { tag_id: VI-2401A,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "팬 구동측 진동",
+          limits: { warn_hi: 3.5, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "2.4",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r031,
+          normal: { base: 2.4373, noise_sd: 0.10352 } }
+      - { tag_id: VI-2401B,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "팬 반구동측 진동",
+          limits: { warn_hi: 3.5, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "2",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r032,
+          normal: { base: 1.8922, noise_sd: 0.100862 } }
+      - { tag_id: TI-2401A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "팬 구동측 베어링 온도",
+          limits: { warn_hi: 75, alarm_hi: 85, trip_hi: 95 },
+          normal_ref: "58",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r033,
+          normal: { base: 55.45, noise_sd: 0.08998 } }
+      - { tag_id: TI-2401B,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "팬 반구동측 베어링 온도",
+          limits: { warn_hi: 75, alarm_hi: 85, trip_hi: 95 },
+          normal_ref: "56",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r034,
+          normal: { base: 53.336, noise_sd: 0.091759 } }
+      - { tag_id: II-2401,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { alarm_hi: 98, trip_hi: 108 },
+          normal_ref: "82",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r035,
+          normal: { base: 80.68, noise_sd: 0.712782 } }
+      - { tag_id: SI-2401,
+          signal: speed,
+          unit: "rpm",
+          description: "팬 회전속도",
+          limits: { alarm_lo: 1600, alarm_hi: 1830, trip_hi: 1860 },
+          normal_ref: "1780",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: hou-r036,
+          normal: { base: 1776.185, noise_sd: 1.617467 } }
+      - { tag_id: FI-2401,
+          signal: flow,
+          unit: "Nm3/h",
+          description: "공기 유량",
+          limits: { alarm_lo: 45000, alarm_hi: 72000, trip_lo: 38000 },
+          normal_ref: "62000",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 0,
+          seed_key: hou-r037,
+          normal: { base: 60865.092, noise_sd: 579.955949 } }
+      - { tag_id: PDI-2401,
+          signal: differential_pressure,
+          unit: "mmH2O",
+          description: "팬 차압",
+          limits: { alarm_lo: 140, alarm_hi: 230 },
+          normal_ref: "185",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: hou-r038,
+          normal: { base: 182.862, noise_sd: 1.503328 } }
+  # ---------------- UNIT-HOU-05 압축기 지원 ----------------
+  - equip_id: P-2501
+    name: "압축기 윤활유 펌프 (Lube Oil Pump)"
+    type: PM
+    unit_id: UNIT-HOU-05
+    seed_key: hou-e05
+    tags:
+      - { tag_id: VI-2501,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 진동",
+          limits: { warn_hi: 3.5, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "1.4",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r039,
+          normal: { base: 1.3874, noise_sd: 0.055996 } }
+      - { tag_id: TI-2501A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "54",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r040,
+          normal: { base: 52.69, noise_sd: 0.065147 } }
+      - { tag_id: PI-2501,
+          signal: oil_pressure,
+          unit: "kg/cm2(g)",
+          description: "윤활유 토출압력",
+          limits: { alarm_lo: 6, alarm_hi: 9.5, trip_lo: 5 },
+          normal_ref: "8.2",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r041,
+          normal: { base: 8.1831, noise_sd: 0.032668 } }
+      - { tag_id: TI-2501B,
+          signal: oil_temp,
+          unit: "DEG C",
+          description: "윤활유 온도",
+          limits: { warn_hi: 58, alarm_hi: 65, trip_hi: 75 },
+          normal_ref: "48",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r042,
+          normal: { base: 46.171, noise_sd: 0.198806 } }
+      - { tag_id: FI-2501,
+          signal: flow,
+          unit: "m3/h",
+          description: "윤활유 유량",
+          limits: { alarm_lo: 30, alarm_hi: 52, trip_lo: 24 },
+          normal_ref: "42",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r043,
+          normal: { base: 41.952, noise_sd: 0.170831 } }
+      - { tag_id: II-2501,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { alarm_hi: 30, trip_hi: 34 },
+          normal_ref: "24",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r044,
+          normal: { base: 24.052, noise_sd: 0.128704 } }
+  # ---------------- UNIT-HOU-06 분별탑 환류 ----------------
+  - equip_id: P-2601
+    name: "분별탑 환류 펌프 (Reflux Pump)"
+    type: PM
+    unit_id: UNIT-HOU-06
+    seed_key: hou-e06
+    tags:
+      - { tag_id: VI-2601A,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 구동측 진동",
+          limits: { warn_hi: 3.5, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "1.8",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r045,
+          normal: { base: 1.8534, noise_sd: 0.068449 } }
+      - { tag_id: VI-2601B,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 반구동측 진동",
+          limits: { warn_hi: 3.5, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "1.5",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r046,
+          normal: { base: 1.5606, noise_sd: 0.059538 } }
+      - { tag_id: TI-2601A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 구동측 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "62",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r047,
+          normal: { base: 61.186, noise_sd: 0.058715 } }
+      - { tag_id: TI-2601B,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 반구동측 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "58",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r048,
+          normal: { base: 56.969, noise_sd: 0.070368 } }
+      - { tag_id: PI-2601A,
+          signal: suction_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 흡입압력",
+          limits: { alarm_lo: 2.5, alarm_hi: 6, trip_lo: 1.5 },
+          normal_ref: "4.2",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r049,
+          normal: { base: 4.2702, noise_sd: 0.033449 } }
+      - { tag_id: PI-2601B,
+          signal: discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 토출압력",
+          limits: { alarm_lo: 7.5, alarm_hi: 12, trip_lo: 6 },
+          normal_ref: "9.8",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r050,
+          normal: { base: 9.9578, noise_sd: 0.065574 } }
+      - { tag_id: FI-2601,
+          signal: flow,
+          unit: "m3/h",
+          description: "환류 유량",
+          limits: { alarm_lo: 55, alarm_hi: 120, trip_lo: 40 },
+          normal_ref: "96",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r051,
+          normal: { base: 98.083, noise_sd: 0.473541 } }
+      - { tag_id: II-2601,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { alarm_hi: 56, trip_hi: 62 },
+          normal_ref: "44",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r052,
+          normal: { base: 44.313, noise_sd: 0.312411 } }
+  # ---------------- UNIT-HOU-07 미전환유 순환 ----------------
+  - equip_id: P-2701
+    name: "미전환유 순환 펌프 (Unconverted Oil Recycle Pump)"
+    type: PM
+    unit_id: UNIT-HOU-07
+    seed_key: hou-e07
+    tags:
+      - { tag_id: VI-2701A,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 구동측 진동",
+          limits: { warn_hi: 3.5, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "2.3",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r053,
+          normal: { base: 2.2877, noise_sd: 0.077874 } }
+      - { tag_id: VI-2701B,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 반구동측 진동",
+          limits: { warn_hi: 3.5, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "1.9",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r054,
+          normal: { base: 1.8243, noise_sd: 0.072264 } }
+      - { tag_id: TI-2701A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 구동측 베어링 온도",
+          limits: { warn_hi: 82, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "74",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r055,
+          normal: { base: 72.389, noise_sd: 0.151064 } }
+      - { tag_id: TI-2701B,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 반구동측 베어링 온도",
+          limits: { warn_hi: 82, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "70",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r056,
+          normal: { base: 68.558, noise_sd: 0.106466 } }
+      - { tag_id: TI-2701C,
+          signal: process_temp,
+          unit: "DEG C",
+          description: "취급 유체 온도",
+          limits: { alarm_hi: 330, trip_hi: 345 },
+          normal_ref: "305",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 1,
+          seed_key: hou-r057,
+          normal: { base: 303.167, noise_sd: 0.363352 } }
+      - { tag_id: PI-2701A,
+          signal: suction_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 흡입압력",
+          limits: { alarm_lo: 2.2, alarm_hi: 5.5, trip_lo: 1.4 },
+          normal_ref: "3.8",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r058,
+          normal: { base: 3.7716, noise_sd: 0.034246 } }
+      - { tag_id: PI-2701B,
+          signal: discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 토출압력",
+          limits: { alarm_lo: 26, alarm_hi: 38, trip_lo: 22 },
+          normal_ref: "32",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r059,
+          normal: { base: 31.817, noise_sd: 0.137571 } }
+      - { tag_id: FI-2701,
+          signal: flow,
+          unit: "m3/h",
+          description: "순환 유량",
+          limits: { alarm_lo: 95, alarm_hi: 170, trip_lo: 75 },
+          normal_ref: "140",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r060,
+          normal: { base: 137.485, noise_sd: 0.872468 } }
+      - { tag_id: II-2701,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { alarm_hi: 118, trip_hi: 128 },
+          normal_ref: "96",
+          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r061,
+          normal: { base: 94.913, noise_sd: 0.519318 } }

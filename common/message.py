@@ -13,11 +13,11 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, model_validator
 
 SCHEMA_VERSION = "1.0"
 
-Quality = Literal["Good", "Bad", "ScanOff"]
+Quality = Literal["Good", "Uncertain", "Bad", "ScanOff"]   # Uncertain: 품질 불확실하지만 값은 있음 (HOU)
 
 
 class Sample(BaseModel):
-    """측정값 한 건. 품질이 Good이 아니면 value는 null일 수 있다."""
+    """측정값 한 건. 품질이 Good / Uncertain 이면 값이 있어야 하고, Bad / ScanOff 면 null 일 수 있다."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -29,8 +29,8 @@ class Sample(BaseModel):
 
     @model_validator(mode="after")
     def _good_needs_value(self) -> "Sample":
-        if self.quality == "Good" and self.value is None:
-            raise ValueError("quality Good requires a value")
+        if self.quality in ("Good", "Uncertain") and self.value is None:
+            raise ValueError(f"quality {self.quality} requires a value")
         return self
 
 

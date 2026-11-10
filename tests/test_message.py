@@ -52,3 +52,10 @@ def test_batch_id_format():
 
     kst = timezone(timedelta(hours=9))
     assert make_batch_id(datetime(2026, 11, 8, 17, 24, tzinfo=kst), "SIM-U1", 1) == "b-20261108-172400-SIM-U1-0001"
+
+
+def test_uncertain_quality_requires_value():
+    from datetime import datetime, timezone
+    Sample(equip_id="E", tag_id="T", ts=datetime(2026, 1, 1, tzinfo=timezone.utc), value=1.0, quality="Uncertain")
+    with pytest.raises(ValidationError):
+        Sample(equip_id="E", tag_id="T", ts=datetime(2026, 1, 1, tzinfo=timezone.utc), value=None, quality="Uncertain")

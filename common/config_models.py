@@ -18,6 +18,9 @@ class ConfigError(Exception):
     """설정 파일 내용이 서로 맞지 않을 때(없는 ID 참조 등). 시작을 멈추고 원인을 알려 준다."""
 
 
+TagKey = tuple[str, str]        # (equip_id, tag_id). 태그명은 같은 설비 안에서만 고유하다 (다중 공장 설계 §4.1)
+
+
 # ---------------------------------------------------------------------------
 # 구성안 (plant_hds.yaml)
 # ---------------------------------------------------------------------------
@@ -29,17 +32,36 @@ class StrictModel(BaseModel):
 
 
 class Limits(StrictModel):
-    """태그 한계값. 시뮬레이터는 정상값을 warn_hi 아래에 두고, 수집 서버는 같은 값으로 알람을 판정한다."""
+    """태그 한계값. 상한(…_hi)은 10분 최대값이 넘으면, 하한(…_lo)은 10분 최소값이 내려가면 알람. 자료에 있는 칸만 적는다."""
 
-    warn_hi: float
-    alarm_hi: float
-    trip_hi: float
+    warn_hi: float | None = None
+    alarm_hi: float | None = None
+    trip_hi: float | None = None
+    warn_lo: float | None = None
+    alarm_lo: float | None = None
+    trip_lo: float | None = None
 
     @model_validator(mode="after")
     def _ordered(self) -> "Limits":
-        if not (self.warn_hi < self.alarm_hi < self.trip_hi):
+        his = [v for _, v in self.hi_levels()]
+        los = [v for _, v in self.lo_levels()]
+        if not his and not los:
+            raise ValueError("limits must have at least one bound")
+        if his != sorted(his) or len(set(his)) != len(his):
             raise ValueError("limits must satisfy warn_hi < alarm_hi < trip_hi")
+        if los != sorted(los, reverse=True) or len(set(los)) != len(los):
+            raise ValueError("limits must satisfy trip_lo < alarm_lo < warn_lo")
+        if his and los and max(los) >= min(his):
+            raise ValueError("every lower limit must be below every upper limit")
         return self
+
+    def hi_levels(self) -> list[tuple[str, float]]:
+        """[(한계 구분, 값)] — 있는 상한만, 낮은 것부터. 구분은 Soft / Alarm / Trip."""
+        return [(name, v) for name, v in (("Soft", self.warn_hi), ("Alarm", self.alarm_hi), ("Trip", self.trip_hi)) if v is not None]
+
+    def lo_levels(self) -> list[tuple[str, float]]:
+        """[(한계 구분, 값)] — 있는 하한만, 높은 것부터."""
+        return [(name, v) for name, v in (("Soft", self.warn_lo), ("Alarm", self.alarm_lo), ("Trip", self.trip_lo)) if v is not None]
 
 
 class NormalModel(StrictModel):
@@ -58,6 +80,8 @@ class TagConfig(StrictModel):
     location: str | None = None           # 측정 위치 코드 (hds)
     description: str | None = None        # 태그 설명 (rfcc). 화면과 equipment_tag 에 남긴다
     limits: Limits | None = None          # 없으면 알람 판정 대상이 아니다 (rfcc)
+    normal_ref: str | None = None         # 자료의 "정상 기준(참고)" 원문 (예: "1.4~2.8"). 코드는 해석하지 않는다
+    limit_basis: str | None = None        # 자료의 "한계값 근거" 원문
     delay_samples: int = Field(default=1, ge=1)   # 알람 지연 판정: 연속된 10분 구간 수
     interval_sec: int | None = Field(default=None, ge=1)   # 태그별 측정 주기. 없으면 runtime.sample_interval_sec
     decimals: int = Field(default=3, ge=0)        # 값 반올림 자릿수
@@ -118,9 +142,9 @@ class SignalType(StrictModel):
 
 
 class Correlation(StrictModel):
-    """태그끼리 함께 움직이는 규칙 (기획서 5.2). target += gain × source 편차(lag_minutes 전)."""
+    """태그끼리 함께 움직이는 규칙 (기획서 5.2). target += gain × source 편차(lag_minutes 전). source/target 은 TagRef."""
 
-    source: str
+    source: str                       # "EQUIP/TAG" 또는 공장 안에서 고유한 "TAG"
     target: str
     gain: float
     lag_minutes: int = Field(ge=0)
@@ -141,11 +165,10 @@ class PlantConfig(StrictModel):
         type_ids = {t.type for t in self.equipment_types}
         signal_ids = {s.signal for s in self.signals}
         equip_ids = [e.equip_id for e in self.equipment]
-        tag_ids = [t.tag_id for e in self.equipment for t in e.tags]
         seed_keys = [t.seed_key for e in self.equipment for t in e.tags]
 
         _require_unique("equip_id", equip_ids)
-        _require_unique("tag_id", tag_ids)
+        _require_unique("(equip_id, tag_id)", [f"{e.equip_id}/{t.tag_id}" for e in self.equipment for t in e.tags])
         _require_unique("seed_key", seed_keys)
         if self.plant.signal_model == "rfcc":
             for e in self.equipment:
@@ -153,7 +176,7 @@ class PlantConfig(StrictModel):
                     raise ConfigError(f"equipment {e.equip_id}: seed_key is required for signal_model rfcc")
             _require_unique("equipment seed_key", [e.seed_key for e in self.equipment])
 
-        equip_set, tag_set = set(equip_ids), set(tag_ids)
+        equip_set = set(equip_ids)
         for e in self.equipment:
             if e.unit_id not in unit_ids:
                 raise ConfigError(f"equipment {e.equip_id}: unknown unit_id {e.unit_id}")
@@ -165,10 +188,11 @@ class PlantConfig(StrictModel):
                 if t.signal not in signal_ids:
                     raise ConfigError(f"tag {t.tag_id}: unknown signal {t.signal}")
         for c in self.correlations:
-            for ref in (c.source, c.target):
-                if ref not in tag_set:
-                    raise ConfigError(f"correlation {c.source}->{c.target}: unknown tag {ref}")
-            if self.tag_unit(c.source) != self.tag_unit(c.target):
+            try:
+                source, target = self.resolve(c.source), self.resolve(c.target)
+            except ConfigError as e:
+                raise ConfigError(f"correlation {c.source}->{c.target}: {e}") from None
+            if self.tag_unit(source) != self.tag_unit(target):
                 raise ConfigError(f"correlation {c.source}->{c.target}: tags must belong to the same unit")
         return self
 
@@ -185,19 +209,36 @@ class PlantConfig(StrictModel):
     def equipment_by_id(self) -> dict[str, EquipmentConfig]:
         return {e.equip_id: e for e in self.equipment}
 
-    def tag_owner(self) -> dict[str, EquipmentConfig]:
-        """tag_id → 그 태그를 가진 설비."""
-        return {t.tag_id: e for e in self.equipment for t in e.tags}
+    def tag_keys(self) -> list[TagKey]:
+        """(equip_id, tag_id) 목록. 구성안 순서."""
+        return [(e.equip_id, t.tag_id) for e in self.equipment for t in e.tags]
 
-    def tag_by_id(self) -> dict[str, TagConfig]:
-        return {t.tag_id: t for t in self.all_tags()}
+    def tag_by_key(self) -> dict[TagKey, TagConfig]:
+        return {(e.equip_id, t.tag_id): t for e in self.equipment for t in e.tags}
 
-    def tag_unit(self, tag_id: str) -> str:
-        return self.tag_owner()[tag_id].unit_id
+    def tag_unit(self, key: TagKey) -> str:
+        return self.equipment_by_id()[key[0]].unit_id
 
-    def tag_interval_sec(self, tag_id: str, default: int) -> int:
+    def tag_interval_sec(self, key: TagKey, default: int) -> int:
         """태그의 측정 주기. 구성안에 없으면 실행 설정의 sample_interval_sec(default)."""
-        return self.tag_by_id()[tag_id].interval_sec or default
+        return self.tag_by_key()[key].interval_sec or default
+
+    def resolve(self, ref: str, equip_hint: str | None = None) -> TagKey:
+        """TagRef → 키. "EQUIP/TAG" 는 그대로, "TAG" 는 equip_hint 설비에 있으면 그것, 아니면 공장 안에서 유일할 때만."""
+        keys = self.tag_by_key()
+        if "/" in ref:
+            equip_id, tag_id = ref.split("/", 1)
+            if (equip_id, tag_id) not in keys:
+                raise ConfigError(f"unknown tag {ref}")
+            return equip_id, tag_id
+        if equip_hint is not None and (equip_hint, ref) in keys:
+            return equip_hint, ref
+        candidates = sorted(k for k in keys if k[1] == ref)
+        if not candidates:
+            raise ConfigError(f"unknown tag {ref}")
+        if len(candidates) > 1:
+            raise ConfigError(f"tag {ref} is ambiguous: " + ", ".join(f"{e}/{t}" for e, t in candidates) + " (write EQUIP/TAG)")
+        return candidates[0]
 
     def equipment_kind(self, equip_id: str) -> str | None:
         """설비 유형(equipment_types)의 kind."""

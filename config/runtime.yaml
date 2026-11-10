@@ -7,5 +7,5 @@ time_mode: live              # backfill / live / accelerated
 speed: 60                    # accelerated 모드 배율
 backfill_days: 90            # 백필 기간
 seed: 20261108               # 같은 시드면 같은 데이터
-collector_url: http://localhost:8000
+collector_url: http://localhost:8000/hds   # 수집 서버의 공장 접두어까지
 raw_retention_days: 7        # 원시 값 보관 기간

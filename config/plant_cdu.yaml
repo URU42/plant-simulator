@@ -1,0 +1,605 @@
+# 구성안: CDU (상압증류) (PL-CDU) — 다중 공장 설계 docs/superpowers/specs/2026-11-09-multi-plant-design.md
+# - 출처: cdu-sample/data/CDU_*.xlsx 의 `설비 설명`(계층)·`설비 태그`(태그명·설명·단위·정상 기준·경고/알람/정지 상·하한·근거) 시트. 마스터 값은 그대로.
+# - 태그명은 같은 설비 안에서만 고유하다 (복합키 (equip_id, tag_id)). 한계값·정상 기준·근거는 자료 그대로이며 빈 칸은 적지 않았다.
+# - normal.base 는 데이터 첫 6시간 Good·Uncertain 평균, noise_sd 는 첫 1시간을 추세 제거한 표준편차의 0.9배, decimals 는 데이터의 소수 자릿수.
+# - 온도 10초, 나머지 1초. 신호 모델은 rfcc. seed_key 는 공장 접두어를 붙여 다른 공장과 겹치지 않는다.
+
+plant:
+  plant_id: PL-CDU
+  name: "CDU (상압증류)"
+  config_version: 1
+  signal_model: rfcc
+  unit_groups:
+    - id: UG-CDU-01
+      name: "원유 전처리"
+      units:
+        - { id: UNIT-CDU-01, name: "U-811" }
+        - { id: UNIT-CDU-02, name: "U-812" }
+    - id: UG-CDU-02
+      name: "원유 가열"
+      units:
+        - { id: UNIT-CDU-03, name: "U-821" }
+    - id: UG-CDU-03
+      name: "상압증류"
+      units:
+        - { id: UNIT-CDU-04, name: "U-831" }
+        - { id: UNIT-CDU-05, name: "U-832" }
+        - { id: UNIT-CDU-06, name: "U-833" }
+    - id: UG-CDU-04
+      name: "제품 회수"
+      units:
+        - { id: UNIT-CDU-07, name: "U-841" }
+
+# 설비 유형 매핑. kind 는 신호 모델이 보는 기계 종류
+equipment_types:
+  - { type: PM, name: 펌프, prefix: P, kind: pump }
+  - { type: FN, name: 팬, prefix: F, kind: fan }
+
+# 표준 태그 (신호 종류 · 대표 접두어 · 대표 단위). 태그별 실제 단위는 각 태그에 적는다
+signals:
+  - { signal: vibration, prefix: VI, unit: "mm/s RMS", name: 케이싱 진동 속도 }
+  - { signal: bearing_temp, prefix: TI, unit: "DEG C", name: 베어링 온도 }
+  - { signal: suction_pressure, prefix: PI, unit: "kg/cm2(g)", name: 흡입 압력 }
+  - { signal: discharge_pressure, prefix: PI, unit: "kg/cm2(g)", name: 토출 압력 }
+  - { signal: flow, prefix: FI, unit: "m3/h", name: 유량 }
+  - { signal: current, prefix: II, unit: "A", name: 모터 전류 }
+  - { signal: speed, prefix: SI, unit: "rpm", name: 회전속도 }
+  - { signal: differential_pressure, prefix: PDI, unit: "mmH2O", name: 차압 }
+  - { signal: process_temp, prefix: TI, unit: "DEG C", name: 공정 유체 온도 }
+
+equipment:
+  # ---------------- UNIT-CDU-01 U-811 ----------------
+  - equip_id: P-8101A
+    name: "원유 공급 펌프 A (Crude Charge Pump A)"
+    type: PM
+    unit_id: UNIT-CDU-01
+    seed_key: cdu-e01
+    tags:
+      - { tag_id: VI-8101A,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 구동측 진동",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "1.1~2.2",
+          limit_basis: "경고 3.0=API 610 선호운전영역(POR) 한계, 알람 4.5/정지 7.1=ISO 20816-3 Group 1 강성지지 B/C·C/D 경계 (가정 적용)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r001,
+          normal: { base: 1.62006, noise_sd: 0.067284 } }
+      - { tag_id: VI-8101B,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 반구동측 진동",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "0.9~1.8",
+          limit_basis: "경고 3.0=API 610 선호운전영역(POR) 한계, 알람 4.5/정지 7.1=ISO 20816-3 Group 1 강성지지 B/C·C/D 경계 (가정 적용)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r002,
+          normal: { base: 1.29802, noise_sd: 0.053594 } }
+      - { tag_id: TI-8101A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "51~67",
+          limit_basis: "구름 베어링 하우징 온도 일반 관리 수준을 참고한 가정값",
+          interval_sec: 10,
+          decimals: 4,
+          seed_key: cdu-r003,
+          normal: { base: 57.58145, noise_sd: 0.139434 } }
+      - { tag_id: PI-8101A,
+          signal: suction_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 흡입 압력",
+          limits: { warn_lo: 2.02, alarm_lo: 1.62 },
+          normal_ref: "2.38~3.22",
+          limit_basis: "압력 저하 관리용 가정값 (정상 기준 72%/58%)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r004,
+          normal: { base: 2.79272, noise_sd: 0.008147 } }
+      - { tag_id: PI-8101B,
+          signal: discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 토출 압력",
+          limits: { warn_lo: 20.16, alarm_lo: 16.24 },
+          normal_ref: "23.80~32.20",
+          limit_basis: "압력 저하 관리용 가정값 (정상 기준 72%/58%)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r005,
+          normal: { base: 27.94483, noise_sd: 0.092463 } }
+      - { tag_id: FI-8101A,
+          signal: flow,
+          unit: "m3/h",
+          description: "원유 공급 유량",
+          limits: { warn_lo: 288, alarm_lo: 248 },
+          normal_ref: "340~440",
+          limit_basis: "최소 연속 유량 보호를 고려한 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r006,
+          normal: { base: 400.37491, noise_sd: 1.577389 } }
+      - { tag_id: II-8101A,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { warn_hi: 122, alarm_hi: 129 },
+          normal_ref: "94~113",
+          limit_basis: "정격 전류 대비 여유를 고려한 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r007,
+          normal: { base: 105.43458, noise_sd: 0.410921 } }
+  # ---------------- UNIT-CDU-02 U-812 ----------------
+  - equip_id: P-8102A
+    name: "탈염 세정수 펌프 A (Desalter Wash Water Pump A)"
+    type: PM
+    unit_id: UNIT-CDU-02
+    seed_key: cdu-e02
+    tags:
+      - { tag_id: VI-8102A,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 구동측 진동",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "1.0~2.0",
+          limit_basis: "경고 3.0=API 610 선호운전영역(POR) 한계, 알람 4.5/정지 7.1=ISO 20816-3 Group 1 강성지지 B/C·C/D 경계 (가정 적용)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r008,
+          normal: { base: 1.37418, noise_sd: 0.056031 } }
+      - { tag_id: VI-8102B,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 반구동측 진동",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "0.8~1.6",
+          limit_basis: "경고 3.0=API 610 선호운전영역(POR) 한계, 알람 4.5/정지 7.1=ISO 20816-3 Group 1 강성지지 B/C·C/D 경계 (가정 적용)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r009,
+          normal: { base: 1.15876, noise_sd: 0.046541 } }
+      - { tag_id: TI-8102A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "44~60",
+          limit_basis: "구름 베어링 하우징 온도 일반 관리 수준을 참고한 가정값",
+          interval_sec: 10,
+          decimals: 4,
+          seed_key: cdu-r010,
+          normal: { base: 50.71225, noise_sd: 0.114847 } }
+      - { tag_id: PI-8102B,
+          signal: discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 토출 압력",
+          limits: { warn_lo: 12.6, alarm_lo: 10.15 },
+          normal_ref: "14.88~20.12",
+          limit_basis: "압력 저하 관리용 가정값 (정상 기준 72%/58%)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r011,
+          normal: { base: 17.47705, noise_sd: 0.05323 } }
+      - { tag_id: FI-8102A,
+          signal: flow,
+          unit: "m3/h",
+          description: "세정수 유량",
+          limits: { warn_lo: 29, alarm_lo: 25 },
+          normal_ref: "34~44",
+          limit_basis: "최소 연속 유량 보호를 고려한 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r012,
+          normal: { base: 40.04873, noise_sd: 0.165752 } }
+      - { tag_id: II-8102A,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { warn_hi: 174, alarm_hi: 184 },
+          normal_ref: "135~162",
+          limit_basis: "정격 전류 대비 여유를 고려한 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r013,
+          normal: { base: 149.71886, noise_sd: 0.570531 } }
+  # ---------------- UNIT-CDU-03 U-821 ----------------
+  - equip_id: F-8201
+    name: "가열로 강제 통풍 팬 (Crude Heater FD Fan)"
+    type: FN
+    unit_id: UNIT-CDU-03
+    seed_key: cdu-e03
+    tags:
+      - { tag_id: VI-8201A,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "팬 구동측 진동",
+          limits: { warn_hi: 4.5, alarm_hi: 7.1, trip_hi: 11 },
+          normal_ref: "1.4~2.8",
+          limit_basis: "ISO 20816-3 Group 1 유연지지 B/C 7.1·C/D 11.0 mm/s와 Group 1 강성지지 B/C 4.5를 참고한 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r014,
+          normal: { base: 2.06853, noise_sd: 0.080754 } }
+      - { tag_id: VI-8201B,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "팬 반구동측 진동",
+          limits: { warn_hi: 4.5, alarm_hi: 7.1, trip_hi: 11 },
+          normal_ref: "1.2~2.4",
+          limit_basis: "ISO 20816-3 Group 1 유연지지 B/C 7.1·C/D 11.0 mm/s와 Group 1 강성지지 B/C 4.5를 참고한 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r015,
+          normal: { base: 1.72743, noise_sd: 0.070722 } }
+      - { tag_id: TI-8201A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "팬 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "53~69",
+          limit_basis: "구름 베어링 하우징 온도 일반 관리 수준을 참고한 가정값",
+          interval_sec: 10,
+          decimals: 4,
+          seed_key: cdu-r016,
+          normal: { base: 59.65683, noise_sd: 0.129919 } }
+      - { tag_id: SI-8201A,
+          signal: speed,
+          unit: "rpm",
+          description: "회전속도",
+          limits: { warn_hi: 1250, alarm_hi: 1300 },
+          normal_ref: "1,185~1,191",
+          limit_basis: "6극 유도전동기 정격 속도 기준 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r017,
+          normal: { base: 1188.00524, noise_sd: 0.722087 } }
+      - { tag_id: II-8201A,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { warn_hi: 53, alarm_hi: 57 },
+          normal_ref: "41~50",
+          limit_basis: "정격 전류 대비 여유를 고려한 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r018,
+          normal: { base: 46.64873, noise_sd: 0.175422 } }
+      - { tag_id: FI-8201A,
+          signal: flow,
+          unit: "Nm3/h",
+          description: "연소 공기 유량",
+          limits: { warn_lo: 85000, alarm_lo: 75000 },
+          normal_ref: "105,000~128,000",
+          limit_basis: "가열로 최소 연소공기(과잉 공기) 확보 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r019,
+          normal: { base: 118797.58023, noise_sd: 386.324684 } }
+      - { tag_id: PDI-8201A,
+          signal: differential_pressure,
+          unit: "mmH2O",
+          description: "팬 전후 차압",
+          limits: { warn_lo: 140, warn_hi: 240, alarm_lo: 120 },
+          normal_ref: "170~200",
+          limit_basis: "공기 덕트·댐퍼 운전 범위 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r020,
+          normal: { base: 185.38668, noise_sd: 1.076947 } }
+  # ---------------- UNIT-CDU-04 U-831 ----------------
+  - equip_id: P-8301A
+    name: "중간 순환환류 펌프 A (Middle Pumparound Pump A)"
+    type: PM
+    unit_id: UNIT-CDU-04
+    seed_key: cdu-e04
+    tags:
+      - { tag_id: VI-8301A,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 구동측 진동",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "1.0~2.1",
+          limit_basis: "경고 3.0=API 610 선호운전영역(POR) 한계, 알람 4.5/정지 7.1=ISO 20816-3 Group 1 강성지지 B/C·C/D 경계 (가정 적용)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r021,
+          normal: { base: 1.50279, noise_sd: 0.060731 } }
+      - { tag_id: VI-8301B,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 반구동측 진동",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "0.8~1.7",
+          limit_basis: "경고 3.0=API 610 선호운전영역(POR) 한계, 알람 4.5/정지 7.1=ISO 20816-3 Group 1 강성지지 B/C·C/D 경계 (가정 적용)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r022,
+          normal: { base: 1.18705, noise_sd: 0.048564 } }
+      - { tag_id: TI-8301A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "52~68",
+          limit_basis: "구름 베어링 하우징 온도 일반 관리 수준을 참고한 가정값",
+          interval_sec: 10,
+          decimals: 4,
+          seed_key: cdu-r023,
+          normal: { base: 57.87385, noise_sd: 0.124816 } }
+      - { tag_id: FI-8301A,
+          signal: flow,
+          unit: "m3/h",
+          description: "중간 순환환류 유량",
+          limits: { warn_lo: 374, alarm_lo: 322 },
+          normal_ref: "442~572",
+          limit_basis: "최소 연속 유량 보호를 고려한 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r024,
+          normal: { base: 520.44259, noise_sd: 2.007791 } }
+      - { tag_id: PI-8301A,
+          signal: suction_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 흡입 압력",
+          limits: { warn_lo: 1.87, alarm_lo: 1.51 },
+          normal_ref: "2.21~2.99",
+          limit_basis: "압력 저하 관리용 가정값 (정상 기준 72%/58%)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r025,
+          normal: { base: 2.5999, noise_sd: 0.009185 } }
+      - { tag_id: PI-8301B,
+          signal: discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 토출 압력",
+          limits: { warn_lo: 6.48, alarm_lo: 5.22 },
+          normal_ref: "7.65~10.35",
+          limit_basis: "압력 저하 관리용 가정값 (정상 기준 72%/58%)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r026,
+          normal: { base: 8.97073, noise_sd: 0.027826 } }
+      - { tag_id: TI-8301B,
+          signal: process_temp,
+          unit: "DEG C",
+          description: "인출 유체 온도",
+          limits: { warn_hi: 235, alarm_hi: 245 },
+          normal_ref: "205~225",
+          limit_basis: "중간 펌프어라운드 인출 온도 공개 예시(약 215°C) 기준 가정값",
+          interval_sec: 10,
+          decimals: 4,
+          seed_key: cdu-r027,
+          normal: { base: 215.51923, noise_sd: 0.191296 } }
+  # ---------------- UNIT-CDU-05 U-832 ----------------
+  - equip_id: P-8302A
+    name: "탑정 환류 펌프 A (Overhead Reflux Pump A)"
+    type: PM
+    unit_id: UNIT-CDU-05
+    seed_key: cdu-e05
+    tags:
+      - { tag_id: VI-8302A,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 구동측 진동",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "0.9~1.8",
+          limit_basis: "경고 3.0=API 610 선호운전영역(POR) 한계, 알람 4.5/정지 7.1=ISO 20816-3 Group 1 강성지지 B/C·C/D 경계 (가정 적용)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r028,
+          normal: { base: 1.27068, noise_sd: 0.051148 } }
+      - { tag_id: VI-8302B,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 반구동측 진동",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "0.8~1.5",
+          limit_basis: "경고 3.0=API 610 선호운전영역(POR) 한계, 알람 4.5/정지 7.1=ISO 20816-3 Group 1 강성지지 B/C·C/D 경계 (가정 적용)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r029,
+          normal: { base: 1.12685, noise_sd: 0.044983 } }
+      - { tag_id: TI-8302A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "44~60",
+          limit_basis: "구름 베어링 하우징 온도 일반 관리 수준을 참고한 가정값",
+          interval_sec: 10,
+          decimals: 4,
+          seed_key: cdu-r030,
+          normal: { base: 50.21615, noise_sd: 0.130136 } }
+      - { tag_id: PI-8302A,
+          signal: suction_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 흡입 압력",
+          limits: { warn_lo: 0.68, alarm_lo: 0.55 },
+          normal_ref: "0.81~1.09",
+          limit_basis: "압력 저하 관리용 가정값 (정상 기준 72%/58%)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r031,
+          normal: { base: 0.95014, noise_sd: 0.002829 } }
+      - { tag_id: PI-8302B,
+          signal: discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 토출 압력",
+          limits: { warn_lo: 4.68, alarm_lo: 3.77 },
+          normal_ref: "5.52~7.47",
+          limit_basis: "압력 저하 관리용 가정값 (정상 기준 72%/58%)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r032,
+          normal: { base: 6.46938, noise_sd: 0.020005 } }
+      - { tag_id: FI-8302A,
+          signal: flow,
+          unit: "m3/h",
+          description: "탑정 환류 유량",
+          limits: { warn_lo: 216, alarm_lo: 186 },
+          normal_ref: "255~330",
+          limit_basis: "최소 연속 유량 보호를 고려한 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r033,
+          normal: { base: 295.14223, noise_sd: 1.179184 } }
+  # ---------------- UNIT-CDU-06 U-833 ----------------
+  - equip_id: P-8303A
+    name: "상압탑 하부 펌프 A (Atmospheric Bottoms Pump A)"
+    type: PM
+    unit_id: UNIT-CDU-06
+    seed_key: cdu-e06
+    tags:
+      - { tag_id: VI-8303A,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 구동측 진동",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "1.2~2.4",
+          limit_basis: "경고 3.0=API 610 선호운전영역(POR) 한계, 알람 4.5/정지 7.1=ISO 20816-3 Group 1 강성지지 B/C·C/D 경계 (가정 적용)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r034,
+          normal: { base: 1.74439, noise_sd: 0.06939 } }
+      - { tag_id: VI-8303B,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 반구동측 진동",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "1.0~2.0",
+          limit_basis: "경고 3.0=API 610 선호운전영역(POR) 한계, 알람 4.5/정지 7.1=ISO 20816-3 Group 1 강성지지 B/C·C/D 경계 (가정 적용)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r035,
+          normal: { base: 1.47408, noise_sd: 0.06023 } }
+      - { tag_id: TI-8303A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "56~72",
+          limit_basis: "구름 베어링 하우징 온도 일반 관리 수준을 참고한 가정값",
+          interval_sec: 10,
+          decimals: 4,
+          seed_key: cdu-r036,
+          normal: { base: 62.41736, noise_sd: 0.121002 } }
+      - { tag_id: TI-8303B,
+          signal: process_temp,
+          unit: "DEG C",
+          description: "흡입 유체 온도",
+          limits: { warn_hi: 360, alarm_hi: 370 },
+          normal_ref: "333~352",
+          limit_basis: "상압 잔사유 인출 온도 공개 예시(약 340°C), 플래시존 328~374°C 기준 가정값",
+          interval_sec: 10,
+          decimals: 4,
+          seed_key: cdu-r037,
+          normal: { base: 343.30008, noise_sd: 0.316408 } }
+      - { tag_id: PI-8303A,
+          signal: suction_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 흡입 압력",
+          limits: { warn_lo: 1.51, alarm_lo: 1.22 },
+          normal_ref: "1.78~2.42",
+          limit_basis: "압력 저하 관리용 가정값 (정상 기준 72%/58%)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r038,
+          normal: { base: 2.09823, noise_sd: 0.006655 } }
+      - { tag_id: PI-8303B,
+          signal: discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 토출 압력",
+          limits: { warn_lo: 10.08, alarm_lo: 8.12 },
+          normal_ref: "11.90~16.10",
+          limit_basis: "압력 저하 관리용 가정값 (정상 기준 72%/58%)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r039,
+          normal: { base: 13.96223, noise_sd: 0.043564 } }
+      - { tag_id: FI-8303A,
+          signal: flow,
+          unit: "m3/h",
+          description: "상압 잔사유 유량",
+          limits: { warn_lo: 259, alarm_lo: 223 },
+          normal_ref: "306~396",
+          limit_basis: "최소 연속 유량 보호를 고려한 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r040,
+          normal: { base: 361.9656, noise_sd: 1.407842 } }
+  # ---------------- UNIT-CDU-07 U-841 ----------------
+  - equip_id: P-8401A
+    name: "경유 제품 이송 펌프 A (Diesel Product Transfer Pump A)"
+    type: PM
+    unit_id: UNIT-CDU-07
+    seed_key: cdu-e07
+    tags:
+      - { tag_id: VI-8401A,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 구동측 진동",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "1.0~2.0",
+          limit_basis: "경고 3.0=API 610 선호운전영역(POR) 한계, 알람 4.5/정지 7.1=ISO 20816-3 Group 1 강성지지 B/C·C/D 경계 (가정 적용)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r041,
+          normal: { base: 1.39606, noise_sd: 0.057719 } }
+      - { tag_id: VI-8401B,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 반구동측 진동",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "0.8~1.6",
+          limit_basis: "경고 3.0=API 610 선호운전영역(POR) 한계, 알람 4.5/정지 7.1=ISO 20816-3 Group 1 강성지지 B/C·C/D 경계 (가정 적용)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r042,
+          normal: { base: 1.13996, noise_sd: 0.046497 } }
+      - { tag_id: TI-8401A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "47~63",
+          limit_basis: "구름 베어링 하우징 온도 일반 관리 수준을 참고한 가정값",
+          interval_sec: 10,
+          decimals: 4,
+          seed_key: cdu-r043,
+          normal: { base: 54.01407, noise_sd: 0.13323 } }
+      - { tag_id: FI-8401A,
+          signal: flow,
+          unit: "m3/h",
+          description: "경유 제품 이송 유량",
+          limits: { warn_lo: 151, alarm_lo: 130 },
+          normal_ref: "178~231",
+          limit_basis: "최소 연속 유량 보호를 고려한 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r044,
+          normal: { base: 210.01069, noise_sd: 0.811656 } }
+      - { tag_id: PI-8401B,
+          signal: discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 토출 압력",
+          limits: { warn_lo: 7.56, alarm_lo: 6.09 },
+          normal_ref: "8.92~12.07",
+          limit_basis: "압력 저하 관리용 가정값 (정상 기준 72%/58%)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r045,
+          normal: { base: 10.47437, noise_sd: 0.038805 } }
+      - { tag_id: II-8401A,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { warn_hi: 46, alarm_hi: 49 },
+          normal_ref: "36~43",
+          limit_basis: "정격 전류 대비 여유를 고려한 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r046,
+          normal: { base: 40.10115, noise_sd: 0.166415 } }
