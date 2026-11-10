@@ -34,6 +34,7 @@ class PlantContext:
     listing: list[dict]                       # GET /equipment 응답 (계층 순서)
     tag_keys: set[TagKey]
     catch_up_task: asyncio.Task | None = field(default=None)
+    simulator_scenarios: list[str] = field(default_factory=list)   # 통합 실행에서 시뮬레이터에만 준 시나리오 파일
 
     @classmethod
     def open(cls, entry: PlantEntry) -> "PlantContext":
@@ -107,7 +108,7 @@ class PlantContext:
     def health(self) -> dict:
         return {"key": self.key, "plant_id": self.plant.plant.plant_id, "plant_name": self.plant.plant.name,
                 "last_received_at": self.storage.last_received_at(), "sim_now": self.storage.sim_now(),
-                "catching_up": self.catching_up}
+                "catching_up": self.catching_up, "simulator_scenarios": self.simulator_scenarios}
 
     def oldest_allowed(self) -> str | None:
         """시뮬레이터 현재 시각 기준 보관 기간 밖의 행은 받지 않는다. 백필을 다시 돌려도 DB가 부풀지 않는다."""

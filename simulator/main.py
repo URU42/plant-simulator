@@ -44,6 +44,7 @@ class Simulator:
             await self.clock.sleep_until(end)
             await self._send_window(self.cursor, end)
             self.cursor = end
+            await asyncio.sleep(0)      # 백필처럼 기다림이 없는 시계에서도 같은 루프의 다른 작업(조회 API 등)에 양보한다
 
     async def _send_window(self, start: datetime, end: datetime) -> None:
         samples = self.generator.generate(start, end)
@@ -64,7 +65,7 @@ def backfill_range(runtime: RuntimeConfig, now: datetime) -> tuple[datetime, dat
 
 async def run_backfill_then_live(plant: PlantConfig, runtime: RuntimeConfig, scenario, sender: Sender,
                                  now: datetime | None = None, live_clock: SimClock | None = None,
-                                 live_until: datetime | None = None) -> None:
+                                 live_until: datetime | None = None, window_sec: int = BACKFILL_WINDOW_SEC) -> None:
     """지난 backfill_days 를 1시간 묶음으로 빠르게 보낸 뒤, 끝난 구간부터 실시간으로 이어 간다.
 
     수집 서버에 이미 값이 있으면(재시작) 그 마지막 측정 시각의 구간부터 이어서 보내 90일을 다시 보내지 않는다.
@@ -75,7 +76,7 @@ async def run_backfill_then_live(plant: PlantConfig, runtime: RuntimeConfig, sce
     if resume_from is not None:     # 수집 서버의 마지막 샘플 다음 샘플이 속한 구간부터
         next_sample = resume_from.astimezone(KST) + timedelta(seconds=runtime.sample_interval_sec)
         start = max(start, align_down(next_sample, runtime.send_interval_sec))
-    backfill = Simulator(plant, runtime, scenario, sender, SimClock.backfill(start), window_sec=BACKFILL_WINDOW_SEC)
+    backfill = Simulator(plant, runtime, scenario, sender, SimClock.backfill(start), window_sec=window_sec)
     if start < live_start:
         log.info("backfill %s → %s", start, live_start)
         await backfill.run(until=live_start)
@@ -86,10 +87,11 @@ async def run_backfill_then_live(plant: PlantConfig, runtime: RuntimeConfig, sce
     await live.run(until=live_until)
 
 
-async def run_mode(plant: PlantConfig, runtime: RuntimeConfig, scenario, sender: Sender) -> None:
-    """time_mode 에 따라 시계를 고르고 실행한다."""
+async def run_mode(plant: PlantConfig, runtime: RuntimeConfig, scenario, sender: Sender,
+                   window_sec: int = BACKFILL_WINDOW_SEC) -> None:
+    """time_mode 에 따라 시계를 고르고 실행한다. window_sec 은 백필 묶음 길이."""
     if runtime.time_mode == "backfill":
-        await run_backfill_then_live(plant, runtime, scenario, sender)
+        await run_backfill_then_live(plant, runtime, scenario, sender, window_sec=window_sec)
     elif runtime.time_mode == "accelerated":
         start = align_down(datetime.now(KST), runtime.send_interval_sec)
         await Simulator(plant, runtime, scenario, sender, SimClock.accelerated(start, runtime.speed)).run()

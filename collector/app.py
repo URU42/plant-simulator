@@ -6,7 +6,10 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import logging
 import os
+import signal
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -14,15 +17,18 @@ from html import escape
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 
 from collector.ingest import RawBatch, schema_supported, validate_samples
 from collector.plant_context import PlantContext
 from collector.plants import PlantEntry, PlantsConfig, load_plants
+from collector.settings import Settings
 from common.config_models import ConfigError
 from common.timefmt import parse_iso, to_db
 
 STATIC_DIR = Path(__file__).with_name("static")     # 디버깅 화면
+log = logging.getLogger("collector")
 
 
 # --- 공장 문맥 선택 -----------------------------------------------------------
@@ -38,7 +44,10 @@ router = APIRouter(prefix="/{plant_key}")
 
 # --- 수집 ---------------------------------------------------------------------
 @router.post("/ingest")
-async def post_ingest(batch: RawBatch, ctx: PlantContext = Depends(context)):
+async def post_ingest(batch: RawBatch, request: Request, ctx: PlantContext = Depends(context)):
+    token = request.app.state.settings.ingest_token
+    if token and request.headers.get("X-Ingest-Token") != token:
+        raise HTTPException(403, "invalid or missing X-Ingest-Token")
     if not schema_supported(batch.schema_version):
         raise HTTPException(400, f"unsupported schema_version {batch.schema_version}")
     accepted, rejected = validate_samples(batch.samples, ctx.tag_keys)
@@ -112,17 +121,32 @@ async def stream(ctx: PlantContext = Depends(context)):
 
 
 # --- 앱 ----------------------------------------------------------------------
-def create_app(plants: PlantsConfig) -> FastAPI:
+def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAPI:
+    settings = settings or Settings()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.plants = {entry.key: PlantContext.open(entry) for entry in plants.plants}
         app.state.started_at = to_db(datetime.now(timezone.utc))
+        tasks: list[asyncio.Task] = []
+        if settings.with_simulators:
+            from collector.embedded import run_plant_simulator
+            for entry in plants.plants:
+                task = asyncio.create_task(run_plant_simulator(app.state.plants[entry.key], entry, settings), name=f"sim-{entry.key}")
+                task.add_done_callback(_simulator_done)
+                tasks.append(task)
         yield
+        for task in tasks:
+            task.cancel()
         for ctx in app.state.plants.values():
             ctx.close()
 
-    app = FastAPI(title="Skadi 앞단 수집 서버", lifespan=lifespan)
+    app = FastAPI(title="Skadi 앞단 수집 서버", lifespan=lifespan, root_path=settings.root_path)
     app.state.plants = {}
+    app.state.settings = settings
+    if settings.cors_origins:
+        app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["GET", "HEAD", "OPTIONS"],
+                           allow_headers=["*"])
 
     @app.get("/health")
     async def root_health(request: Request):
@@ -131,15 +155,23 @@ def create_app(plants: PlantsConfig) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def root_index(request: Request):
-        return _plants_page(request.app.state.plants)
+        return _plants_page(request.app.state.plants, request.scope.get("root_path", ""))
 
     @app.get("/{plant_key}")
     async def plant_root(plant_key: str, request: Request):
         context(plant_key, request)                 # 모르는 키면 404
-        return RedirectResponse(f"/{plant_key}/", status_code=307)
+        return RedirectResponse(f"{request.scope.get('root_path', '')}/{plant_key}/", status_code=307)
 
     app.include_router(router)
     return app
+
+
+def _simulator_done(task: asyncio.Task) -> None:
+    """통합 실행의 공장 태스크가 예외로 끝나면 로그를 남기고 프로세스를 끝낸다 (k8s 가 재시작, 재개 로직이 이어 채운다)."""
+    if task.cancelled() or task.exception() is None:
+        return
+    log.error("embedded simulator %s died: %r", task.get_name(), task.exception())
+    signal.raise_signal(signal.SIGTERM)
 
 
 def check_plants(plants: PlantsConfig) -> None:
@@ -151,25 +183,26 @@ def check_plants(plants: PlantsConfig) -> None:
             raise ConfigError(f"plant {entry.key}: {e}") from None
 
 
-def create_single_app(plant_path, runtime_path, db_path, scenario_path=None, key: str = "plant") -> FastAPI:
+def create_single_app(plant_path, runtime_path, db_path, scenario_path=None, key: str = "plant",
+                      settings: Settings | None = None) -> FastAPI:
     """공장 하나짜리 서버 (테스트·호환용). 경로는 /{key}/... 다."""
     entry = PlantEntry(key=key, plant=str(plant_path), runtime=str(runtime_path), db=str(db_path),
                        scenario=str(scenario_path) if scenario_path else None)
-    return create_app(PlantsConfig(plants=[entry]))
+    return create_app(PlantsConfig(plants=[entry]), settings)
 
 
-def _plants_page(plants: dict[str, PlantContext]) -> str:
+def _plants_page(plants: dict[str, PlantContext], root: str = "") -> str:
     rows = "".join(
-        f"<tr><td><a href='/{escape(k)}/'>/{escape(k)}/</a></td><td>{escape(c.plant.plant.plant_id)}</td>"
+        f"<tr><td><a href='{root}/{escape(k)}/'>/{escape(k)}/</a></td><td>{escape(c.plant.plant.plant_id)}</td>"
         f"<td>{escape(c.plant.plant.name)}</td><td class='num'>{len(c.plant.equipment)}</td>"
-        f"<td class='num'>{len(c.plant.tag_keys())}</td><td><a href='/{escape(k)}/health'>health</a></td></tr>"
+        f"<td class='num'>{len(c.plant.tag_keys())}</td><td><a href='{root}/{escape(k)}/health'>health</a></td></tr>"
         for k, c in plants.items())
     return f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>plant-simulator · 공장 목록</title>
 <style>body{{font:14px/1.4 -apple-system,"Apple SD Gothic Neo",sans-serif;margin:24px}}table{{border-collapse:collapse}}
 th,td{{padding:4px 12px;border-bottom:1px solid #e3e3e3;text-align:left}}td.num{{text-align:right}}</style></head>
 <body><h1>plant-simulator · 공장 목록</h1>
 <table><thead><tr><th>경로</th><th>plant_id</th><th>이름</th><th>설비</th><th>태그</th><th></th></tr></thead><tbody>{rows}</tbody></table>
-<p><a href="/health">전체 상태 (/health)</a></p></body></html>"""
+<p><a href="{root}/health">전체 상태 (/health)</a></p></body></html>"""
 
 
 # --- 실행 진입점 -----------------------------------------------------------
@@ -178,19 +211,26 @@ def _parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--plants", default=os.environ.get("PLANTS_CONFIG", "config/plants.yaml"), help="공장 목록 yaml")
     p.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
+    p.add_argument("--with-simulators", action="store_true", default=None,
+                   help="공장 목록의 생성기를 같은 프로세스에서 돌린다 (WITH_SIMULATORS=1 과 같다)")
+    p.add_argument("--time-mode", choices=["backfill", "live", "accelerated"], help="통합 실행에서 각 공장의 time_mode 를 덮어쓴다")
+    p.add_argument("--backfill-days", type=int, help="통합 실행에서 각 공장의 backfill_days 를 덮어쓴다")
     return p.parse_args(argv)
 
 
 def main(argv=None) -> None:
     import uvicorn
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args = _parse_args(argv)
     plants = load_plants(args.plants)
+    settings = Settings.from_env(with_simulators=args.with_simulators or None, time_mode=args.time_mode,
+                                 backfill_days=args.backfill_days)
     try:
         check_plants(plants)
     except ConfigError as e:
         sys.exit(f"error: {e}")
-    uvicorn.run(create_app(plants), host=args.host, port=args.port)
+    uvicorn.run(create_app(plants, settings), host=args.host, port=args.port, root_path=settings.root_path)
 
 
 if __name__ == "__main__":
