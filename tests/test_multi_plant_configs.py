@@ -39,9 +39,12 @@ def test_master_values_match_excel_samples(config_dir):
     assert {e.seed_key for e in vrds.equipment}.isdisjoint({e.seed_key for e in rhds.equipment})
 
 
-def test_plants_yaml_lists_six(config_dir):
+def test_plants_yaml_lists_five(config_dir):
+    """배포 공장 목록: HDS 는 RHDS·VRDS 로 대체돼 뺐다 (k8s 설계 §4.3). 파일과 테스트는 남는다."""
     from collector.plants import load_plants
-    assert [p.key for p in load_plants(config_dir / "plants.yaml").plants] == ["hds", "rfcc", "cdu", "hou", "rhds", "vrds"]
+    assert [p.key for p in load_plants(config_dir / "plants.yaml").plants] == ["rfcc", "cdu", "hou", "rhds", "vrds"]
+    k8s = load_plants(config_dir / "plants.k8s.yaml").plants
+    assert [p.key for p in k8s] == ["rfcc", "cdu", "hou", "rhds", "vrds"] and all(p.db.startswith("/app/data/") for p in k8s)
 
 
 def test_normal_noise_leaves_margin_below_warning_limits(config_dir):
