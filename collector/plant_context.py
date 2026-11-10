@@ -35,7 +35,8 @@ class PlantContext:
     listing: list[dict]                       # GET /equipment 응답 (계층 순서)
     tag_keys: set[TagKey]
     catch_up_task: asyncio.Task | None = field(default=None)
-    simulator_scenarios: list[str] = field(default_factory=list)   # 통합 실행에서 시뮬레이터에만 준 시나리오 파일
+    simulator_scenarios: list[str] = field(default_factory=list)   # 통합 실행에서 시뮬레이터에만 준 시나리오 파일 (로그·테스트용, API 에는 내지 않는다)
+    simulator_error: str | None = field(default=None)               # 통합 실행의 생성기 태스크가 예외로 끝났을 때
     # 저장·배치 전진은 워커 스레드에서도 돌 수 있다(통합 실행). 한 공장의 SQLite 트랜잭션이 겹치지 않도록 락으로 직렬화한다.
     lock: threading.Lock = field(default_factory=threading.Lock)
     loop: asyncio.AbstractEventLoop | None = field(default=None)    # SSE 발행을 루프 스레드로 넘기기 위해
@@ -135,7 +136,7 @@ class PlantContext:
     def health(self) -> dict:
         return {"key": self.key, "plant_id": self.plant.plant.plant_id, "plant_name": self.plant.plant.name,
                 "last_received_at": self.storage.last_received_at(), "sim_now": self.storage.sim_now(),
-                "catching_up": self.catching_up, "simulator_scenarios": self.simulator_scenarios}
+                "catching_up": self.catching_up, "simulator_error": self.simulator_error}
 
     def oldest_allowed(self) -> str | None:
         """시뮬레이터 현재 시각 기준 보관 기간 밖의 행은 받지 않는다. 백필을 다시 돌려도 DB가 부풀지 않는다."""

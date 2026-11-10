@@ -84,7 +84,7 @@ docker compose --profile split up --build -d    # 분리 실행 6 컨테이너
 확인:
 
 ```bash
-curl localhost:8000/health                                   # 여섯 공장의 sim_now · catching_up
+curl localhost:8000/health                                   # 다섯 공장의 sim_now · catching_up
 curl localhost:8000/rhds/equipment                           # 계층 순서의 설비·태그·한계값
 curl localhost:8000/rhds/current
 curl localhost:8000/rhds/equipment/P-3101/tags/TI-B-3101/current
@@ -103,7 +103,7 @@ curl -N localhost:8000/rfcc/stream
 | 수집 서버 | `--time-mode`, `--backfill-days` | | 통합 실행에서 각 공장 runtime 값을 덮어쓴다 |
 | 수집 서버 | | `ROOT_PATH` | 경로 접두어(예: `/plant-sim`). 루트 링크·리다이렉트·`/docs` 가 붙인다 |
 | 수집 서버 | | `CORS_ORIGINS` | 쉼표 구분. 있으면 GET 에 CORS 헤더 |
-| 수집 서버 | | `INGEST_TOKEN` | 있으면 외부 `POST /ingest` 는 헤더 `X-Ingest-Token` 필수. 통합 실행의 생성기는 거치지 않는다. 시뮬레이터 `HttpSender` 도 같은 변수를 읽어 헤더를 붙인다 |
+| 수집 서버 | | `INGEST_TOKEN` | 있으면 외부 `POST /ingest` 는 헤더 `X-Ingest-Token` 필수. 통합 실행인데 없으면 외부 `/ingest` 는 닫힌다(403). 통합 실행의 생성기는 거치지 않는다. 시뮬레이터 `HttpSender` 도 같은 변수를 읽어 헤더를 붙인다 |
 | 수집 서버 | | `SIM_SCENARIO_DIR` | 있으면 그 안의 `scenario_<key>.yaml` 을 그 공장의 시뮬레이터에만 더 준다(평가용, 이력에는 안 들어감) |
 | 시뮬레이터 | `--plant` | `PLANT_CONFIG` | `config/plant_hds.yaml` |
 | 시뮬레이터 | `--runtime` | `RUNTIME_CONFIG` | `config/runtime.yaml` |
@@ -234,7 +234,7 @@ Unit 별로 프로세스를 나눠도 같은 값이 나오고, 같은 시드로 
 - **예전 DB 파일(v1, 태그 ID 단일 키)은 열 수 없다.** 수집 서버가 파일 경로와 함께 옮기거나 지우라고 알리고 멈춘다. `data/old/` 로 옮긴 뒤 백필을 다시 돌린다.
 - 보관: 10분 배치가 끝날 때마다 `raw_retention_days` 보다 오래된 `ts_raw` 행(측정 시각 기준)과 `ingest_batch` 행(받은 시각 기준)을 지운다. 집계는 남긴다.
 - 용량(하루 백필 뒤 실측, 행당 약 180 B): rfcc 1.1 GB · hou 0.7 GB · cdu 0.6 GB · rhds 0.5 GB · vrds 0.5 GB. 다섯 1초 공장을 하루 보관하면 합계 약 3.5 GB 에서 머문다. SQLite 파일은 지워도 줄지 않고 최고점에서 고정된다. 수첨탈황은 7일 보관(90일 백필 뒤 약 0.5 GB).
-- 수집 서버는 프로세스 하나다. compose 로 여섯 공장이 동시에 첫 백필을 하면 SQLite 쓰기가 직렬화돼 다섯 1초 공장의 하루 백필이 함께 끝나기까지 약 5분 걸렸고(수첨탈황 90일은 그 뒤로도 수 분), 먼저 실시간에 들어간 공장의 1초 전송은 재시도로 버틴다. 정상 상태(초당 약 6 요청)에는 여유가 있다.
+- 수집 서버는 프로세스 하나다. 통합 실행에서는 동시에 저장하는 공장을 둘로 제한하고(나머지는 기다린다) 값 계산·저장을 워커 스레드에서 돌린다. 분리 실행으로 다섯 공장이 동시에 첫 백필을 하면 SQLite 쓰기가 직렬화돼 하루 백필이 함께 끝나기까지 약 2~5분 걸렸고, 먼저 실시간에 들어간 공장의 1초 전송은 재시도로 버틴다.
 
 ## k8s 배포 (`deploy/k8s`)
 
@@ -246,8 +246,8 @@ Unit 별로 프로세스를 나눠도 같은 값이 나오고, 같은 시드로 
 | 스토리지 | PVC `plant-sim-data` 20Gi(gp3, RWO). 다섯 공장 SQLite, 하루 보관 약 3.5 GB 에서 고정 |
 | 외부 | Ingress `https://u4-2.skala-us.com/plant-sim/…` (접두어 제거, SSE 용 버퍼링 off·타임아웃 3600s). 조회·화면·SSE |
 | 내부 | `http://plant-sim.u4-2.svc.cluster.local:8000/{공장}/…` (접두어 없음, CORS 불필요) |
-| 쓰기 보호 | Secret `plant-sim` 의 `ingest-token` 이 있으면 외부 `/ingest` 는 `X-Ingest-Token` 필수 |
-| 프로브 | startupProbe 30초×60회(첫 백필 30분까지), readiness 10초, liveness 30초. 백필 창이 10분이고 창마다 양보하므로 백필 중에도 응답한다 |
+| 쓰기 보호 | 통합 실행에서 외부 `POST /ingest` 는 기본적으로 닫혀 있다(403). 열려면 Secret `plant-sim` 의 `ingest-token` 을 만들고 보내는 쪽이 `X-Ingest-Token` 을 붙인다 |
+| 프로브 | startupProbe 30초×60회(첫 백필 30분까지), readiness 10초, liveness 30초. 값 계산·저장은 워커 스레드에서 돌고 조회 핸들러는 스레드풀에서 돌아 백필 중에도 응답한다. 생성기 태스크가 죽으면 `/health` 가 503 이 되어 liveness 가 다시 띄운다 |
 
 ```bash
 # 1. 이미지 (PC 에서; Harbor 가 인터넷에서 닿으면 .github/workflows/build-image.yml 로도 가능)
@@ -264,7 +264,7 @@ curl https://u4-2.skala-us.com/plant-sim/health
 - 첫 기동은 다섯 공장 하루치 백필이다. CPU 500m 에서 수 분~십수 분 걸리며 그동안 `/health` 의 `sim_now` 가 전진한다.
 - 백필 기간을 늘리려면(`--backfill-days`) PVC 의 DB 파일을 지우고 다시 채워야 한다. 재개는 마지막 시각부터만 이어 간다.
 - 다른 파드는 DB 파일을 직접 읽을 수 없다(RWO). HTTP API(`/current`, `/timeseries`, `/alarms`, `/maintenance`, `/failures`, `/stream`)를 쓴다.
-- 실측(로컬 Mac, 다섯 공장 통합 실행): 백필 중 `/health` 응답 0.1초 이하(생성·저장이 워커 스레드에서 돌아 루프가 비어 있다), 다섯 공장 하루 백필 약 7분, 백필 뒤 RSS 약 250 MB(compose 컨테이너 기준 약 300~400 MiB, 파일 캐시 포함). CPU 500m 에서는 백필이 2~3배 더 걸린다.
+- 실측(로컬 Mac, 다섯 공장 통합 실행): 백필 중 `/health` 응답 0.1초 이하(생성·저장이 워커 스레드에서 돌아 루프가 비어 있다), 다섯 공장 하루 백필 약 7분, 백필 뒤 Python 프로세스 RSS 약 250 MB(`docker stats` 는 SQLite 파일 캐시까지 세어 약 740 MiB 로 보인다. 캐시는 회수 가능하다). CPU 500m 에서는 백필이 2~3배 더 걸린다.
 
 ## 폴더
 

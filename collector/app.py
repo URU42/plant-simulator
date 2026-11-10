@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hmac
 import logging
 import os
-import signal
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -19,6 +19,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from pydantic import ValidationError
 
 from collector.ingest import RawBatch, schema_supported, validate_samples
 from collector.plant_context import PlantContext
@@ -43,11 +44,23 @@ router = APIRouter(prefix="/{plant_key}")
 
 
 # --- 수집 ---------------------------------------------------------------------
+def require_ingest_token(request: Request) -> None:
+    """본문을 읽기 전에 쓰기 권한을 확인한다. 통합 실행인데 토큰이 없으면 외부 수신을 아예 닫는다(fail-closed)."""
+    settings = request.app.state.settings
+    if settings.ingest_token:
+        if not hmac.compare_digest(request.headers.get("X-Ingest-Token", ""), settings.ingest_token):
+            raise HTTPException(403, "invalid or missing X-Ingest-Token")
+    elif settings.with_simulators:
+        raise HTTPException(403, "external ingest is disabled: set INGEST_TOKEN to allow POST /ingest in embedded mode")
+
+
 @router.post("/ingest")
-async def post_ingest(batch: RawBatch, request: Request, ctx: PlantContext = Depends(context)):
-    token = request.app.state.settings.ingest_token
-    if token and request.headers.get("X-Ingest-Token") != token:
-        raise HTTPException(403, "invalid or missing X-Ingest-Token")
+async def post_ingest(request: Request, ctx: PlantContext = Depends(context)):
+    require_ingest_token(request)                 # 본문을 읽기 전에 (FastAPI 의 본문 검증은 의존성보다 먼저 돌므로 직접 순서를 정한다)
+    try:
+        batch = RawBatch.model_validate(await request.json())
+    except (ValueError, ValidationError) as e:    # JSON 오류도 ValueError
+        raise HTTPException(422, f"invalid body: {str(e)[:300]}")
     if not schema_supported(batch.schema_version):
         raise HTTPException(400, f"unsupported schema_version {batch.schema_version}")
     accepted, rejected = validate_samples(batch.samples, ctx.tag_keys)
@@ -62,18 +75,21 @@ async def plant_page(ctx: PlantContext = Depends(context)):
 
 
 @router.get("/health")
-async def plant_health(ctx: PlantContext = Depends(context)):
+def plant_health(ctx: PlantContext = Depends(context)):
+    """조회 핸들러는 동기(def)라 스레드풀에서 돈다: 워커가 쥔 저장소 락을 이벤트 루프가 기다리지 않는다."""
+    if ctx.simulator_error:
+        raise HTTPException(503, {"status": "degraded", **ctx.health()})
     return {"status": "ok", **ctx.health()}
 
 
 @router.get("/equipment")
-async def equipment(ctx: PlantContext = Depends(context)):
+def equipment(ctx: PlantContext = Depends(context)):
     """계층 순서의 설비 목록과 태그 (화면이 표를 그릴 때)."""
     return ctx.listing
 
 
 @router.get("/current")
-async def current_all(ctx: PlantContext = Depends(context)):
+def current_all(ctx: PlantContext = Depends(context)):
     """모든 태그의 현재값 + status. 순서는 /equipment 와 같다."""
     rows = {(r["equip_id"], r["tag_id"]): r for r in ctx.storage.query_dicts("SELECT * FROM tag_current")}
     return [ctx.with_status(rows.get((e["equip_id"], t["tag_id"])), (e["equip_id"], t["tag_id"]))
@@ -81,7 +97,7 @@ async def current_all(ctx: PlantContext = Depends(context)):
 
 
 @router.get("/equipment/{equip_id}/tags/{tag_id}/current")
-async def tag_current(equip_id: str, tag_id: str, ctx: PlantContext = Depends(context)):
+def tag_current(equip_id: str, tag_id: str, ctx: PlantContext = Depends(context)):
     key = (equip_id, tag_id)
     if key not in ctx.tag_keys:
         raise HTTPException(404, f"unknown tag {equip_id}/{tag_id}")
@@ -89,7 +105,7 @@ async def tag_current(equip_id: str, tag_id: str, ctx: PlantContext = Depends(co
 
 
 @router.get("/timeseries")
-async def timeseries(equip_id: str, tag_id: str, from_: str = Query(alias="from"), to: str = Query(), interval: str = "1h",
+def timeseries(equip_id: str, tag_id: str, from_: str = Query(alias="from"), to: str = Query(), interval: str = "1h",
                      ctx: PlantContext = Depends(context)):
     if (equip_id, tag_id) not in ctx.tag_keys:
         raise HTTPException(404, f"unknown tag {equip_id}/{tag_id}")
@@ -103,7 +119,7 @@ async def timeseries(equip_id: str, tag_id: str, from_: str = Query(alias="from"
 
 
 @router.get("/alarms")
-async def alarms(equip_id: str | None = None, from_: str | None = Query(default=None, alias="from"), to: str | None = None,
+def alarms(equip_id: str | None = None, from_: str | None = Query(default=None, alias="from"), to: str | None = None,
                  ctx: PlantContext = Depends(context)):
     where, params = ["1=1"], []
     if equip_id:
@@ -116,14 +132,14 @@ async def alarms(equip_id: str | None = None, from_: str | None = Query(default=
 
 
 @router.get("/maintenance")
-async def maintenance(equip_id: str | None = None, ctx: PlantContext = Depends(context)):
+def maintenance(equip_id: str | None = None, ctx: PlantContext = Depends(context)):
     """정비 이력 (개발용 시나리오에서 적재). 다른 파드는 DB 를 직접 읽지 못하므로 API 로 연다."""
     where, params = ("WHERE equip_id = ?", [equip_id]) if equip_id else ("", [])
     return ctx.storage.query_dicts(f"SELECT * FROM maintenance_history {where} ORDER BY start_ts", params)
 
 
 @router.get("/failures")
-async def failures(equip_id: str | None = None, ctx: PlantContext = Depends(context)):
+def failures(equip_id: str | None = None, ctx: PlantContext = Depends(context)):
     """고장 이력 (개발용 시나리오에서 적재)."""
     where, params = ("WHERE equip_id = ?", [equip_id]) if equip_id else ("", [])
     return ctx.storage.query_dicts(f"SELECT * FROM failure_history {where} ORDER BY start_ts", params)
@@ -144,14 +160,18 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
         app.state.started_at = to_db(datetime.now(timezone.utc))
         tasks: list[asyncio.Task] = []
         if settings.with_simulators:
-            from collector.embedded import run_plant_simulator
+            from collector.embedded import EMBEDDED_CONCURRENCY, run_plant_simulator
+            limiter = asyncio.Semaphore(EMBEDDED_CONCURRENCY)
             for entry in plants.plants:
-                task = asyncio.create_task(run_plant_simulator(app.state.plants[entry.key], entry, settings), name=f"sim-{entry.key}")
-                task.add_done_callback(_simulator_done)
+                ctx = app.state.plants[entry.key]
+                task = asyncio.create_task(run_plant_simulator(ctx, entry, settings, limiter), name=f"sim-{entry.key}")
+                task.add_done_callback(lambda t, ctx=ctx: _simulator_done(t, ctx))
                 tasks.append(task)
         yield
         for task in tasks:
             task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)   # 워커 스레드의 마지막 묶음이 끝날 때까지 기다린 뒤 닫는다
         for ctx in app.state.plants.values():
             ctx.close()
 
@@ -163,9 +183,13 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
                            allow_headers=["*"])
 
     @app.get("/health")
-    async def root_health(request: Request):
-        return {"status": "ok", "started_at": request.app.state.started_at,
-                "plants": {key: ctx.health() for key, ctx in request.app.state.plants.items()}}
+    def root_health(request: Request):
+        """전체 상태. 통합 실행의 생성기가 하나라도 죽었으면 503 → liveness 가 파드를 다시 띄운다."""
+        plants_health = {key: ctx.health() for key, ctx in request.app.state.plants.items()}
+        body = {"status": "ok", "started_at": request.app.state.started_at, "plants": plants_health}
+        if any(c.simulator_error for c in request.app.state.plants.values()):
+            raise HTTPException(503, body | {"status": "degraded"})
+        return body
 
     @app.get("/", response_class=HTMLResponse)
     async def root_index(request: Request):
@@ -180,12 +204,13 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
     return app
 
 
-def _simulator_done(task: asyncio.Task) -> None:
-    """통합 실행의 공장 태스크가 예외로 끝나면 로그를 남기고 프로세스를 끝낸다 (k8s 가 재시작, 재개 로직이 이어 채운다)."""
+def _simulator_done(task: asyncio.Task, ctx: PlantContext) -> None:
+    """통합 실행의 공장 태스크가 예외로 끝나면 기록만 한다. /health 가 503 이 되어 k8s liveness 가 파드를 다시 띄우고,
+    재개 로직이 마지막 시각부터 이어 채운다. (프로세스를 직접 죽이지 않는다 — 테스트 러너까지 끝내 버린다.)"""
     if task.cancelled() or task.exception() is None:
         return
-    log.error("embedded simulator %s died: %r", task.get_name(), task.exception())
-    signal.raise_signal(signal.SIGTERM)
+    ctx.simulator_error = repr(task.exception())
+    log.error("embedded simulator %s died: %s", task.get_name(), ctx.simulator_error)
 
 
 def check_plants(plants: PlantsConfig) -> None:

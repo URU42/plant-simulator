@@ -45,7 +45,8 @@ class Storage:
                               f"db in plants.yaml to a new file")
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:                       # 워커 스레드의 트랜잭션이 끝난 뒤에 닫는다
+            self._conn.close()
 
     # --- 범용 ---------------------------------------------------------------
     def execute(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:

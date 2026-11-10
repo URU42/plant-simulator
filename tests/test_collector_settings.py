@@ -44,3 +44,19 @@ def test_settings_from_env(monkeypatch):
     monkeypatch.delenv("INGEST_TOKEN", raising=False)
     s = Settings.from_env()
     assert (s.root_path, s.cors_origins, s.with_simulators, s.ingest_token) == ("/x", ["a", "b"], True, None)
+
+
+def test_embedded_mode_without_token_closes_http_ingest(rfcc_plant_path, rfcc_runtime_path):
+    """통합 실행인데 토큰이 없으면 외부 /ingest 는 닫힌다 (fail-closed). 생성기는 LocalSender 로 들어가므로 영향 없다."""
+    settings = Settings(with_simulators=True, time_mode="live")
+    with TestClient(create_single_app(rfcc_plant_path, rfcc_runtime_path, ":memory:", settings=settings)) as c:
+        s = [Sample(equip_id="P-1101A", tag_id="VI-P-1101A", ts=T0, value=1.45, quality="Good")]
+        body = IngestBatch(source_id="T", batch_id="b-ext", sent_at=T0, samples=s).model_dump_json()
+        r = c.post("/plant/ingest", content=body, headers={"content-type": "application/json"})
+        assert r.status_code == 403 and "INGEST_TOKEN" in r.json()["detail"]
+
+
+def test_token_is_checked_before_body_is_parsed(plant_path, runtime_path):
+    with TestClient(create_single_app(plant_path, runtime_path, ":memory:", settings=Settings(ingest_token="s3cret"))) as c:
+        r = c.post("/plant/ingest", content="not json", headers={"content-type": "application/json"})
+        assert r.status_code == 403                                  # 422 (스키마 상세) 가 아니라 403
