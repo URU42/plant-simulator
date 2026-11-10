@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent / "deploy" / "k8s"
 
 
 def _docs():
-    return [d for f in ROOT.glob("*.yaml") if f.name not in ("kustomization.yaml", "secret.example.yaml")
+    return [d for f in ROOT.glob("*.yaml") if f.name not in ("kustomization.yaml", "plant-sim-secret.example.yaml")
             for d in yaml.safe_load_all(f.read_text()) if d]
 
 

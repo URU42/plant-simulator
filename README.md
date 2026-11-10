@@ -243,20 +243,20 @@ Unit 별로 프로세스를 나눠도 같은 값이 나오고, 같은 시드로 
 | 항목 | 값 |
 | --- | --- |
 | 자원 | requests 200m/512Mi, limits 500m/1Gi |
-| 스토리지 | PVC `plant-sim-data` 20Gi(gp3, RWO). 다섯 공장 SQLite, 하루 보관 약 3.5 GB 에서 고정 |
+| 스토리지 | PVC `plant-sim-data` 20Gi(gp3, RWO, 매니페스트에 포함). 다섯 공장 SQLite, 하루 보관 약 3.5 GB 에서 고정 |
 | 외부 | Ingress `https://u4-2.skala-us.com/plant-sim/…` (접두어 제거, SSE 용 버퍼링 off·타임아웃 3600s). 조회·화면·SSE |
 | 내부 | `http://plant-sim.u4-2.svc.cluster.local:8000/{공장}/…` (접두어 없음, CORS 불필요) |
 | 쓰기 보호 | 통합 실행에서 외부 `POST /ingest` 는 기본적으로 닫혀 있다(403). 열려면 Secret `plant-sim` 의 `ingest-token` 을 만들고 보내는 쪽이 `X-Ingest-Token` 을 붙인다 |
 | 프로브 | startupProbe 30초×60회(첫 백필 30분까지), readiness 10초, liveness 30초. 값 계산·저장은 워커 스레드에서 돌고 조회 핸들러는 스레드풀에서 돌아 백필 중에도 응답한다. 생성기 태스크가 죽으면 `/health` 가 503 이 되어 liveness 가 다시 띄운다 |
 
-이미지 빌드·push·배포는 `Jenkinsfile` 로 자동화돼 있다: `rootless-docker` 에이전트에서 테스트(uv 이미지 안) → 빌드(`test-<빌드번호>-<커밋8자리>`) → Harbor push(`harbor-jenkins-robot`) → GitOps 저장소 `URU42/being-gitops` 의 `k8s/test/kustomization.yaml` 이미지 태그 갱신(`gitops-github-pat`).
-실제 배포는 그 저장소를 바라보는 쪽이 하므로, `deploy/k8s` 의 plant-sim 매니페스트를 GitOps 저장소 `k8s/test` 에 옮겨 두고 kustomization 의 `resources` 와 `images` 에 넣는다(렌더 결과에 `harbor.uru42.space/uru42/plant-simulator` 가 있어야 파이프라인이 통과한다). 손으로 하려면:
+이미지 빌드·push·배포는 `Jenkinsfile` 로 자동화돼 있다: `rootless-docker` 에이전트에서 테스트(uv 이미지 안) → 빌드(`test-<빌드번호>-<커밋8자리>`) → Harbor push(`harbor-jenkins-robot`) → GitOps 저장소 `URU42/being-gitops` 의 `k8s/plant-sim/kustomization.yaml` 이미지 태그 갱신(`gitops-github-pat`).
+실제 배포는 그 저장소를 바라보는 쪽이 하므로, `deploy/k8s` 의 파일 전부(`kustomization.yaml`, `plant-sim-*.yaml`)를 GitOps 저장소의 `k8s/plant-sim/` 에 복사해 둔다(렌더 결과에 `harbor.uru42.space/uru42/plant-simulator` 가 있어야 파이프라인이 통과한다). 손으로 하려면:
 
 ```bash
 # 1. 이미지 (PC 에서; Harbor 가 인터넷에서 닿으면 .github/workflows/build-image.yml 로도 가능)
 docker build --platform linux/amd64 -t harbor.uru42.space/uru42/plant-simulator:<TAG> . && docker push harbor.uru42.space/uru42/plant-simulator:<TAG>
-# 2. deploy/k8s/kustomization.yaml 의 images.newTag 를 그 태그로 바꾼다 (주소는 harbor.uru42.space/uru42 로 적혀 있다)
-# 3. Secret (선택): kubectl -n u4-2 create secret generic plant-sim --from-literal=ingest-token='<긴 문자열>'
+# 2. kustomization.yaml 의 images.newTag 를 그 태그로 바꾼다 (주소는 harbor.uru42.space/uru42 로 적혀 있다)
+# 3. Secret (선택, 외부에서 /ingest 로 쓸 때만): kubectl -n u4-2 create secret generic plant-sim --from-literal=ingest-token='<긴 문자열>'
 #    평가용 시나리오 (선택): kubectl -n u4-2 create secret generic plant-sim-scenarios --from-file=scenario_cdu.yaml=<파일>
 # 4. 적용·확인
 kubectl apply -k deploy/k8s -n u4-2
@@ -283,7 +283,7 @@ config/      plants.yaml · plant_*.yaml · runtime*.yaml · scenario_*.yaml
 common/      config_models(복합키·TagRef·한계값) · scenario_models · message(v1) · sim_clock · timefmt
 simulator/   signal_model(hds) · rfcc_model · patterns · scenario · random_anomalies · random_quality · generator · sender · main
 collector/   app(라우트) · plants(공장 목록) · plant_context(공장별 문맥·수신 핵심) · embedded(통합 실행) · settings · ingest · storage · schema.sql · jobs · seed_master · seed_history · stream · static/index.html
-deploy/k8s/  deployment · service · pvc · ingress · secret.example · kustomization
+deploy/k8s/  kustomization · plant-sim-{deployment,service,pvc,ingress}.yaml · plant-sim-secret.example.yaml (being-gitops k8s/plant-sim 으로 복사)
 docs/        superpowers/specs (RFCC · 다중 공장 설계) · superpowers/plans (구현 계획)
 tests/       기획서 9.2 단계별 완료 기준 + 설계 §5 테스트
 ```

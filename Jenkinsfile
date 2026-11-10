@@ -1,6 +1,6 @@
 // plant-simulator CI/CD: 테스트 → 이미지 빌드 → Harbor push → GitOps 저장소(being-gitops) 의 이미지 태그 갱신.
 // 팀의 frontend 파이프라인과 같은 모양이다: rootless-docker 에이전트, 태그 파일, Harbor 로봇 자격, GitOps PAT.
-// 배포 자체는 GitOps 저장소 k8s/test 를 바라보는 쪽(ArgoCD 등)이 한다. deploy/k8s 의 매니페스트는 그 저장소에 옮겨 둔다.
+// 배포 자체는 GitOps 저장소 k8s/plant-sim 을 바라보는 쪽(ArgoCD 등)이 한다. deploy/k8s 의 파일을 그 디렉터리로 복사해 둔다.
 
 pipeline {
     agent { label 'rootless-docker' }
@@ -123,7 +123,7 @@ echo "[1/6] Clone GitOps repository"
 git clone --branch main --depth 1 \
   "$GITOPS_REPO" "$WORKDIR/gitops"
 
-cd "$WORKDIR/gitops/k8s/test"
+cd "$WORKDIR/gitops/k8s/plant-sim"
 
 echo "[2/6] Update plant-simulator image tag"
 echo "Target: ${IMAGE}:${TAG}"
@@ -141,7 +141,7 @@ echo "[4/6] Verify plant-simulator image"
 if ! grep -Fq "image: ${IMAGE}:${TAG}" \
     "$WORKDIR/rendered.yaml"; then
     echo "ERROR: plant-simulator image tag not found in rendered manifests" >&2
-    echo "       k8s/test 에 deploy/k8s 의 plant-sim 매니페스트가 들어 있어야 한다" >&2
+    echo "       k8s/plant-sim 에 deploy/k8s 의 파일(kustomization.yaml, plant-sim-*.yaml)이 있어야 한다" >&2
     exit 1
 fi
 
@@ -151,7 +151,7 @@ cd "$WORKDIR/gitops"
 git config user.name "URU42 Jenkins"
 git config user.email "jenkins@localhost"
 
-git add k8s/test/kustomization.yaml
+git add k8s/plant-sim/kustomization.yaml
 
 if git diff --cached --quiet; then
     echo "No GitOps changes"
