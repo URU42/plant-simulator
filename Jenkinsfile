@@ -1,14 +1,6 @@
-// plant-simulator CI/CD: 테스트 → 이미지 빌드 → Harbor push → (선택) k8s 배포.
-//
-// 전제와 바꿀 값
-// - 에이전트: Docker CLI 와 Python 3.11 + uv 가 있는 노드(Docker-in-Docker 는 클러스터 정책상 금지이므로 Jenkins 는 클러스터 밖이거나 docker 소켓이 있는 노드).
-//   필요하면 agent { label 'docker' } 처럼 레이블을 지정한다.
-// - 자격 증명(Jenkins Credentials):
-//     harbor-cred      Username with password — Harbor(harbor.uru42.space) 로그인
-//     kubeconfig-u4-2  Secret file — 네임스페이스 u4-2 에 apply 할 kubeconfig (DEPLOY=true 일 때만 필요)
-// - 이미지: harbor.uru42.space/uru42/plant-simulator:<빌드번호>-<커밋7자리> 와 :latest
-// - 배포: 파라미터 DEPLOY 를 켰을 때만 kustomize 로 태그를 바꿔 kubectl apply -k deploy/k8s -n u4-2.
-//   첫 기동은 다섯 공장 하루 백필(500m CPU 에서 약 15분)이라 rollout 대기는 30분까지 둔다.
+// plant-simulator CI/CD: 테스트 → 이미지 빌드 → Harbor push → GitOps 저장소(being-gitops) 의 이미지 태그 갱신.
+// 팀의 frontend 파이프라인과 같은 모양이다: rootless-docker 에이전트, 태그 파일, Harbor 로봇 자격, GitOps PAT.
+// 배포 자체는 GitOps 저장소 k8s/test 를 바라보는 쪽(ArgoCD 등)이 한다. deploy/k8s 의 매니페스트는 그 저장소에 옮겨 둔다.
 
 pipeline {
     agent { label 'rootless-docker' }
@@ -16,94 +8,166 @@ pipeline {
     options {
         timestamps()
         disableConcurrentBuilds()
-        buildDiscarder(logRotator(numToKeepStr: '30'))
-    }
-
-    parameters {
-        booleanParam(name: 'DEPLOY', defaultValue: false, description: 'Harbor push 뒤 u4-2 네임스페이스에 배포한다')
-        booleanParam(name: 'PUSH_LATEST', defaultValue: true, description: ':latest 태그도 함께 push 한다')
+        skipDefaultCheckout(true)
     }
 
     environment {
-        REGISTRY   = 'harbor.uru42.space'
-        PROJECT    = 'uru42'
-        IMAGE      = "${REGISTRY}/${PROJECT}/plant-simulator"
-        NAMESPACE  = 'u4-2'
-        PLATFORM   = 'linux/amd64'
+        IMAGE = 'harbor.uru42.space/uru42/plant-simulator'
     }
 
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
-                script {
-                    env.GIT_SHORT = sh(script: 'git rev-parse --short=7 HEAD', returnStdout: true).trim()
-                    env.TAG = "${env.BUILD_NUMBER}-${env.GIT_SHORT}"
-                }
-                echo "image tag: ${env.TAG}"
+            }
+        }
+
+        stage('Validate') {
+            steps {
+                sh '''
+                    test -f Dockerfile
+                    test -f pyproject.toml
+                    test -f config/plants.k8s.yaml
+                '''
             }
         }
 
         stage('Test') {
             steps {
-                sh '''
-                    uv sync --frozen
-                    uv run pytest -q -p no:cacheprovider --junitxml=reports/pytest.xml
-                '''
-            }
-            post {
-                always { junit allowEmptyResults: true, testResults: 'reports/pytest.xml' }
+                sh '''#!/bin/sh
+set -eu
+
+export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"
+
+# 에이전트에 Python 을 두지 않고 uv 이미지 안에서 테스트한다 (의존성은 uv.lock 그대로)
+docker run --rm \
+  -v "$PWD":/src -w /src \
+  -e UV_CACHE_DIR=/tmp/uv-cache -e UV_PROJECT_ENVIRONMENT=/tmp/venv \
+  ghcr.io/astral-sh/uv:python3.11-bookworm-slim \
+  sh -c "uv sync --frozen && uv run pytest -q -p no:cacheprovider"
+'''
             }
         }
 
-        stage('Build image') {
+        stage('Build') {
             steps {
-                sh "docker build --platform ${PLATFORM} -t ${IMAGE}:${TAG} ."
+                sh '''#!/bin/sh
+set -eu
+
+export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"
+
+TAG="test-${BUILD_NUMBER}-$(git rev-parse --short=8 HEAD)"
+printf '%s' "$TAG" > .plant-sim-image-tag
+
+docker build \
+  -t "${IMAGE}:${TAG}" \
+  -f Dockerfile \
+  .
+
+echo "Built image: ${IMAGE}:${TAG}"
+'''
             }
         }
 
-        stage('Push to Harbor') {
+        stage('Push') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'harbor-cred', usernameVariable: 'HARBOR_USER', passwordVariable: 'HARBOR_PASS')]) {
-                    sh '''
-                        echo "$HARBOR_PASS" | docker login ${REGISTRY} -u "$HARBOR_USER" --password-stdin
-                        docker push ${IMAGE}:${TAG}
-                        if [ "${PUSH_LATEST}" = "true" ]; then
-                            docker tag ${IMAGE}:${TAG} ${IMAGE}:latest
-                            docker push ${IMAGE}:latest
-                        fi
-                        docker logout ${REGISTRY}
-                    '''
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'harbor-jenkins-robot',
+                        usernameVariable: 'HARBOR_USER',
+                        passwordVariable: 'HARBOR_PASS'
+                    )
+                ]) {
+                    sh '''#!/bin/sh
+set -eu
+set +x
+
+export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"
+export DOCKER_CONFIG="$(mktemp -d)"
+trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+
+TAG="$(cat .plant-sim-image-tag)"
+
+printf '%s' "$HARBOR_PASS" |
+  docker login harbor.uru42.space \
+    -u "$HARBOR_USER" \
+    --password-stdin
+
+docker push "${IMAGE}:${TAG}"
+
+echo "Pushed image: ${IMAGE}:${TAG}"
+'''
                 }
             }
         }
 
-        stage('Deploy to k8s') {
-            when { expression { params.DEPLOY } }
+        stage('Update GitOps Tag') {
             steps {
-                withCredentials([file(credentialsId: 'kubeconfig-u4-2', variable: 'KUBECONFIG')]) {
-                    sh '''
-                        # kustomization 의 태그를 이번 빌드로 바꾼 뒤 적용한다 (작업 트리만 바꾸고 커밋하지 않는다)
-                        cd deploy/k8s
-                        kubectl kustomize . >/dev/null
-                        (command -v kustomize >/dev/null && kustomize edit set image ${IMAGE}=${IMAGE}:${TAG}) || \
-                            sed -i "s#newTag: .*#newTag: ${TAG}#" kustomization.yaml
-                        kubectl apply -k . -n ${NAMESPACE}
-                        kubectl -n ${NAMESPACE} rollout status deploy/plant-sim --timeout=30m
-                        kubectl -n ${NAMESPACE} get pods -l app=plant-sim
-                    '''
+                withCredentials([
+                    gitUsernamePassword(
+                        credentialsId: 'gitops-github-pat',
+                        gitToolName: 'Default'
+                    )
+                ]) {
+                    sh '''#!/bin/sh
+set -eu
+
+GITOPS_REPO="https://github.com/URU42/being-gitops.git"
+IMAGE="harbor.uru42.space/uru42/plant-simulator"
+TAG="$(cat "$WORKSPACE/.plant-sim-image-tag")"
+
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf "$WORKDIR"' EXIT
+
+echo "[1/6] Clone GitOps repository"
+git clone --branch main --depth 1 \
+  "$GITOPS_REPO" "$WORKDIR/gitops"
+
+cd "$WORKDIR/gitops/k8s/test"
+
+echo "[2/6] Update plant-simulator image tag"
+echo "Target: ${IMAGE}:${TAG}"
+
+kustomize edit set image "${IMAGE}=${IMAGE}:${TAG}"
+
+echo "[3/6] Render Kubernetes manifests"
+kustomize build . > "$WORKDIR/rendered.yaml"
+
+echo "Images in rendered manifests:"
+grep -n 'image:' "$WORKDIR/rendered.yaml" || true
+
+echo "[4/6] Verify plant-simulator image"
+
+if ! grep -Fq "image: ${IMAGE}:${TAG}" \
+    "$WORKDIR/rendered.yaml"; then
+    echo "ERROR: plant-simulator image tag not found in rendered manifests" >&2
+    echo "       k8s/test 에 deploy/k8s 의 plant-sim 매니페스트가 들어 있어야 한다" >&2
+    exit 1
+fi
+
+echo "[5/6] Commit GitOps changes"
+cd "$WORKDIR/gitops"
+
+git config user.name "URU42 Jenkins"
+git config user.email "jenkins@localhost"
+
+git add k8s/test/kustomization.yaml
+
+if git diff --cached --quiet; then
+    echo "No GitOps changes"
+    exit 0
+fi
+
+git diff --cached --stat
+git commit -m "deploy(plant-sim): ${TAG}"
+
+echo "[6/6] Push GitOps changes"
+git push origin HEAD:main
+
+echo "SUCCESS: plant-simulator GitOps updated to ${TAG}"
+'''
                 }
             }
-        }
-    }
-
-    post {
-        always {
-            sh 'docker image rm -f ${IMAGE}:${TAG} >/dev/null 2>&1 || true'
-            cleanWs(deleteDirs: true, notFailBuild: true)
-        }
-        failure {
-            echo "빌드 실패: ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.TAG})"
         }
     }
 }
