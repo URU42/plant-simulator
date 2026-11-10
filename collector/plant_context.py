@@ -7,15 +7,17 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from collector.jobs import JobRunner
+from collector.ingest import IngestResult, Rejection
+from collector.jobs import MAX_WINDOWS_PER_ADVANCE, JobRunner
 from collector.plants import PlantEntry
 from collector.seed_master import seed_master
 from collector.storage import Storage
 from collector.stream import Broadcaster
 from common.config_models import PlantConfig, RuntimeConfig, TagKey, load_plant, load_runtime
+from common.message import Sample
 from common.timefmt import from_db, to_db
 
 NO_DATA_SEND_INTERVALS = 3      # 전송 주기(또는 더 긴 태그 주기) 3번 동안 안 들어오면 NoData (기획서 6.2)
@@ -50,6 +52,52 @@ class PlantContext:
         if self.catch_up_task:
             self.catch_up_task.cancel()
         self.storage.close()
+
+    # --- 수신 핵심 (HTTP 라우트와 LocalSender 가 함께 쓴다) -------------------------
+    def receive(self, batch_id: str, source_id: str, samples: list[Sample], received_at: str,
+                rejections: list[Rejection] = ()) -> IngestResult:
+        """검증을 마친 샘플을 저장하고 배치를 전진시킨다. 같은 batch_id 는 저장하지 않고, 보관 기간 밖 행은 거절한다."""
+        reasons = list(rejections)
+        oldest = self.oldest_allowed()
+        accepted: list[Sample] = []
+        for i, s in enumerate(samples):
+            if oldest is not None and to_db(s.ts) < oldest:
+                reasons.append(Rejection(index=i, tag_id=s.tag_id, reason=f"ts {s.ts.isoformat()} is older than raw retention"))
+            else:
+                accepted.append(s)
+        if self.storage.batch_seen(batch_id):
+            return IngestResult(batch_id=batch_id, duplicate=True, accepted=len(accepted), stored=0,
+                                rejected=len(reasons), reasons=reasons)
+        rows = [(s.equip_id, s.tag_id, to_db(s.ts), s.value, s.quality) for s in accepted]
+        stored = self.storage.store_batch(batch_id, source_id, received_at, rows)
+        if accepted:
+            if self.jobs.advance(self.storage.sim_now()) >= MAX_WINDOWS_PER_ADVANCE:
+                self.start_catch_up()
+            if self.broadcaster.has_subscribers():         # 구독자가 없으면 직렬화도 하지 않는다
+                self.broadcaster.publish("samples", [s.model_dump(mode="json") for s in accepted])
+        return IngestResult(batch_id=batch_id, duplicate=False, accepted=len(accepted), stored=stored,
+                            rejected=len(reasons), reasons=reasons)
+
+    def receive_local(self, batch_id: str, source_id: str, samples: list[Sample]) -> IngestResult:
+        """같은 프로세스의 생성기가 보낸 묶음. 받은 시각은 지금."""
+        return self.receive(batch_id, source_id, samples, to_db(datetime.now(timezone.utc)))
+
+    def start_catch_up(self) -> None:
+        """밀린 구간이 상한을 넘으면 요청을 붙잡지 않고 백그라운드에서 이어서 따라잡는다. 이벤트 루프 밖(테스트)에서는 그 자리에서 끝낸다."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            while self.jobs.advance(self.storage.sim_now()):
+                pass
+            return
+        if not self.catching_up:
+            self.catch_up_task = asyncio.create_task(self.catch_up())
+
+    async def catch_up(self) -> None:
+        while True:
+            await asyncio.sleep(0)                      # 다른 요청이 끼어들 틈을 준다
+            if self.jobs.advance(self.storage.sim_now()) == 0:
+                return
 
     # --- 조회 도우미 ---------------------------------------------------------
     @property

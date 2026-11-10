@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -17,8 +16,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 
-from collector.ingest import RawBatch, ingest, schema_supported
-from collector.jobs import MAX_WINDOWS_PER_ADVANCE
+from collector.ingest import RawBatch, schema_supported, validate_samples
 from collector.plant_context import PlantContext
 from collector.plants import PlantEntry, PlantsConfig, load_plants
 from common.config_models import ConfigError
@@ -43,26 +41,8 @@ router = APIRouter(prefix="/{plant_key}")
 async def post_ingest(batch: RawBatch, ctx: PlantContext = Depends(context)):
     if not schema_supported(batch.schema_version):
         raise HTTPException(400, f"unsupported schema_version {batch.schema_version}")
-    received_at = to_db(datetime.now(timezone.utc))
-    result, accepted = ingest(ctx.storage, batch, received_at, ctx.tag_keys, ctx.oldest_allowed())
-    if accepted:
-        if ctx.jobs.advance(ctx.storage.sim_now()) >= MAX_WINDOWS_PER_ADVANCE:
-            _start_catch_up(ctx)
-        ctx.broadcaster.publish("samples", [s.model_dump(mode="json") for s in accepted])
-    return result
-
-
-def _start_catch_up(ctx: PlantContext) -> None:
-    """밀린 구간이 상한을 넘으면 요청을 붙잡지 않고 백그라운드에서 이어서 따라잡는다."""
-    if not ctx.catching_up:
-        ctx.catch_up_task = asyncio.create_task(_catch_up(ctx))
-
-
-async def _catch_up(ctx: PlantContext) -> None:
-    while True:
-        await asyncio.sleep(0)                      # 다른 요청이 끼어들 틈을 준다
-        if ctx.jobs.advance(ctx.storage.sim_now()) == 0:
-            return
+    accepted, rejected = validate_samples(batch.samples, ctx.tag_keys)
+    return ctx.receive(batch.batch_id, batch.source_id, accepted, to_db(datetime.now(timezone.utc)), rejected)
 
 
 # --- 조회 ---------------------------------------------------------------------

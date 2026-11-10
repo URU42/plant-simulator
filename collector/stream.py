@@ -15,6 +15,9 @@ class Broadcaster:
     def __init__(self) -> None:
         self._subscribers: set[asyncio.Queue] = set()
 
+    def has_subscribers(self) -> bool:
+        return bool(self._subscribers)
+
     def publish(self, event: str, data: Any) -> None:
         message = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
         for q in list(self._subscribers):
