@@ -243,7 +243,7 @@ Unit 별로 프로세스를 나눠도 같은 값이 나오고, 같은 시드로 
 | 항목 | 값 |
 | --- | --- |
 | 자원 | requests 200m/512Mi, limits 500m/1Gi |
-| 스토리지 | PVC `plant-sim-data` 20Gi(gp3, RWO, 매니페스트에 포함). 다섯 공장 SQLite, 하루 보관 약 3.5 GB 에서 고정 |
+| 스토리지 | PVC `plant-sim-data` 10Gi(gp3, RWO, 매니페스트에 포함). 다섯 공장 SQLite: 원시값은 하루 보관으로 약 3.5 GB 에서 고정, 집계는 1년에 약 2 GB 증가. 늘릴 수는 있지만 줄일 수는 없다 |
 | 외부 | Ingress `https://u4-2.skala-us.com/plant-sim/…` (접두어 제거, SSE 용 버퍼링 off·타임아웃 3600s). 조회·화면·SSE |
 | 내부 | `http://plant-sim.u4-2.svc.cluster.local:8000/{공장}/…` (접두어 없음, CORS 불필요) |
 | 쓰기 보호 | 통합 실행에서 외부 `POST /ingest` 는 기본적으로 닫혀 있다(403). 열려면 Secret `plant-sim` 의 `ingest-token` 을 만들고 보내는 쪽이 `X-Ingest-Token` 을 붙인다 |
@@ -264,6 +264,7 @@ kubectl -n u4-2 rollout status deploy/plant-sim
 curl https://u4-2.skala-us.com/plant-sim/health
 ```
 
+- 이미지는 Harbor 비공개 프로젝트에 있으므로 Deployment 에 `imagePullSecrets: harbor-cred` 를 적어 둔다(네임스페이스에 그 Secret 이 있어야 한다: `kubectl -n u4-2 get secret harbor-cred`).
 - 첫 기동은 다섯 공장 하루치 백필이다. CPU 500m 에서 수 분~십수 분 걸리며 그동안 `/health` 의 `sim_now` 가 전진한다.
 - 백필 기간을 늘리려면(`--backfill-days`) PVC 의 DB 파일을 지우고 다시 채워야 한다. 재개는 마지막 시각부터만 이어 간다.
 - 다른 파드는 DB 파일을 직접 읽을 수 없다(RWO). HTTP API(`/current`, `/timeseries`, `/alarms`, `/maintenance`, `/failures`, `/stream`)를 쓴다.
