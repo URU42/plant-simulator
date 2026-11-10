@@ -11,7 +11,7 @@
 //   첫 기동은 다섯 공장 하루 백필(500m CPU 에서 약 15분)이라 rollout 대기는 30분까지 둔다.
 
 pipeline {
-    agent any
+    agent { label 'rootless-docker' }
 
     options {
         timestamps()

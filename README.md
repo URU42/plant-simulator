@@ -249,8 +249,8 @@ Unit 별로 프로세스를 나눠도 같은 값이 나오고, 같은 시드로 
 | 쓰기 보호 | 통합 실행에서 외부 `POST /ingest` 는 기본적으로 닫혀 있다(403). 열려면 Secret `plant-sim` 의 `ingest-token` 을 만들고 보내는 쪽이 `X-Ingest-Token` 을 붙인다 |
 | 프로브 | startupProbe 30초×60회(첫 백필 30분까지), readiness 10초, liveness 30초. 값 계산·저장은 워커 스레드에서 돌고 조회 핸들러는 스레드풀에서 돌아 백필 중에도 응답한다. 생성기 태스크가 죽으면 `/health` 가 503 이 되어 liveness 가 다시 띄운다 |
 
-이미지 빌드·push·배포는 `Jenkinsfile`(테스트 → 빌드 → Harbor push → `DEPLOY` 파라미터를 켰을 때만 `kubectl apply -k`)로 자동화돼 있다.
-Jenkins 자격 증명 두 개가 필요하다: `harbor-cred`(Harbor 사용자/비밀번호), `kubeconfig-u4-2`(배포할 때만, kubeconfig 파일). 손으로 하려면:
+이미지 빌드·push·배포는 `Jenkinsfile` 로 자동화돼 있다: `rootless-docker` 에이전트에서 테스트(uv 이미지 안) → 빌드(`test-<빌드번호>-<커밋8자리>`) → Harbor push(`harbor-jenkins-robot`) → GitOps 저장소 `URU42/being-gitops` 의 `k8s/test/kustomization.yaml` 이미지 태그 갱신(`gitops-github-pat`).
+실제 배포는 그 저장소를 바라보는 쪽이 하므로, `deploy/k8s` 의 plant-sim 매니페스트를 GitOps 저장소 `k8s/test` 에 옮겨 두고 kustomization 의 `resources` 와 `images` 에 넣는다(렌더 결과에 `harbor.uru42.space/uru42/plant-simulator` 가 있어야 파이프라인이 통과한다). 손으로 하려면:
 
 ```bash
 # 1. 이미지 (PC 에서; Harbor 가 인터넷에서 닿으면 .github/workflows/build-image.yml 로도 가능)
