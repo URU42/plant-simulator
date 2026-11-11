@@ -11,12 +11,12 @@
 
 | key | plant_id | 공장 | 설비 | 태그 (1초 / 10초) | 한계값 있는 태그 | 원시 행/일 |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
-| `rfcc` | `PL-RFCC` | 가상 정유단지 RFCC | 12 | 81 (65 / 16) | 0 | 약 575만 |
+| `rfcc` | `PL-RFCC` | 가상 정유단지 RFCC | 12 | 81 (65 / 16) | 81 (통계) | 약 575만 |
 | `cdu` | `PL-CDU` | CDU (상압증류) | 7 | 46 (37 / 9) | 46 | 약 327만 |
 | `hou` | `PL-HOU` | HOU (수첨분해) | 7 | 61 (43 / 18) | 61 | 약 387만 |
 | `rhds` | `PL-RHDS` | RHDS (상압 잔사유 수첨탈황) | 6 | 43 (31 / 12) | 43 | 약 278만 |
 | `vrds` | `PL-VRDS` | VRDS (감압 잔사유 수첨탈황) | 6 | 43 (31 / 12) | 43 | 약 278만 |
-| **합계** | | | **38** | **274** | **193** | **약 1,846만** |
+| **합계** | | | **38** | **274** | **274** | **약 1,846만** |
 
 - 온도 계열 태그는 10초, 나머지는 1초 주기다. 원시 행/일은 `Σ 86400 / interval_sec` 이다.
 - 10분 집계는 태그당 하루 144행, 1시간 집계는 24행이다.
@@ -67,7 +67,7 @@
 | `alarm_detail` | `alarm_id` (자동 증가) | `occurred_at`, `cleared_at`, `equip_id`, `tag_id`, `limit_type`, `direction`, `limit_value`, `actual_value`, `exceed_pct`, `severity` | 10분 배치 | 계속 |
 
 - `quality`: Good / Uncertain / Bad / ScanOff. `limit_type`: Soft / Alarm / Trip. `direction`: hi / lo. `severity`: Trip→High, Alarm→Medium, Soft→Low.
-- RFCC 는 한계값이 없어 `alarm_detail` 이 생기지 않는다 (설계상 의도).
+- RFCC 는 자료에 한계값이 없어 통계 경고 한계를 쓴다: 정상 구간 10분 최대·최소의 평균 ± 3σ, `delay_samples` 2. 시뮬레이터 정상 7일에서 잡음만으로 연속 2구간을 넘은 건 6건.
 
 ### 2.4 운영 — 수집 서버 내부
 
@@ -108,87 +108,87 @@
 
 | 설비 | 태그 | 신호 | 단위 | 설명 | 주기(s) | 하한 | 상한 |
 | --- | --- | --- | --- | --- | ---: | --- | --- |
-| `P-1101A` | `VI-P-1101A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | — | — |
-| `P-1101A` | `TI-P-1101A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | — | — |
-| `P-1101A` | `PS-P-1101A` | suction_pressure | bar(g) | 흡입 압력 | 1 | — | — |
-| `P-1101A` | `PD-P-1101A` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | — |
-| `P-1101A` | `FI-P-1101A` | flow | m3/h | 액체 체적 유량 | 1 | — | — |
-| `P-1101A` | `II-P-1101A` | current | A | 구동 모터 전류 | 1 | — | — |
-| `B-1201` | `VX-B-1201` | shaft_vibration | um p-p | 구동측 X축 상대 진동 | 1 | — | — |
-| `B-1201` | `VY-B-1201` | shaft_vibration | um p-p | 구동측 Y축 상대 진동 | 1 | — | — |
-| `B-1201` | `TI-B-1201` | bearing_temp | degC | 구동측 저널 베어링 온도 | 10 | — | — |
-| `B-1201` | `PS-B-1201` | suction_pressure | bar(g) | 입구 공기 압력 | 1 | — | — |
-| `B-1201` | `PD-B-1201` | discharge_pressure | bar(g) | 토출 공기 압력 | 1 | — | — |
-| `B-1201` | `FI-B-1201` | flow | Nm3/h | 표준 상태 공기 체적 유량 | 1 | — | — |
-| `B-1201` | `SI-B-1201` | speed | rpm | 축 회전속도 | 1 | — | — |
-| `B-1201` | `LOP-B-1201` | oil_pressure | bar(g) | 윤활유 공급 압력 | 1 | — | — |
-| `E-1202` | `VX-E-1202` | shaft_vibration | um p-p | 구동측 X축 상대 진동 | 1 | — | — |
-| `E-1202` | `VY-E-1202` | shaft_vibration | um p-p | 구동측 Y축 상대 진동 | 1 | — | — |
-| `E-1202` | `TI-E-1202` | bearing_temp | degC | 저널 베어링 온도 | 10 | — | — |
-| `E-1202` | `ZI-E-1202` | axial_position | mm | 축방향 상대 위치 | 1 | — | — |
-| `E-1202` | `SI-E-1202` | speed | rpm | 축 회전속도 | 1 | — | — |
-| `E-1202` | `PS-E-1202` | suction_pressure | bar(g) | 배기가스 입구 압력 | 1 | — | — |
-| `E-1202` | `PD-E-1202` | discharge_pressure | bar(g) | 배기가스 출구 압력 | 1 | — | — |
-| `E-1202` | `LOT-E-1202` | oil_temp | degC | 윤활유 공급 온도 | 10 | — | — |
-| `P-1301A` | `VI-P-1301A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | — | — |
-| `P-1301A` | `TI-P-1301A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | — | — |
-| `P-1301A` | `PS-P-1301A` | suction_pressure | bar(g) | 흡입 압력 | 1 | — | — |
-| `P-1301A` | `PD-P-1301A` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | — |
-| `P-1301A` | `FI-P-1301A` | flow | m3/h | 액체 체적 유량 | 1 | — | — |
-| `P-1301A` | `II-P-1301A` | current | A | 구동 모터 전류 | 1 | — | — |
-| `P-1302A` | `VI-P-1302A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | — | — |
-| `P-1302A` | `TI-P-1302A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | — | — |
-| `P-1302A` | `PS-P-1302A` | suction_pressure | bar(g) | 흡입 압력 | 1 | — | — |
-| `P-1302A` | `PD-P-1302A` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | — |
-| `P-1302A` | `FI-P-1302A` | flow | m3/h | 액체 체적 유량 | 1 | — | — |
-| `P-1302A` | `II-P-1302A` | current | A | 구동 모터 전류 | 1 | — | — |
-| `P-1303A` | `VI-P-1303A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | — | — |
-| `P-1303A` | `TI-P-1303A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | — | — |
-| `P-1303A` | `PS-P-1303A` | suction_pressure | bar(g) | 흡입 압력 | 1 | — | — |
-| `P-1303A` | `PD-P-1303A` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | — |
-| `P-1303A` | `FI-P-1303A` | flow | m3/h | 액체 체적 유량 | 1 | — | — |
-| `P-1303A` | `II-P-1303A` | current | A | 구동 모터 전류 | 1 | — | — |
-| `C-1401` | `VX-C-1401` | shaft_vibration | um p-p | 구동측 X축 상대 진동 | 1 | — | — |
-| `C-1401` | `VY-C-1401` | shaft_vibration | um p-p | 구동측 Y축 상대 진동 | 1 | — | — |
-| `C-1401` | `TI-C-1401` | bearing_temp | degC | 구동측 저널 베어링 온도 | 10 | — | — |
-| `C-1401` | `ZI-C-1401` | axial_position | mm | 축방향 상대 위치 | 1 | — | — |
-| `C-1401` | `PS-C-1401` | suction_pressure | bar(g) | 1단 흡입 압력 | 1 | — | — |
-| `C-1401` | `PD-C-1401` | discharge_pressure | bar(g) | 최종 토출 압력 | 1 | — | — |
-| `C-1401` | `TS-C-1401` | suction_temp | degC | 1단 흡입 온도 | 10 | — | — |
-| `C-1401` | `TD-C-1401` | discharge_temp | degC | 최종 토출 온도 | 10 | — | — |
-| `C-1401` | `FI-C-1401` | flow | Nm3/h | 흡입 가스 표준 상태 체적 유량 | 1 | — | — |
-| `C-1401` | `SI-C-1401` | speed | rpm | 축 회전속도 | 1 | — | — |
-| `T-1401` | `VX-T-1401` | shaft_vibration | um p-p | 구동측 X축 상대 진동 | 1 | — | — |
-| `T-1401` | `VY-T-1401` | shaft_vibration | um p-p | 구동측 Y축 상대 진동 | 1 | — | — |
-| `T-1401` | `TI-T-1401` | bearing_temp | degC | 구동측 저널 베어링 온도 | 10 | — | — |
-| `T-1401` | `SI-T-1401` | speed | rpm | 축 회전속도 | 1 | — | — |
-| `T-1401` | `LOP-T-1401` | oil_pressure | bar(g) | 윤활유 공급 압력 | 1 | — | — |
-| `T-1401` | `LOT-T-1401` | oil_temp | degC | 윤활유 공급 온도 | 10 | — | — |
-| `T-1401` | `SP-T-1401` | steam_pressure | bar(g) | 입구 증기 압력 | 1 | — | — |
-| `P-1402A` | `VI-P-1402A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | — | — |
-| `P-1402A` | `TI-P-1402A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | — | — |
-| `P-1402A` | `PS-P-1402A` | suction_pressure | bar(g) | 흡입 압력 | 1 | — | — |
-| `P-1402A` | `PD-P-1402A` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | — |
-| `P-1402A` | `FI-P-1402A` | flow | m3/h | 액체 체적 유량 | 1 | — | — |
-| `P-1402A` | `II-P-1402A` | current | A | 구동 모터 전류 | 1 | — | — |
-| `P-1403A` | `VI-P-1403A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | — | — |
-| `P-1403A` | `TI-P-1403A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | — | — |
-| `P-1403A` | `PS-P-1403A` | suction_pressure | bar(g) | 흡입 압력 | 1 | — | — |
-| `P-1403A` | `PD-P-1403A` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | — |
-| `P-1403A` | `FI-P-1403A` | flow | m3/h | 액체 체적 유량 | 1 | — | — |
-| `P-1403A` | `II-P-1403A` | current | A | 구동 모터 전류 | 1 | — | — |
-| `P-1501A` | `VI-P-1501A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | — | — |
-| `P-1501A` | `TI-P-1501A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | — | — |
-| `P-1501A` | `PS-P-1501A` | suction_pressure | bar(g) | 흡입 압력 | 1 | — | — |
-| `P-1501A` | `PD-P-1501A` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | — |
-| `P-1501A` | `FI-P-1501A` | flow | m3/h | 액체 체적 유량 | 1 | — | — |
-| `P-1501A` | `II-P-1501A` | current | A | 구동 모터 전류 | 1 | — | — |
-| `P-1502A` | `VI-P-1502A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | — | — |
-| `P-1502A` | `TI-P-1502A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | — | — |
-| `P-1502A` | `PS-P-1502A` | suction_pressure | bar(g) | 흡입 압력 | 1 | — | — |
-| `P-1502A` | `PD-P-1502A` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | — |
-| `P-1502A` | `FI-P-1502A` | flow | m3/h | 액체 체적 유량 | 1 | — | — |
-| `P-1502A` | `II-P-1502A` | current | A | 구동 모터 전류 | 1 | — | — |
+| `P-1101A` | `VI-P-1101A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | 1.2567 / — / — | 1.6451 / — / — |
+| `P-1101A` | `TI-P-1101A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | 63.7601 / — / — | 68.2231 / — / — |
+| `P-1101A` | `PS-P-1101A` | suction_pressure | bar(g) | 흡입 압력 | 1 | 3.1645 / — / — | 3.2353 / — / — |
+| `P-1101A` | `PD-P-1101A` | discharge_pressure | bar(g) | 토출 압력 | 1 | 18.5441 / — / — | 19.4206 / — / — |
+| `P-1101A` | `FI-P-1101A` | flow | m3/h | 액체 체적 유량 | 1 | 197.3323 / — / — | 223.8069 / — / — |
+| `P-1101A` | `II-P-1101A` | current | A | 구동 모터 전류 | 1 | 138.4174 / — / — | 152.1602 / — / — |
+| `B-1201` | `VX-B-1201` | shaft_vibration | um p-p | 구동측 X축 상대 진동 | 1 | 28.2733 / — / — | 35.8724 / — / — |
+| `B-1201` | `VY-B-1201` | shaft_vibration | um p-p | 구동측 Y축 상대 진동 | 1 | 25.3324 / — / — | 32.7922 / — / — |
+| `B-1201` | `TI-B-1201` | bearing_temp | degC | 구동측 저널 베어링 온도 | 10 | 75.7936 / — / — | 80.2017 / — / — |
+| `B-1201` | `PS-B-1201` | suction_pressure | bar(g) | 입구 공기 압력 | 1 | -0.0248 / — / — | -0.0059 / — / — |
+| `B-1201` | `PD-B-1201` | discharge_pressure | bar(g) | 토출 공기 압력 | 1 | 2.7332 / — / — | 2.8715 / — / — |
+| `B-1201` | `FI-B-1201` | flow | Nm3/h | 표준 상태 공기 체적 유량 | 1 | 170207.0328 / — / — | 190933.9342 / — / — |
+| `B-1201` | `SI-B-1201` | speed | rpm | 축 회전속도 | 1 | 5164.3385 / — / — | 5239.1692 / — / — |
+| `B-1201` | `LOP-B-1201` | oil_pressure | bar(g) | 윤활유 공급 압력 | 1 | 2.151 / — / — | 2.2495 / — / — |
+| `E-1202` | `VX-E-1202` | shaft_vibration | um p-p | 구동측 X축 상대 진동 | 1 | 30.9272 / — / — | 39.1313 / — / — |
+| `E-1202` | `VY-E-1202` | shaft_vibration | um p-p | 구동측 Y축 상대 진동 | 1 | 27.9967 / — / — | 36.1586 / — / — |
+| `E-1202` | `TI-E-1202` | bearing_temp | degC | 저널 베어링 온도 | 10 | 79.796 / — / — | 84.1938 / — / — |
+| `E-1202` | `ZI-E-1202` | axial_position | mm | 축방향 상대 위치 | 1 | 0.03664 / — / — | 0.04331 / — / — |
+| `E-1202` | `SI-E-1202` | speed | rpm | 축 회전속도 | 1 | 5164.3385 / — / — | 5239.1692 / — / — |
+| `E-1202` | `PS-E-1202` | suction_pressure | bar(g) | 배기가스 입구 압력 | 1 | 2.5482 / — / — | 2.6518 / — / — |
+| `E-1202` | `PD-E-1202` | discharge_pressure | bar(g) | 배기가스 출구 압력 | 1 | 0.1172 / — / — | 0.1426 / — / — |
+| `E-1202` | `LOT-E-1202` | oil_temp | degC | 윤활유 공급 온도 | 10 | 42.8124 / — / — | 47.1791 / — / — |
+| `P-1301A` | `VI-P-1301A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | 1.629 / — / — | 2.0749 / — / — |
+| `P-1301A` | `TI-P-1301A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | 71.7556 / — / — | 76.2255 / — / — |
+| `P-1301A` | `PS-P-1301A` | suction_pressure | bar(g) | 흡입 압력 | 1 | 4.0632 / — / — | 4.1345 / — / — |
+| `P-1301A` | `PD-P-1301A` | discharge_pressure | bar(g) | 토출 압력 | 1 | 10.2804 / — / — | 10.709 / — / — |
+| `P-1301A` | `FI-P-1301A` | flow | m3/h | 액체 체적 유량 | 1 | 357.8561 / — / — | 403.4699 / — / — |
+| `P-1301A` | `II-P-1301A` | current | A | 구동 모터 전류 | 1 | 181.6953 / — / — | 198.8389 / — / — |
+| `P-1302A` | `VI-P-1302A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | 0.9997 / — / — | 1.4417 / — / — |
+| `P-1302A` | `TI-P-1302A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | 65.7997 / — / — | 70.1955 / — / — |
+| `P-1302A` | `PS-P-1302A` | suction_pressure | bar(g) | 흡입 압력 | 1 | 2.9642 / — / — | 3.0349 / — / — |
+| `P-1302A` | `PD-P-1302A` | discharge_pressure | bar(g) | 토출 압력 | 1 | 9.2769 / — / — | 9.7067 / — / — |
+| `P-1302A` | `FI-P-1302A` | flow | m3/h | 액체 체적 유량 | 1 | 226.4188 / — / — | 254.8523 / — / — |
+| `P-1302A` | `II-P-1302A` | current | A | 구동 모터 전류 | 1 | 93.8206 / — / — | 102.5589 / — / — |
+| `P-1303A` | `VI-P-1303A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | 0.8278 / — / — | 1.2724 / — / — |
+| `P-1303A` | `TI-P-1303A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | 55.7951 / — / — | 60.196 / — / — |
+| `P-1303A` | `PS-P-1303A` | suction_pressure | bar(g) | 흡입 압력 | 1 | 2.4643 / — / — | 2.5352 / — / — |
+| `P-1303A` | `PD-P-1303A` | discharge_pressure | bar(g) | 토출 압력 | 1 | 7.9899 / — / — | 8.3939 / — / — |
+| `P-1303A` | `FI-P-1303A` | flow | m3/h | 액체 체적 유량 | 1 | 127.205 / — / — | 143.5388 / — / — |
+| `P-1303A` | `II-P-1303A` | current | A | 구동 모터 전류 | 1 | 62.1688 / — / — | 68.0888 / — / — |
+| `C-1401` | `VX-C-1401` | shaft_vibration | um p-p | 구동측 X축 상대 진동 | 1 | 26.4709 / — / — | 33.7498 / — / — |
+| `C-1401` | `VY-C-1401` | shaft_vibration | um p-p | 구동측 Y축 상대 진동 | 1 | 23.366 / — / — | 30.7156 / — / — |
+| `C-1401` | `TI-C-1401` | bearing_temp | degC | 구동측 저널 베어링 온도 | 10 | 74.7974 / — / — | 79.1987 / — / — |
+| `C-1401` | `ZI-C-1401` | axial_position | mm | 축방향 상대 위치 | 1 | 0.02665 / — / — | 0.03338 / — / — |
+| `C-1401` | `PS-C-1401` | suction_pressure | bar(g) | 1단 흡입 압력 | 1 | 1.1719 / — / — | 1.2274 / — / — |
+| `C-1401` | `PD-C-1401` | discharge_pressure | bar(g) | 최종 토출 압력 | 1 | 12.2843 / — / — | 12.7248 / — / — |
+| `C-1401` | `TS-C-1401` | suction_temp | degC | 1단 흡입 온도 | 10 | 39.784 / — / — | 44.1997 / — / — |
+| `C-1401` | `TD-C-1401` | discharge_temp | degC | 최종 토출 온도 | 10 | 114.8455 / — / — | 121.1934 / — / — |
+| `C-1401` | `FI-C-1401` | flow | Nm3/h | 흡입 가스 표준 상태 체적 유량 | 1 | 39654.5459 / — / — | 44615.3311 / — / — |
+| `C-1401` | `SI-C-1401` | speed | rpm | 축 회전속도 | 1 | 8088.6267 / — / — | 8322.8262 / — / — |
+| `T-1401` | `VX-T-1401` | shaft_vibration | um p-p | 구동측 X축 상대 진동 | 1 | 24.6318 / — / — | 31.5256 / — / — |
+| `T-1401` | `VY-T-1401` | shaft_vibration | um p-p | 구동측 Y축 상대 진동 | 1 | 21.7343 / — / — | 28.4011 / — / — |
+| `T-1401` | `TI-T-1401` | bearing_temp | degC | 구동측 저널 베어링 온도 | 10 | 77.802 / — / — | 82.1965 / — / — |
+| `T-1401` | `SI-T-1401` | speed | rpm | 축 회전속도 | 1 | 8088.6267 / — / — | 8322.8262 / — / — |
+| `T-1401` | `LOP-T-1401` | oil_pressure | bar(g) | 윤활유 공급 압력 | 1 | 2.0511 / — / — | 2.1495 / — / — |
+| `T-1401` | `LOT-T-1401` | oil_temp | degC | 윤활유 공급 온도 | 10 | 42.8162 / — / — | 47.1753 / — / — |
+| `T-1401` | `SP-T-1401` | steam_pressure | bar(g) | 입구 증기 압력 | 1 | 39.7312 / — / — | 40.2899 / — / — |
+| `P-1402A` | `VI-P-1402A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | 0.8792 / — / — | 1.3674 / — / — |
+| `P-1402A` | `TI-P-1402A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | 60.8061 / — / — | 65.1909 / — / — |
+| `P-1402A` | `PS-P-1402A` | suction_pressure | bar(g) | 흡입 압력 | 1 | 7.1636 / — / — | 7.2351 / — / — |
+| `P-1402A` | `PD-P-1402A` | discharge_pressure | bar(g) | 토출 압력 | 1 | 16.701 / — / — | 17.2778 / — / — |
+| `P-1402A` | `FI-P-1402A` | flow | m3/h | 액체 체적 유량 | 1 | 89.5748 / — / — | 100.9547 / — / — |
+| `P-1402A` | `II-P-1402A` | current | A | 구동 모터 전류 | 1 | 49.7696 / — / — | 54.4512 / — / — |
+| `P-1403A` | `VI-P-1403A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | 0.7278 / — / — | 1.2282 / — / — |
+| `P-1403A` | `TI-P-1403A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | 56.7938 / — / — | 61.1985 / — / — |
+| `P-1403A` | `PS-P-1403A` | suction_pressure | bar(g) | 흡입 압력 | 1 | 9.9637 / — / — | 10.0357 / — / — |
+| `P-1403A` | `PD-P-1403A` | discharge_pressure | bar(g) | 토출 압력 | 1 | 17.743 / — / — | 18.2412 / — / — |
+| `P-1403A` | `FI-P-1403A` | flow | m3/h | 액체 체적 유량 | 1 | 77.3507 / — / — | 87.1257 / — / — |
+| `P-1403A` | `II-P-1403A` | current | A | 구동 모터 전류 | 1 | 46.8999 / — / — | 51.3067 / — / — |
+| `P-1501A` | `VI-P-1501A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | 0.826 / — / — | 1.348 / — / — |
+| `P-1501A` | `TI-P-1501A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | 52.7974 / — / — | 57.1983 / — / — |
+| `P-1501A` | `PS-P-1501A` | suction_pressure | bar(g) | 흡입 압력 | 1 | 11.9641 / — / — | 12.0355 / — / — |
+| `P-1501A` | `PD-P-1501A` | discharge_pressure | bar(g) | 토출 압력 | 1 | 19.7424 / — / — | 20.2412 / — / — |
+| `P-1501A` | `FI-P-1501A` | flow | m3/h | 액체 체적 유량 | 1 | 61.3325 / — / — | 69.0746 / — / — |
+| `P-1501A` | `II-P-1501A` | current | A | 구동 모터 전류 | 1 | 42.1326 / — / — | 46.0694 / — / — |
+| `P-1502A` | `VI-P-1502A` | vibration | mm/s RMS | 펌프 구동측 케이싱 진동 속도 Overall RMS | 1 | 0.9186 / — / — | 1.4577 / — / — |
+| `P-1502A` | `TI-P-1502A` | bearing_temp | degC | 펌프 구동측 베어링 온도 | 10 | 54.7974 / — / — | 59.1941 / — / — |
+| `P-1502A` | `PS-P-1502A` | suction_pressure | bar(g) | 흡입 압력 | 1 | 2.0639 / — / — | 2.1353 / — / — |
+| `P-1502A` | `PD-P-1502A` | discharge_pressure | bar(g) | 토출 압력 | 1 | 8.2766 / — / — | 8.7069 / — / — |
+| `P-1502A` | `FI-P-1502A` | flow | m3/h | 액체 체적 유량 | 1 | 113.2339 / — / — | 127.48 / — / — |
+| `P-1502A` | `II-P-1502A` | current | A | 구동 모터 전류 | 1 | 57.4575 / — / — | 62.8178 / — / — |
 
 </details>
 
@@ -358,49 +358,49 @@
 
 | 설비 | 태그 | 신호 | 단위 | 설명 | 주기(s) | 하한 | 상한 |
 | --- | --- | --- | --- | --- | ---: | --- | --- |
-| `P-3101` | `VI-A-P3101` | vibration | mm/s RMS | 구동측 수평 케이싱 진동 | 1 | — | 4.5 / — / — |
-| `P-3101` | `TI-B-P3101` | bearing_temp | DEG C | 구동측 베어링 온도 | 10 | — | 85 / — / — |
-| `P-3101` | `PI-S-P3101` | suction_pressure | bar(g) | 흡입 압력 | 1 | 3.5 / — / — | — |
-| `P-3101` | `PI-D-P3101` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 170 / — / — |
-| `P-3101` | `FI-P3101` | flow | m3/h | 원료 유량 | 1 | 160 / — / — | — |
-| `P-3101` | `II-P3101` | current | A | 모터 전류 | 1 | — | 210 / — / — |
-| `C-3102` | `VI-A-C3102` | vibration | mm/s RMS | 프레임 케이싱 진동 | 1 | — | 6 / — / — |
-| `C-3102` | `TI-B-C3102` | bearing_temp | DEG C | 프레임 베어링 온도 | 10 | — | 85 / — / — |
-| `C-3102` | `PI-S-C3102` | suction_pressure | bar(g) | 첫 단 흡입 압력 | 1 | 20 / — / — | — |
-| `C-3102` | `PI-D-C3102` | discharge_pressure | bar(g) | 최종 단 토출 압력 | 1 | — | 175 / — / — |
-| `C-3102` | `TI-S-C3102` | suction_temp | DEG C | 첫 단 흡입 가스 온도 | 10 | — | 50 / — / — |
-| `C-3102` | `TI-D-C3102` | discharge_temp | DEG C | 최종 단 토출 가스 온도 | 10 | — | 145 / — / — |
-| `C-3102` | `FI-C3102` | flow | Nm3/h | 보충 수소 표준 유량 | 1 | 9000 / — / — | — |
-| `C-3102` | `SI-C3102` | speed | rpm | 크랭크축 회전속도 | 1 | 570 / — / — | 610 / — / — |
-| `C-3101` | `XI-X-C3101` | shaft_vibration | um pk-pk | 구동측 X방향 축 상대 진동 | 1 | — | 75 / — / — |
-| `C-3101` | `TI-B-C3101` | bearing_temp | DEG C | 저널 베어링 금속 온도 | 10 | — | 95 / — / — |
-| `C-3101` | `ZI-C3101` | axial_position | mm | 축방향 위치·기준점 대비 | 1 | -0.35 / — / — | 0.35 / — / — |
-| `C-3101` | `PI-S-C3101` | suction_pressure | bar(g) | 흡입 압력 | 1 | 125 / — / — | — |
-| `C-3101` | `PI-D-C3101` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 170 / — / — |
-| `C-3101` | `TI-S-C3101` | suction_temp | DEG C | 흡입 가스 온도 | 10 | — | 60 / — / — |
-| `C-3101` | `TI-D-C3101` | discharge_temp | DEG C | 토출 가스 온도 | 10 | — | 95 / — / — |
-| `C-3101` | `FI-C3101` | flow | Nm3/h | 순환가스 표준 유량 | 1 | 110000 / — / — | — |
-| `C-3101` | `SI-C3101` | speed | rpm | 압축기 회전속도 | 1 | 8500 / — / — | 10000 / — / — |
-| `C-3101` | `PI-LO-C3101` | oil_pressure | bar(g) | 윤활유 헤더 압력 | 1 | 2 / — / — | — |
-| `C-3101` | `TI-LO-C3101` | oil_temp | DEG C | 윤활유 공급 온도 | 10 | — | 55 / — / — |
-| `F-3101` | `VI-A-F3101` | vibration | mm/s RMS | 팬 구동측 케이싱 진동 | 1 | — | 4.5 / — / — |
-| `F-3101` | `TI-B-F3101` | bearing_temp | DEG C | 팬 구동측 베어링 온도 | 10 | — | 80 / — / — |
-| `F-3101` | `SI-F3101` | speed | rpm | 팬 회전속도 | 1 | 1150 / — / — | 1550 / — / — |
-| `F-3101` | `II-F3101` | current | A | 모터 전류 | 1 | — | 80 / — / — |
-| `F-3101` | `FI-F3101` | flow | m3/h | 연소공기 실제 체적 유량 | 1 | 35000 / — / — | — |
-| `F-3101` | `PDI-F3101` | differential_pressure | Pa | 팬 입출구 차압 | 1 | 1400 / — / — | — |
-| `P-3102` | `VI-A-P3102` | vibration | mm/s RMS | 구동측 케이싱 진동 | 1 | — | 4.5 / — / — |
-| `P-3102` | `TI-B-P3102` | bearing_temp | DEG C | 구동측 베어링 온도 | 10 | — | 90 / — / — |
-| `P-3102` | `TI-F-P3102` | process_temp | DEG C | 흡입 유체 온도 | 10 | — | 310 / — / — |
-| `P-3102` | `PI-S-P3102` | suction_pressure | bar(g) | 흡입 압력 | 1 | 3 / — / — | — |
-| `P-3102` | `PI-D-P3102` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 25 / — / — |
-| `P-3102` | `FI-P3102` | flow | m3/h | 잔사유 유량 | 1 | 140 / — / — | — |
-| `P-3102` | `II-P3102` | current | A | 모터 전류 | 1 | — | 145 / — / — |
-| `P-3103` | `VI-A-P3103` | vibration | mm/s RMS | 구동측 케이싱 진동 | 1 | — | 4.5 / — / — |
-| `P-3103` | `TI-B-P3103` | bearing_temp | DEG C | 구동측 베어링 온도 | 10 | — | 80 / — / — |
-| `P-3103` | `PI-S-P3103` | suction_pressure | bar(g) | 흡입 압력 | 1 | 2 / — / — | — |
-| `P-3103` | `PI-D-P3103` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 15 / — / — |
-| `P-3103` | `FI-P3103` | flow | m3/h | 환류액 유량 | 1 | 65 / — / — | — |
+| `P-3101` | `VI-A-P3101` | vibration | mm/s RMS | 구동측 수평 케이싱 진동 | 1 | — | 4.5 / 7.1 / 11 |
+| `P-3101` | `TI-B-P3101` | bearing_temp | DEG C | 구동측 베어링 온도 | 10 | — | 85 / 95 / 105 |
+| `P-3101` | `PI-S-P3101` | suction_pressure | bar(g) | 흡입 압력 | 1 | 3.5 / 2.8 / 2.24 | — |
+| `P-3101` | `PI-D-P3101` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 170 / 178 / 187 |
+| `P-3101` | `FI-P3101` | flow | m3/h | 원료 유량 | 1 | 160 / 138 / 110 | — |
+| `P-3101` | `II-P3101` | current | A | 모터 전류 | 1 | — | 210 / 223 / 240 |
+| `C-3102` | `VI-A-C3102` | vibration | mm/s RMS | 프레임 케이싱 진동 | 1 | — | 6 / 7.1 / 11 |
+| `C-3102` | `TI-B-C3102` | bearing_temp | DEG C | 프레임 베어링 온도 | 10 | — | 85 / 95 / 105 |
+| `C-3102` | `PI-S-C3102` | suction_pressure | bar(g) | 첫 단 흡입 압력 | 1 | 20 / 16 / 12.8 | — |
+| `C-3102` | `PI-D-C3102` | discharge_pressure | bar(g) | 최종 단 토출 압력 | 1 | — | 175 / 184 / 193 |
+| `C-3102` | `TI-S-C3102` | suction_temp | DEG C | 첫 단 흡입 가스 온도 | 10 | — | 50 / 60 / 70 |
+| `C-3102` | `TI-D-C3102` | discharge_temp | DEG C | 최종 단 토출 가스 온도 | 10 | — | 145 / 155 / 165 |
+| `C-3102` | `FI-C3102` | flow | Nm3/h | 보충 수소 표준 유량 | 1 | 9000 / 7740 / 6190 | — |
+| `C-3102` | `SI-C3102` | speed | rpm | 크랭크축 회전속도 | 1 | 570 / 547 / — | 610 / 634 / 659 |
+| `C-3101` | `XI-X-C3101` | shaft_vibration | um pk-pk | 구동측 X방향 축 상대 진동 | 1 | — | 75 / 95.2 / 130 |
+| `C-3101` | `TI-B-C3101` | bearing_temp | DEG C | 저널 베어링 금속 온도 | 10 | — | 95 / 105 / 115 |
+| `C-3101` | `ZI-C3101` | axial_position | mm | 축방향 위치·기준점 대비 | 1 | -0.35 / -0.525 / -0.875 | 0.35 / 0.525 / 0.875 |
+| `C-3101` | `PI-S-C3101` | suction_pressure | bar(g) | 흡입 압력 | 1 | 125 / 100 / 80 | — |
+| `C-3101` | `PI-D-C3101` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 170 / 178 / 187 |
+| `C-3101` | `TI-S-C3101` | suction_temp | DEG C | 흡입 가스 온도 | 10 | — | 60 / 70 / 80 |
+| `C-3101` | `TI-D-C3101` | discharge_temp | DEG C | 토출 가스 온도 | 10 | — | 95 / 105 / 115 |
+| `C-3101` | `FI-C3101` | flow | Nm3/h | 순환가스 표준 유량 | 1 | 110000 / 94600 / 75700 | — |
+| `C-3101` | `SI-C3101` | speed | rpm | 압축기 회전속도 | 1 | 8500 / 8160 / — | 10000 / 10400 / 10800 |
+| `C-3101` | `PI-LO-C3101` | oil_pressure | bar(g) | 윤활유 헤더 압력 | 1 | 2 / 1.6 / 1.33 | — |
+| `C-3101` | `TI-LO-C3101` | oil_temp | DEG C | 윤활유 공급 온도 | 10 | — | 55 / 62 / 72 |
+| `F-3101` | `VI-A-F3101` | vibration | mm/s RMS | 팬 구동측 케이싱 진동 | 1 | — | 4.5 / 7.1 / 11 |
+| `F-3101` | `TI-B-F3101` | bearing_temp | DEG C | 팬 구동측 베어링 온도 | 10 | — | 80 / 90 / 100 |
+| `F-3101` | `SI-F3101` | speed | rpm | 팬 회전속도 | 1 | 1150 / 1100 / — | 1550 / 1610 / 1670 |
+| `F-3101` | `II-F3101` | current | A | 모터 전류 | 1 | — | 80 / 84.8 / 91.6 |
+| `F-3101` | `FI-F3101` | flow | m3/h | 연소공기 실제 체적 유량 | 1 | 35000 / 30100 / 24100 | — |
+| `F-3101` | `PDI-F3101` | differential_pressure | Pa | 팬 입출구 차압 | 1 | 1400 / 1200 / — | — |
+| `P-3102` | `VI-A-P3102` | vibration | mm/s RMS | 구동측 케이싱 진동 | 1 | — | 4.5 / 7.1 / 11 |
+| `P-3102` | `TI-B-P3102` | bearing_temp | DEG C | 구동측 베어링 온도 | 10 | — | 90 / 100 / 110 |
+| `P-3102` | `TI-F-P3102` | process_temp | DEG C | 흡입 유체 온도 | 10 | — | 310 / 320 / 335 |
+| `P-3102` | `PI-S-P3102` | suction_pressure | bar(g) | 흡입 압력 | 1 | 3 / 2.4 / 1.92 | — |
+| `P-3102` | `PI-D-P3102` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 25 / 26.2 / 27.5 |
+| `P-3102` | `FI-P3102` | flow | m3/h | 잔사유 유량 | 1 | 140 / 120 / 96.3 | — |
+| `P-3102` | `II-P3102` | current | A | 모터 전류 | 1 | — | 145 / 154 / 166 |
+| `P-3103` | `VI-A-P3103` | vibration | mm/s RMS | 구동측 케이싱 진동 | 1 | — | 4.5 / 7.1 / 11 |
+| `P-3103` | `TI-B-P3103` | bearing_temp | DEG C | 구동측 베어링 온도 | 10 | — | 80 / 90 / 100 |
+| `P-3103` | `PI-S-P3103` | suction_pressure | bar(g) | 흡입 압력 | 1 | 2 / 1.6 / 1.28 | — |
+| `P-3103` | `PI-D-P3103` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 15 / 15.8 / 16.5 |
+| `P-3103` | `FI-P3103` | flow | m3/h | 환류액 유량 | 1 | 65 / 55.9 / 44.7 | — |
 
 </details>
 
@@ -421,49 +421,49 @@
 
 | 설비 | 태그 | 신호 | 단위 | 설명 | 주기(s) | 하한 | 상한 |
 | --- | --- | --- | --- | --- | ---: | --- | --- |
-| `P-4101` | `VI-A-P4101` | vibration | mm/s RMS | 구동측 수평 케이싱 진동 | 1 | — | 4.5 / — / — |
-| `P-4101` | `TI-B-P4101` | bearing_temp | DEG C | 구동측 베어링 온도 | 10 | — | 85 / — / — |
-| `P-4101` | `PI-S-P4101` | suction_pressure | bar(g) | 흡입 압력 | 1 | 3.5 / — / — | — |
-| `P-4101` | `PI-D-P4101` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 170 / — / — |
-| `P-4101` | `FI-P4101` | flow | m3/h | 원료 유량 | 1 | 160 / — / — | — |
-| `P-4101` | `II-P4101` | current | A | 모터 전류 | 1 | — | 210 / — / — |
-| `C-4102` | `VI-A-C4102` | vibration | mm/s RMS | 프레임 케이싱 진동 | 1 | — | 6 / — / — |
-| `C-4102` | `TI-B-C4102` | bearing_temp | DEG C | 프레임 베어링 온도 | 10 | — | 85 / — / — |
-| `C-4102` | `PI-S-C4102` | suction_pressure | bar(g) | 첫 단 흡입 압력 | 1 | 20 / — / — | — |
-| `C-4102` | `PI-D-C4102` | discharge_pressure | bar(g) | 최종 단 토출 압력 | 1 | — | 175 / — / — |
-| `C-4102` | `TI-S-C4102` | suction_temp | DEG C | 첫 단 흡입 가스 온도 | 10 | — | 50 / — / — |
-| `C-4102` | `TI-D-C4102` | discharge_temp | DEG C | 최종 단 토출 가스 온도 | 10 | — | 145 / — / — |
-| `C-4102` | `FI-C4102` | flow | Nm3/h | 보충 수소 표준 유량 | 1 | 9000 / — / — | — |
-| `C-4102` | `SI-C4102` | speed | rpm | 크랭크축 회전속도 | 1 | 570 / — / — | 610 / — / — |
-| `C-4101` | `XI-X-C4101` | shaft_vibration | um pk-pk | 구동측 X방향 축 상대 진동 | 1 | — | 75 / — / — |
-| `C-4101` | `TI-B-C4101` | bearing_temp | DEG C | 저널 베어링 금속 온도 | 10 | — | 95 / — / — |
-| `C-4101` | `ZI-C4101` | axial_position | mm | 축방향 위치·기준점 대비 | 1 | -0.35 / — / — | 0.35 / — / — |
-| `C-4101` | `PI-S-C4101` | suction_pressure | bar(g) | 흡입 압력 | 1 | 125 / — / — | — |
-| `C-4101` | `PI-D-C4101` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 170 / — / — |
-| `C-4101` | `TI-S-C4101` | suction_temp | DEG C | 흡입 가스 온도 | 10 | — | 60 / — / — |
-| `C-4101` | `TI-D-C4101` | discharge_temp | DEG C | 토출 가스 온도 | 10 | — | 95 / — / — |
-| `C-4101` | `FI-C4101` | flow | Nm3/h | 순환가스 표준 유량 | 1 | 110000 / — / — | — |
-| `C-4101` | `SI-C4101` | speed | rpm | 압축기 회전속도 | 1 | 8500 / — / — | 10000 / — / — |
-| `C-4101` | `PI-LO-C4101` | oil_pressure | bar(g) | 윤활유 헤더 압력 | 1 | 2 / — / — | — |
-| `C-4101` | `TI-LO-C4101` | oil_temp | DEG C | 윤활유 공급 온도 | 10 | — | 55 / — / — |
-| `F-4101` | `VI-A-F4101` | vibration | mm/s RMS | 팬 구동측 케이싱 진동 | 1 | — | 4.5 / — / — |
-| `F-4101` | `TI-B-F4101` | bearing_temp | DEG C | 팬 구동측 베어링 온도 | 10 | — | 80 / — / — |
-| `F-4101` | `SI-F4101` | speed | rpm | 팬 회전속도 | 1 | 1150 / — / — | 1550 / — / — |
-| `F-4101` | `II-F4101` | current | A | 모터 전류 | 1 | — | 80 / — / — |
-| `F-4101` | `FI-F4101` | flow | m3/h | 연소공기 실제 체적 유량 | 1 | 35000 / — / — | — |
-| `F-4101` | `PDI-F4101` | differential_pressure | Pa | 팬 입출구 차압 | 1 | 1400 / — / — | — |
-| `P-4102` | `VI-A-P4102` | vibration | mm/s RMS | 구동측 케이싱 진동 | 1 | — | 4.5 / — / — |
-| `P-4102` | `TI-B-P4102` | bearing_temp | DEG C | 구동측 베어링 온도 | 10 | — | 90 / — / — |
-| `P-4102` | `TI-F-P4102` | process_temp | DEG C | 흡입 유체 온도 | 10 | — | 310 / — / — |
-| `P-4102` | `PI-S-P4102` | suction_pressure | bar(g) | 흡입 압력 | 1 | 3 / — / — | — |
-| `P-4102` | `PI-D-P4102` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 25 / — / — |
-| `P-4102` | `FI-P4102` | flow | m3/h | 잔사유 유량 | 1 | 140 / — / — | — |
-| `P-4102` | `II-P4102` | current | A | 모터 전류 | 1 | — | 145 / — / — |
-| `P-4103` | `VI-A-P4103` | vibration | mm/s RMS | 구동측 케이싱 진동 | 1 | — | 4.5 / — / — |
-| `P-4103` | `TI-B-P4103` | bearing_temp | DEG C | 구동측 베어링 온도 | 10 | — | 80 / — / — |
-| `P-4103` | `PI-S-P4103` | suction_pressure | bar(g) | 흡입 압력 | 1 | 2 / — / — | — |
-| `P-4103` | `PI-D-P4103` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 15 / — / — |
-| `P-4103` | `FI-P4103` | flow | m3/h | 환류액 유량 | 1 | 65 / — / — | — |
+| `P-4101` | `VI-A-P4101` | vibration | mm/s RMS | 구동측 수평 케이싱 진동 | 1 | — | 4.5 / 7.1 / 11 |
+| `P-4101` | `TI-B-P4101` | bearing_temp | DEG C | 구동측 베어링 온도 | 10 | — | 85 / 95 / 105 |
+| `P-4101` | `PI-S-P4101` | suction_pressure | bar(g) | 흡입 압력 | 1 | 3.5 / 2.8 / 2.24 | — |
+| `P-4101` | `PI-D-P4101` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 170 / 178 / 187 |
+| `P-4101` | `FI-P4101` | flow | m3/h | 원료 유량 | 1 | 160 / 138 / 110 | — |
+| `P-4101` | `II-P4101` | current | A | 모터 전류 | 1 | — | 210 / 223 / 240 |
+| `C-4102` | `VI-A-C4102` | vibration | mm/s RMS | 프레임 케이싱 진동 | 1 | — | 6 / 7.1 / 11 |
+| `C-4102` | `TI-B-C4102` | bearing_temp | DEG C | 프레임 베어링 온도 | 10 | — | 85 / 95 / 105 |
+| `C-4102` | `PI-S-C4102` | suction_pressure | bar(g) | 첫 단 흡입 압력 | 1 | 20 / 16 / 12.8 | — |
+| `C-4102` | `PI-D-C4102` | discharge_pressure | bar(g) | 최종 단 토출 압력 | 1 | — | 175 / 184 / 193 |
+| `C-4102` | `TI-S-C4102` | suction_temp | DEG C | 첫 단 흡입 가스 온도 | 10 | — | 50 / 60 / 70 |
+| `C-4102` | `TI-D-C4102` | discharge_temp | DEG C | 최종 단 토출 가스 온도 | 10 | — | 145 / 155 / 165 |
+| `C-4102` | `FI-C4102` | flow | Nm3/h | 보충 수소 표준 유량 | 1 | 9000 / 7740 / 6190 | — |
+| `C-4102` | `SI-C4102` | speed | rpm | 크랭크축 회전속도 | 1 | 570 / 547 / — | 610 / 634 / 659 |
+| `C-4101` | `XI-X-C4101` | shaft_vibration | um pk-pk | 구동측 X방향 축 상대 진동 | 1 | — | 75 / 95.2 / 130 |
+| `C-4101` | `TI-B-C4101` | bearing_temp | DEG C | 저널 베어링 금속 온도 | 10 | — | 95 / 105 / 115 |
+| `C-4101` | `ZI-C4101` | axial_position | mm | 축방향 위치·기준점 대비 | 1 | -0.35 / -0.525 / -0.875 | 0.35 / 0.525 / 0.875 |
+| `C-4101` | `PI-S-C4101` | suction_pressure | bar(g) | 흡입 압력 | 1 | 125 / 100 / 80 | — |
+| `C-4101` | `PI-D-C4101` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 170 / 178 / 187 |
+| `C-4101` | `TI-S-C4101` | suction_temp | DEG C | 흡입 가스 온도 | 10 | — | 60 / 70 / 80 |
+| `C-4101` | `TI-D-C4101` | discharge_temp | DEG C | 토출 가스 온도 | 10 | — | 95 / 105 / 115 |
+| `C-4101` | `FI-C4101` | flow | Nm3/h | 순환가스 표준 유량 | 1 | 110000 / 94600 / 75700 | — |
+| `C-4101` | `SI-C4101` | speed | rpm | 압축기 회전속도 | 1 | 8500 / 8160 / — | 10000 / 10400 / 10800 |
+| `C-4101` | `PI-LO-C4101` | oil_pressure | bar(g) | 윤활유 헤더 압력 | 1 | 2 / 1.6 / 1.33 | — |
+| `C-4101` | `TI-LO-C4101` | oil_temp | DEG C | 윤활유 공급 온도 | 10 | — | 55 / 62 / 72 |
+| `F-4101` | `VI-A-F4101` | vibration | mm/s RMS | 팬 구동측 케이싱 진동 | 1 | — | 4.5 / 7.1 / 11 |
+| `F-4101` | `TI-B-F4101` | bearing_temp | DEG C | 팬 구동측 베어링 온도 | 10 | — | 80 / 90 / 100 |
+| `F-4101` | `SI-F4101` | speed | rpm | 팬 회전속도 | 1 | 1150 / 1100 / — | 1550 / 1610 / 1670 |
+| `F-4101` | `II-F4101` | current | A | 모터 전류 | 1 | — | 80 / 84.8 / 91.6 |
+| `F-4101` | `FI-F4101` | flow | m3/h | 연소공기 실제 체적 유량 | 1 | 35000 / 30100 / 24100 | — |
+| `F-4101` | `PDI-F4101` | differential_pressure | Pa | 팬 입출구 차압 | 1 | 1400 / 1200 / — | — |
+| `P-4102` | `VI-A-P4102` | vibration | mm/s RMS | 구동측 케이싱 진동 | 1 | — | 4.5 / 7.1 / 11 |
+| `P-4102` | `TI-B-P4102` | bearing_temp | DEG C | 구동측 베어링 온도 | 10 | — | 90 / 100 / 110 |
+| `P-4102` | `TI-F-P4102` | process_temp | DEG C | 흡입 유체 온도 | 10 | — | 310 / 320 / 335 |
+| `P-4102` | `PI-S-P4102` | suction_pressure | bar(g) | 흡입 압력 | 1 | 3 / 2.4 / 1.92 | — |
+| `P-4102` | `PI-D-P4102` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 25 / 26.2 / 27.5 |
+| `P-4102` | `FI-P4102` | flow | m3/h | 잔사유 유량 | 1 | 140 / 120 / 96.3 | — |
+| `P-4102` | `II-P4102` | current | A | 모터 전류 | 1 | — | 145 / 154 / 166 |
+| `P-4103` | `VI-A-P4103` | vibration | mm/s RMS | 구동측 케이싱 진동 | 1 | — | 4.5 / 7.1 / 11 |
+| `P-4103` | `TI-B-P4103` | bearing_temp | DEG C | 구동측 베어링 온도 | 10 | — | 80 / 90 / 100 |
+| `P-4103` | `PI-S-P4103` | suction_pressure | bar(g) | 흡입 압력 | 1 | 2 / 1.6 / 1.28 | — |
+| `P-4103` | `PI-D-P4103` | discharge_pressure | bar(g) | 토출 압력 | 1 | — | 15 / 15.8 / 16.5 |
+| `P-4103` | `FI-P4103` | flow | m3/h | 환류액 유량 | 1 | 65 / 55.9 / 44.7 | — |
 
 </details>
 
@@ -496,7 +496,7 @@
 2. **`tag_std` 가 공장마다 다르다** → 스키마별로 따로 두므로 충돌 없음. 같은 `signal` 인데 접두어·단위 표기가 다르다. 예) `shaft_vibration` 접두어 VI / XI / VX, `suction_pressure` 단위 bar(g) / kg/cm2(g), `bearing_temp` 단위 DEG C / degC. 공장을 가로지르는 조회에서는 `equipment_tag.unit` 을 기준으로 본다.
 3. **`equipment_type` 도 다르다** → 스키마별로 따로 두므로 충돌 없음. `CC` 가 RFCC 에서는 “원심 압축기”, 나머지에서는 “압축기”.
 4. **비어 있는 테이블**: `equipment_alias`, `maintenance_history`, `failure_history` 는 다섯 공장 모두 0행이다 (별칭·정비·고장 자료가 구성안·시나리오에 없음). `equipment.grade`, `equipment_tag.location` 도 비어 있다.
-5. **한계값**: RFCC 81개 태그는 한계값이 없다. RHDS·VRDS 는 경고값만 있고 알람·정지값이 없어 `alarm_detail` 이 모두 Soft(Low) 로만 생긴다. `delay_samples` 는 모두 기본값 1.
+5. **한계값**: RFCC 81개 태그는 통계 경고값만 있다 (`delay_samples` 2). RHDS·VRDS 는 경고값이 자료 그대로이고, 알람·정지값은 CDU·HOU 의 같은 신호 간격을 적용해 넣었다 (규칙은 각 태그 `limit_basis`). 나머지 공장의 `delay_samples` 는 기본값 1.
 6. **원시 값 크기**: 다섯 공장 합계 하루 약 1,846만 행 (행당 약 180 B → 하루 약 3.3 GB). 보관 기간이 1일이라 원시 값은 이 정도에서 고정되고, 집계가 계속 쌓인다.
 
 ## 6. PostgreSQL 이상 데이터 DB (결정)
@@ -510,7 +510,7 @@
   1. **한계값 초과**: 10분 배치가 만드는 `alarm_detail` 그대로 (10분 최대값↔상한, 최소값↔하한, `delay_samples`).
   2. **품질 이상**: 원시 값 품질이 `Bad` / `ScanOff` 인 구간. `Uncertain` 은 값이 있으므로 이상으로 보지 않는다.
 - **저장 범위**: 이상 1건당 한 행 + 이상 구간 앞뒤 원시 값.
-- RFCC 는 한계값이 없어 품질 이상만 쌓인다. RHDS·VRDS 의 한계값 초과는 모두 Soft(Low) 다.
+- RFCC 의 한계값 초과는 통계 경고뿐이라 모두 Soft(Low) 다. RHDS·VRDS 는 알람·정지값이 생겨 Medium·High 도 나온다.
 
 ### 6.2 스키마별 테이블
 

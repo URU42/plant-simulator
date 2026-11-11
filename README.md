@@ -138,7 +138,7 @@ limits: { alarm_lo: 115, alarm_hi: 140 }                 # 양쪽 (HOU)
 ```
 
 여섯 칸 모두 선택이며 자료에 있는 칸만 적는다. 상한은 10분 최대값이 넘으면, 하한은 10분 최소값이 내려가면 알람(`alarm_detail.direction` hi / lo).
-심각도는 Trip → High, Alarm → Medium, Soft → Low. 한계값이 없는 태그(RFCC)는 알람 판정 대상이 아니다. `normal_ref`(정상 기준 원문)와 `limit_basis`(근거 원문)는 자료를 그대로 남긴 참고 문자열이다.
+심각도는 Trip → High, Alarm → Medium, Soft → Low. RFCC 는 자료에 한계값이 없어 통계 경고 한계(정상 구간 10분 최대·최소의 평균 ± 3σ, 20분 연속)를 쓴다. `normal_ref`(정상 기준 원문)와 `limit_basis`(근거 원문)는 자료를 그대로 남긴 참고 문자열이다.
 
 ### 시나리오 이벤트
 

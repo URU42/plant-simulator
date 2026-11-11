@@ -13,7 +13,8 @@ def test_rfcc_plant_matches_sample_package(rfcc_plant_path):
     temps = [t for t in tags if t.signal in TEMPS]
     assert len(temps) == 16 and all(t.interval_sec == 10 for t in temps)
     assert all(t.interval_sec == 1 for t in tags if t.signal not in TEMPS)
-    assert all(t.limits is None for t in tags)
+    assert all(t.limits.warn_lo < t.normal.base < t.limits.warn_hi and t.delay_samples == 2 for t in tags)   # 통계 경고만
+    assert all(t.limits.alarm_hi is None and t.limits.trip_hi is None for t in tags)
     by_key = plant.tag_by_key()
     assert by_key[("P-1101A", "VI-P-1101A")].normal.base == 1.45 and by_key[("P-1101A", "VI-P-1101A")].normal.noise_sd == 0.03375
     assert by_key[("E-1202", "ZI-E-1202")].decimals == 5 and by_key[("B-1201", "FI-B-1201")].decimals == 4
