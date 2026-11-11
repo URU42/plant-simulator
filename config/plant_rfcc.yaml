@@ -1,14 +1,16 @@
 # 구성안 2: RFCC 회전기계 (설계 docs/superpowers/specs/2026-11-09-rfcc-simulator-design.md)
 # - 출처: rfcc-20261109 v1.2.0 의 support/config.json. 설비 12대, 태그 81개, 기준값·잡음은 그대로.
 # - 온도(bearing_temp / suction_temp / discharge_temp / oil_temp) 16개는 10초, 나머지 65개는 1초 주기.
-# - 한계값(limits)은 없다. 자료의 매뉴얼이 "정상 중심값을 경보값으로 바꾸지 않는다"고 못 박았다. 알람 배치는 이 태그들을 건너뛴다.
+# - 한계값은 자료에 없어 통계로 정했다 (경고만, 상·하한). 자료(이벤트 두 건 + 2시간, Bad 제외)의 10분 구간 최대값의 평균 + 3σ 를 상한,
+#   최소값의 평균 − 3σ 를 하한으로 했다. 알람이 10분 최대·최소를 보므로 원시 값의 σ 로는 정상에서도 구간의 17% 가 넘는다.
+#   잡음만으로 넘는 구간이 약 0.2% 라 delay_samples 2 (20분 연속)로 둔다. 매뉴얼의 정상 중심값은 그대로 경보값으로 쓰지 않았다.
 # - driven_by: 같은 축으로 직접 결합된 설비. 피구동 설비의 speed 태그는 구동기의 속도를 그대로 쓴다.
 # - seed_key: 태그 r001~r081, 설비 e01~e12. ID 를 바꿔도 생성 값이 유지된다.
 
 plant:
   plant_id: PL-RFCC
   name: 가상 정유단지 RFCC
-  config_version: 1
+  config_version: 2
   signal_model: rfcc
   unit_groups:
     - id: UG-RFCC-01
@@ -69,16 +71,22 @@ equipment:
     seed_key: e01
     tags:
       - { tag_id: VI-P-1101A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          limits: { warn_lo: 1.2567, warn_hi: 1.6451 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r001, normal: { base: 1.45, noise_sd: 0.03375 } }
       - { tag_id: TI-P-1101A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          limits: { warn_lo: 63.7601, warn_hi: 68.2231 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r002, normal: { base: 66, noise_sd: 0.035 } }
       - { tag_id: PS-P-1101A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          limits: { warn_lo: 3.1645, warn_hi: 3.2353 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r003, normal: { base: 3.2, noise_sd: 0.008 } }
       - { tag_id: PD-P-1101A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          limits: { warn_lo: 18.5441, warn_hi: 19.4206 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r004, normal: { base: 19, noise_sd: 0.025 } }
       - { tag_id: FI-P-1101A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          limits: { warn_lo: 197.3323, warn_hi: 223.8069 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r005, normal: { base: 210, noise_sd: 0.315 } }
       - { tag_id: II-P-1101A, signal: current, unit: A, description: "구동 모터 전류",
+          limits: { warn_lo: 138.4174, warn_hi: 152.1602 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r006, normal: { base: 145, noise_sd: 0.174 } }
   # ---------------- UNIT-RFCC-02 촉매 재생 ----------------
   - equip_id: B-1201
@@ -89,20 +97,28 @@ equipment:
     seed_key: e02
     tags:
       - { tag_id: VX-B-1201, signal: shaft_vibration, unit: um p-p, description: "구동측 X축 상대 진동",
+          limits: { warn_lo: 28.2733, warn_hi: 35.8724 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r007, normal: { base: 32, noise_sd: 0.65 } }
       - { tag_id: VY-B-1201, signal: shaft_vibration, unit: um p-p, description: "구동측 Y축 상대 진동",
+          limits: { warn_lo: 25.3324, warn_hi: 32.7922 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r008, normal: { base: 29, noise_sd: 0.65 } }
       - { tag_id: TI-B-1201, signal: bearing_temp, unit: degC, description: "구동측 저널 베어링 온도",
+          limits: { warn_lo: 75.7936, warn_hi: 80.2017 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r009, normal: { base: 78, noise_sd: 0.035 } }
       - { tag_id: PS-B-1201, signal: suction_pressure, unit: bar(g), description: "입구 공기 압력",
+          limits: { warn_lo: -0.0248, warn_hi: -0.0059 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r010, normal: { base: -0.015, noise_sd: 0.001 } }
       - { tag_id: PD-B-1201, signal: discharge_pressure, unit: bar(g), description: "토출 공기 압력",
+          limits: { warn_lo: 2.7332, warn_hi: 2.8715 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r011, normal: { base: 2.8, noise_sd: 0.012 } }
       - { tag_id: FI-B-1201, signal: flow, unit: Nm3/h, description: "표준 상태 공기 체적 유량",
+          limits: { warn_lo: 170207.0328, warn_hi: 190933.9342 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r012, normal: { base: 180000, noise_sd: 160 } }
       - { tag_id: SI-B-1201, signal: speed, unit: rpm, description: "축 회전속도",
+          limits: { warn_lo: 5164.3385, warn_hi: 5239.1692 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r013, normal: { base: 5200, noise_sd: 1.2 } }
       - { tag_id: LOP-B-1201, signal: oil_pressure, unit: bar(g), description: "윤활유 공급 압력",
+          limits: { warn_lo: 2.151, warn_hi: 2.2495 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r014, normal: { base: 2.2, noise_sd: 0.004 } }
   # ---------------- UNIT-RFCC-03 동력 회수 ----------------
   - equip_id: E-1202
@@ -112,20 +128,28 @@ equipment:
     seed_key: e03
     tags:
       - { tag_id: VX-E-1202, signal: shaft_vibration, unit: um p-p, description: "구동측 X축 상대 진동",
+          limits: { warn_lo: 30.9272, warn_hi: 39.1313 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r015, normal: { base: 35, noise_sd: 0.7 } }
       - { tag_id: VY-E-1202, signal: shaft_vibration, unit: um p-p, description: "구동측 Y축 상대 진동",
+          limits: { warn_lo: 27.9967, warn_hi: 36.1586 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r016, normal: { base: 32, noise_sd: 0.7 } }
       - { tag_id: TI-E-1202, signal: bearing_temp, unit: degC, description: "저널 베어링 온도",
+          limits: { warn_lo: 79.796, warn_hi: 84.1938 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r017, normal: { base: 82, noise_sd: 0.035 } }
       - { tag_id: ZI-E-1202, signal: axial_position, unit: mm, description: "축방향 상대 위치",
+          limits: { warn_lo: 0.03664, warn_hi: 0.04331 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 5, seed_key: r018, normal: { base: 0.04, noise_sd: 0.0008 } }
       - { tag_id: SI-E-1202, signal: speed, unit: rpm, description: "축 회전속도",
+          limits: { warn_lo: 5164.3385, warn_hi: 5239.1692 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r019, normal: { base: 5200, noise_sd: 1.2 } }
       - { tag_id: PS-E-1202, signal: suction_pressure, unit: bar(g), description: "배기가스 입구 압력",
+          limits: { warn_lo: 2.5482, warn_hi: 2.6518 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r020, normal: { base: 2.6, noise_sd: 0.012 } }
       - { tag_id: PD-E-1202, signal: discharge_pressure, unit: bar(g), description: "배기가스 출구 압력",
+          limits: { warn_lo: 0.1172, warn_hi: 0.1426 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r021, normal: { base: 0.13, noise_sd: 0.003 } }
       - { tag_id: LOT-E-1202, signal: oil_temp, unit: degC, description: "윤활유 공급 온도",
+          limits: { warn_lo: 42.8124, warn_hi: 47.1791 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r022, normal: { base: 45, noise_sd: 0.025 } }
   # ---------------- UNIT-RFCC-04 슬러리·LCO 순환·탑정 처리 ----------------
   - equip_id: P-1301A
@@ -135,16 +159,22 @@ equipment:
     seed_key: e04
     tags:
       - { tag_id: VI-P-1301A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          limits: { warn_lo: 1.629, warn_hi: 2.0749 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r023, normal: { base: 1.85, noise_sd: 0.038475 } }
       - { tag_id: TI-P-1301A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          limits: { warn_lo: 71.7556, warn_hi: 76.2255 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r024, normal: { base: 74, noise_sd: 0.035 } }
       - { tag_id: PS-P-1301A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          limits: { warn_lo: 4.0632, warn_hi: 4.1345 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r025, normal: { base: 4.1, noise_sd: 0.008 } }
       - { tag_id: PD-P-1301A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          limits: { warn_lo: 10.2804, warn_hi: 10.709 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r026, normal: { base: 10.5, noise_sd: 0.025 } }
       - { tag_id: FI-P-1301A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          limits: { warn_lo: 357.8561, warn_hi: 403.4699 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r027, normal: { base: 380, noise_sd: 0.57 } }
       - { tag_id: II-P-1301A, signal: current, unit: A, description: "구동 모터 전류",
+          limits: { warn_lo: 181.6953, warn_hi: 198.8389 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r028, normal: { base: 190, noise_sd: 0.228 } }
   - equip_id: P-1302A
     name: LCO Pumparound Pump
@@ -153,16 +183,22 @@ equipment:
     seed_key: e05
     tags:
       - { tag_id: VI-P-1302A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          limits: { warn_lo: 0.9997, warn_hi: 1.4417 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r029, normal: { base: 1.22, noise_sd: 0.04005 } }
       - { tag_id: TI-P-1302A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          limits: { warn_lo: 65.7997, warn_hi: 70.1955 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r030, normal: { base: 68, noise_sd: 0.035 } }
       - { tag_id: PS-P-1302A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          limits: { warn_lo: 2.9642, warn_hi: 3.0349 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r031, normal: { base: 3, noise_sd: 0.008 } }
       - { tag_id: PD-P-1302A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          limits: { warn_lo: 9.2769, warn_hi: 9.7067 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r032, normal: { base: 9.5, noise_sd: 0.025 } }
       - { tag_id: FI-P-1302A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          limits: { warn_lo: 226.4188, warn_hi: 254.8523 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r033, normal: { base: 240, noise_sd: 0.36 } }
       - { tag_id: II-P-1302A, signal: current, unit: A, description: "구동 모터 전류",
+          limits: { warn_lo: 93.8206, warn_hi: 102.5589 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r034, normal: { base: 98, noise_sd: 0.1176 } }
   - equip_id: P-1303A
     name: Overhead Reflux Pump
@@ -171,16 +207,22 @@ equipment:
     seed_key: e06
     tags:
       - { tag_id: VI-P-1303A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          limits: { warn_lo: 0.8278, warn_hi: 1.2724 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r035, normal: { base: 1.05, noise_sd: 0.041625 } }
       - { tag_id: TI-P-1303A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          limits: { warn_lo: 55.7951, warn_hi: 60.196 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r036, normal: { base: 58, noise_sd: 0.035 } }
       - { tag_id: PS-P-1303A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          limits: { warn_lo: 2.4643, warn_hi: 2.5352 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r037, normal: { base: 2.5, noise_sd: 0.008 } }
       - { tag_id: PD-P-1303A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          limits: { warn_lo: 7.9899, warn_hi: 8.3939 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r038, normal: { base: 8.2, noise_sd: 0.025 } }
       - { tag_id: FI-P-1303A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          limits: { warn_lo: 127.205, warn_hi: 143.5388 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r039, normal: { base: 135, noise_sd: 0.2025 } }
       - { tag_id: II-P-1303A, signal: current, unit: A, description: "구동 모터 전류",
+          limits: { warn_lo: 62.1688, warn_hi: 68.0888 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r040, normal: { base: 65, noise_sd: 0.078 } }
   # ---------------- UNIT-RFCC-05 습가스 압축 ----------------
   - equip_id: C-1401
@@ -191,24 +233,34 @@ equipment:
     seed_key: e07
     tags:
       - { tag_id: VX-C-1401, signal: shaft_vibration, unit: um p-p, description: "구동측 X축 상대 진동",
+          limits: { warn_lo: 26.4709, warn_hi: 33.7498 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r041, normal: { base: 30, noise_sd: 0.65 } }
       - { tag_id: VY-C-1401, signal: shaft_vibration, unit: um p-p, description: "구동측 Y축 상대 진동",
+          limits: { warn_lo: 23.366, warn_hi: 30.7156 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r042, normal: { base: 27, noise_sd: 0.65 } }
       - { tag_id: TI-C-1401, signal: bearing_temp, unit: degC, description: "구동측 저널 베어링 온도",
+          limits: { warn_lo: 74.7974, warn_hi: 79.1987 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r043, normal: { base: 77, noise_sd: 0.035 } }
       - { tag_id: ZI-C-1401, signal: axial_position, unit: mm, description: "축방향 상대 위치",
+          limits: { warn_lo: 0.02665, warn_hi: 0.03338 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 5, seed_key: r044, normal: { base: 0.03, noise_sd: 0.0008 } }
       - { tag_id: PS-C-1401, signal: suction_pressure, unit: bar(g), description: "1단 흡입 압력",
+          limits: { warn_lo: 1.1719, warn_hi: 1.2274 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r045, normal: { base: 1.2, noise_sd: 0.006 } }
       - { tag_id: PD-C-1401, signal: discharge_pressure, unit: bar(g), description: "최종 토출 압력",
+          limits: { warn_lo: 12.2843, warn_hi: 12.7248 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r046, normal: { base: 12.5, noise_sd: 0.028 } }
       - { tag_id: TS-C-1401, signal: suction_temp, unit: degC, description: "1단 흡입 온도",
+          limits: { warn_lo: 39.784, warn_hi: 44.1997 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r047, normal: { base: 42, noise_sd: 0.04 } }
       - { tag_id: TD-C-1401, signal: discharge_temp, unit: degC, description: "최종 토출 온도",
+          limits: { warn_lo: 114.8455, warn_hi: 121.1934 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r048, normal: { base: 118, noise_sd: 0.06 } }
       - { tag_id: FI-C-1401, signal: flow, unit: Nm3/h, description: "흡입 가스 표준 상태 체적 유량",
+          limits: { warn_lo: 39654.5459, warn_hi: 44615.3311 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r049, normal: { base: 42000, noise_sd: 50 } }
       - { tag_id: SI-C-1401, signal: speed, unit: rpm, description: "축 회전속도",
+          limits: { warn_lo: 8088.6267, warn_hi: 8322.8262 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r050, normal: { base: 8200, noise_sd: 1.5 } }
   # ---------------- UNIT-RFCC-06 습가스 압축 구동 ----------------
   - equip_id: T-1401
@@ -218,18 +270,25 @@ equipment:
     seed_key: e08
     tags:
       - { tag_id: VX-T-1401, signal: shaft_vibration, unit: um p-p, description: "구동측 X축 상대 진동",
+          limits: { warn_lo: 24.6318, warn_hi: 31.5256 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r051, normal: { base: 28, noise_sd: 0.6 } }
       - { tag_id: VY-T-1401, signal: shaft_vibration, unit: um p-p, description: "구동측 Y축 상대 진동",
+          limits: { warn_lo: 21.7343, warn_hi: 28.4011 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r052, normal: { base: 25, noise_sd: 0.6 } }
       - { tag_id: TI-T-1401, signal: bearing_temp, unit: degC, description: "구동측 저널 베어링 온도",
+          limits: { warn_lo: 77.802, warn_hi: 82.1965 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r053, normal: { base: 80, noise_sd: 0.035 } }
       - { tag_id: SI-T-1401, signal: speed, unit: rpm, description: "축 회전속도",
+          limits: { warn_lo: 8088.6267, warn_hi: 8322.8262 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r054, normal: { base: 8200, noise_sd: 1.5 } }
       - { tag_id: LOP-T-1401, signal: oil_pressure, unit: bar(g), description: "윤활유 공급 압력",
+          limits: { warn_lo: 2.0511, warn_hi: 2.1495 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r055, normal: { base: 2.1, noise_sd: 0.004 } }
       - { tag_id: LOT-T-1401, signal: oil_temp, unit: degC, description: "윤활유 공급 온도",
+          limits: { warn_lo: 42.8162, warn_hi: 47.1753 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r056, normal: { base: 45, noise_sd: 0.025 } }
       - { tag_id: SP-T-1401, signal: steam_pressure, unit: bar(g), description: "입구 증기 압력",
+          limits: { warn_lo: 39.7312, warn_hi: 40.2899 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r057, normal: { base: 40, noise_sd: 0.04 } }
   # ---------------- UNIT-RFCC-07 흡수·분별·안정화 ----------------
   - equip_id: P-1402A
@@ -239,16 +298,22 @@ equipment:
     seed_key: e09
     tags:
       - { tag_id: VI-P-1402A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          limits: { warn_lo: 0.8792, warn_hi: 1.3674 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r058, normal: { base: 1.12, noise_sd: 0.04635 } }
       - { tag_id: TI-P-1402A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          limits: { warn_lo: 60.8061, warn_hi: 65.1909 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r059, normal: { base: 63, noise_sd: 0.035 } }
       - { tag_id: PS-P-1402A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          limits: { warn_lo: 7.1636, warn_hi: 7.2351 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r060, normal: { base: 7.2, noise_sd: 0.008 } }
       - { tag_id: PD-P-1402A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          limits: { warn_lo: 16.701, warn_hi: 17.2778 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r061, normal: { base: 17, noise_sd: 0.025 } }
       - { tag_id: FI-P-1402A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          limits: { warn_lo: 89.5748, warn_hi: 100.9547 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r062, normal: { base: 95, noise_sd: 0.1425 } }
       - { tag_id: II-P-1402A, signal: current, unit: A, description: "구동 모터 전류",
+          limits: { warn_lo: 49.7696, warn_hi: 54.4512 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r063, normal: { base: 52, noise_sd: 0.0624 } }
   - equip_id: P-1403A
     name: Gas Recovery Reflux Pump
@@ -257,16 +322,22 @@ equipment:
     seed_key: e10
     tags:
       - { tag_id: VI-P-1403A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          limits: { warn_lo: 0.7278, warn_hi: 1.2282 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r064, normal: { base: 0.98, noise_sd: 0.047925 } }
       - { tag_id: TI-P-1403A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          limits: { warn_lo: 56.7938, warn_hi: 61.1985 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r065, normal: { base: 59, noise_sd: 0.035 } }
       - { tag_id: PS-P-1403A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          limits: { warn_lo: 9.9637, warn_hi: 10.0357 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r066, normal: { base: 10, noise_sd: 0.008 } }
       - { tag_id: PD-P-1403A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          limits: { warn_lo: 17.743, warn_hi: 18.2412 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r067, normal: { base: 18, noise_sd: 0.025 } }
       - { tag_id: FI-P-1403A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          limits: { warn_lo: 77.3507, warn_hi: 87.1257 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r068, normal: { base: 82, noise_sd: 0.123 } }
       - { tag_id: II-P-1403A, signal: current, unit: A, description: "구동 모터 전류",
+          limits: { warn_lo: 46.8999, warn_hi: 51.3067 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r069, normal: { base: 49, noise_sd: 0.0588 } }
   # ---------------- UNIT-RFCC-08 LPG·가솔린 처리 ----------------
   - equip_id: P-1501A
@@ -276,16 +347,22 @@ equipment:
     seed_key: e11
     tags:
       - { tag_id: VI-P-1501A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          limits: { warn_lo: 0.826, warn_hi: 1.348 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r070, normal: { base: 1.08, noise_sd: 0.0495 } }
       - { tag_id: TI-P-1501A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          limits: { warn_lo: 52.7974, warn_hi: 57.1983 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r071, normal: { base: 55, noise_sd: 0.035 } }
       - { tag_id: PS-P-1501A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          limits: { warn_lo: 11.9641, warn_hi: 12.0355 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r072, normal: { base: 12, noise_sd: 0.008 } }
       - { tag_id: PD-P-1501A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          limits: { warn_lo: 19.7424, warn_hi: 20.2412 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r073, normal: { base: 20, noise_sd: 0.025 } }
       - { tag_id: FI-P-1501A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          limits: { warn_lo: 61.3325, warn_hi: 69.0746 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r074, normal: { base: 65, noise_sd: 0.0975 } }
       - { tag_id: II-P-1501A, signal: current, unit: A, description: "구동 모터 전류",
+          limits: { warn_lo: 42.1326, warn_hi: 46.0694 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r075, normal: { base: 44, noise_sd: 0.0528 } }
   - equip_id: P-1502A
     name: Gasoline Transfer Pump
@@ -294,14 +371,20 @@ equipment:
     seed_key: e12
     tags:
       - { tag_id: VI-P-1502A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          limits: { warn_lo: 0.9186, warn_hi: 1.4577 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r076, normal: { base: 1.18, noise_sd: 0.051075 } }
       - { tag_id: TI-P-1502A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          limits: { warn_lo: 54.7974, warn_hi: 59.1941 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 10, decimals: 4, seed_key: r077, normal: { base: 57, noise_sd: 0.035 } }
       - { tag_id: PS-P-1502A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          limits: { warn_lo: 2.0639, warn_hi: 2.1353 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r078, normal: { base: 2.1, noise_sd: 0.008 } }
       - { tag_id: PD-P-1502A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          limits: { warn_lo: 8.2766, warn_hi: 8.7069 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r079, normal: { base: 8.5, noise_sd: 0.025 } }
       - { tag_id: FI-P-1502A, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          limits: { warn_lo: 113.2339, warn_hi: 127.48 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r080, normal: { base: 120, noise_sd: 0.18 } }
       - { tag_id: II-P-1502A, signal: current, unit: A, description: "구동 모터 전류",
+          limits: { warn_lo: 57.4575, warn_hi: 62.8178 }, delay_samples: 2, limit_basis: "통계 기준: 정상 구간 10분 최대·최소의 평균 ± 3σ",
           interval_sec: 1, decimals: 4, seed_key: r081, normal: { base: 60, noise_sd: 0.072 } }

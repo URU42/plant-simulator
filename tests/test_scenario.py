@@ -162,7 +162,7 @@ def test_dev_scenario_file_loads_and_matches_plant(plant_path, scenario_path):
 
 
 # ---------------------------------------------------------------------------
-# RFCC 시나리오: swell 반복 이벤트, 품질 이벤트 반복, 한계값 없는 태그 (설계 §4.3)
+# RFCC 시나리오: swell 반복 이벤트, 품질 이벤트 반복, 경고 상한 없는 태그 (설계 §4.3)
 # ---------------------------------------------------------------------------
 
 def test_repeat_every_repeats_the_event_weekly(rfcc_plant_path, rfcc_runtime_path, rfcc_scenario_path):
@@ -193,11 +193,11 @@ def test_quality_event_repeats(rfcc_plant_path, rfcc_runtime_path, rfcc_scenario
     assert qualities[:5] == ["Good"] * 5 and qualities[5:65] == ["Bad"] * 60 and qualities[65:] == ["Good"] * 5
 
 
-def test_random_anomalies_skip_tags_without_limits(rfcc_plant_path, rfcc_runtime_path):
-    plant, runtime = load_plant(rfcc_plant_path), load_runtime(rfcc_runtime_path)
-    maker = RandomAnomalyMaker(plant, runtime.seed, rate_per_tag_day=5.0)
+def test_random_anomalies_skip_tags_without_warn_hi(config_dir):
+    plant = load_plant(config_dir / "plant_cdu.yaml")                     # PI-8101A 는 하한만 있다
+    maker = RandomAnomalyMaker(plant, 61109, rate_per_tag_day=5.0)
     epochs = epochs_range(datetime(2026, 11, 9, tzinfo=KST), datetime(2026, 11, 10, tzinfo=KST), 60)
-    assert maker.offset(("P-1101A", "VI-P-1101A"), epochs).max() == 0.0
+    assert maker.offset(("P-8101A", "PI-8101A"), epochs).max() == 0.0
 
 
 # ---------------------------------------------------------------------------

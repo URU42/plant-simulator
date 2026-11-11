@@ -44,4 +44,4 @@ events:
     repeat_every: 7d
 
 random_anomalies:
-  rate_per_tag_day: 0          # 한계값이 없는 구성안이라 쓰지 않는다
+  rate_per_tag_day: 0          # 쓰지 않는다 (개발 이벤트만 넣는다)
