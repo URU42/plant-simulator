@@ -40,6 +40,21 @@ def test_master_values_match_excel_samples(config_dir):
     assert {e.seed_key for e in vrds.equipment}.isdisjoint({e.seed_key for e in rhds.equipment})
 
 
+
+@pytest.mark.parametrize("key", ["rhds", "vrds"])
+def test_rhds_vrds_alarm_trip_follow_cdu_hou_gaps(key, config_dir):
+    """경고는 자료 그대로, 알람·정지는 CDU·HOU 의 같은 신호 간격 (차압 하한·속도 하한만 정지 없음)."""
+    tags = load_plant(config_dir / f"plant_{key}.yaml").tag_by_key()
+    n = {"rhds": "3", "vrds": "4"}[key]                                                  # 설비 번호대
+    vib = tags[(f"P-{n}101", f"VI-A-P{n}101")].limits
+    assert (vib.warn_hi, vib.alarm_hi, vib.trip_hi) == (4.5, 7.1, 11)                    # ISO 20816 경계
+    tb = tags[(f"P-{n}101", f"TI-B-P{n}101")].limits
+    assert (tb.warn_hi, tb.alarm_hi, tb.trip_hi) == (85, 95, 105)
+    ps = tags[(f"P-{n}101", f"PI-S-P{n}101")].limits
+    assert (ps.warn_lo, ps.alarm_lo, ps.trip_lo) == (3.5, 2.8, 2.24)
+    assert all(t.limits.alarm_hi is not None or t.limits.alarm_lo is not None for t in tags.values())
+
+
 @pytest.mark.parametrize("key", ["rfcc", "cdu", "hou", "rhds", "vrds"])
 def test_tag_names_unique_within_plant(key, config_dir):
     """태그명은 공장 안에서 고유하다. RHDS·VRDS 는 자료의 겹치는 이름에 설비 종류 문자를 넣어 바꿨다."""
