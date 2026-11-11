@@ -29,14 +29,22 @@ def test_master_values_match_excel_samples(config_dir):
     assert (z.limits.warn_hi, z.limits.alarm_lo, z.limits.alarm_hi, z.limits.trip_lo, z.limits.trip_hi) == (0.2, -0.3, 0.3, -0.5, 0.5)
     assert hou[("C-2301", "TI-2301A")].interval_sec == 10 and hou[("C-2301", "TI-2301A")].description == "구동측 저널 베어링 패드 온도"
     rhds = load_plant(config_dir / "plant_rhds.yaml")
-    assert [k for k in rhds.tag_keys() if k[1] == "TI-B-3101"] == [("P-3101", "TI-B-3101"), ("C-3101", "TI-B-3101"), ("F-3101", "TI-B-3101")]
-    s = rhds.tag_by_key()[("C-3101", "SI-3101")]
+    assert [k for k in rhds.tag_keys() if k[1].startswith("TI-B-") and k[1].endswith("3101")] == [
+        ("P-3101", "TI-B-P3101"), ("C-3101", "TI-B-C3101"), ("F-3101", "TI-B-F3101")]   # 자료의 TI-B-3101 셋
+    s = rhds.tag_by_key()[("C-3101", "SI-C3101")]
     assert (s.limits.warn_lo, s.limits.warn_hi) == (8500, 10000) and s.signal == "speed"
-    assert rhds.tag_by_key()[("F-3101", "PDI-3101")].signal == "differential_pressure"
-    assert rhds.tag_by_key()[("P-3102", "TI-F-3102")].signal == "process_temp"
+    assert rhds.tag_by_key()[("F-3101", "PDI-F3101")].signal == "differential_pressure"
+    assert rhds.tag_by_key()[("P-3102", "TI-F-P3102")].signal == "process_temp"
     vrds = load_plant(config_dir / "plant_vrds.yaml")
     assert load_runtime(config_dir / "runtime_vrds.yaml").seed == 20261111
     assert {e.seed_key for e in vrds.equipment}.isdisjoint({e.seed_key for e in rhds.equipment})
+
+
+@pytest.mark.parametrize("key", ["rfcc", "cdu", "hou", "rhds", "vrds"])
+def test_tag_names_unique_within_plant(key, config_dir):
+    """태그명은 공장 안에서 고유하다. RHDS·VRDS 는 자료의 겹치는 이름에 설비 종류 문자를 넣어 바꿨다."""
+    names = [tag for _, tag in load_plant(config_dir / f"plant_{key}.yaml").tag_keys()]
+    assert len(names) == len(set(names))
 
 
 def test_plants_yaml_lists_five(config_dir):

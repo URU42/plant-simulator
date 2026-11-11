@@ -87,7 +87,7 @@ docker compose --profile split up --build -d    # 분리 실행 6 컨테이너
 curl localhost:8000/health                                   # 다섯 공장의 sim_now · catching_up
 curl localhost:8000/rhds/equipment                           # 계층 순서의 설비·태그·한계값
 curl localhost:8000/rhds/current
-curl localhost:8000/rhds/equipment/P-3101/tags/TI-B-3101/current
+curl localhost:8000/rhds/equipment/P-3101/tags/TI-B-P3101/current
 curl "localhost:8000/cdu/timeseries?equip_id=P-8101A&tag_id=PI-8101A&from=2026-11-08T00:00:00%2B09:00&to=2026-11-09T00:00:00%2B09:00&interval=10m"
 curl "localhost:8000/hou/alarms?equip_id=P-2601"
 curl -N localhost:8000/rfcc/stream
@@ -125,8 +125,8 @@ curl -N localhost:8000/rfcc/stream
 
 ### 태그를 가리키는 법
 
-태그는 **(설비 ID, 태그명)** 복합키다. 태그명은 같은 설비 안에서만 고유하면 된다(RHDS 의 `TI-B-3101` 은 P-3101·C-3101·F-3101 에 모두 있다).
-설정 파일에서 태그를 가리키는 문자열(`correlations.source/target`, 시나리오 `related[].tag_id`)은 `EQUIP/TAG`(예: `P-3101/TI-B-3101`)이거나,
+태그는 **(설비 ID, 태그명)** 복합키다. 다섯 공장의 태그명은 공장 안에서 고유하다(RHDS·VRDS 는 자료에서 겹치던 `TI-B-3101` 등에 설비 종류 문자를 넣어 `TI-B-P3101`·`TI-B-C3101`·`TI-B-F3101` 로 바꿨다).
+설정 파일에서 태그를 가리키는 문자열(`correlations.source/target`, 시나리오 `related[].tag_id`)은 `EQUIP/TAG`(예: `P-3101/TI-B-P3101`)이거나,
 공장 안에서 유일한 태그명이면 그냥 `TAG` 다. 겹치는 태그명을 그냥 적으면 어느 설비들에 있는지 알려 주며 멈춘다.
 
 ### 한계값
@@ -146,13 +146,13 @@ limits: { alarm_lo: 115, alarm_hi: 140 }                 # 양쪽 (HOU)
 events:
   - event_id: EV-RHDS-001
     equip_id: P-3101            # 설비. tag_id 가 공장 안에서 유일하면 생략할 수 있다
-    tag_id: VI-A-3101           # 없으면 설비의 모든 태그에 적용
+    tag_id: VI-A-P3101          # 없으면 설비의 모든 태그에 적용
     pattern: swell              # ramp / step / spike / oscillation / swell / freeze / quality / gap
     start: 2026-11-01T17:46:40+09:00
     duration: 40m               # 90s / 30m / 12h / 5d (단위 하나)
     repeat_every: 7d            # (선택) 이 간격으로 반복. recovered_at 과 함께 쓸 수 없다
     magnitude: 1.5              # 값 패턴의 편차 크기 (태그 단위)
-    related: [{ equip_id: P-3101, tag_id: PI-S-3101, ratio: -0.667 }]   # 함께 움직일 태그와 배율 (equip_id 생략 시 이벤트 설비에서 먼저 찾는다)
+    related: [{ equip_id: P-3101, tag_id: PI-S-P3101, ratio: -0.667 }]  # 함께 움직일 태그와 배율 (equip_id 생략 시 이벤트 설비에서 먼저 찾는다)
     quality: Bad                # quality 패턴일 때 (Bad / ScanOff / Uncertain)
     spread_to_driven: 0.6       # driven_by 로 이어진 피구동 설비 진동 태그에 번지는 비율
     failure_id: FL-DEV-001      # (선택) 있으면 failure_history 에 적재
@@ -191,7 +191,7 @@ Unit 별로 프로세스를 나눠도 같은 값이 나오고, 같은 시드로 
   "batch_id": "b-20261109-172400-SIM-RHDS-0001",
   "sent_at": "2026-11-09T17:24:00+09:00",
   "samples": [
-    { "equip_id": "P-3101", "tag_id": "TI-B-3101", "ts": "2026-11-09T17:23:50+09:00", "value": 63.4, "quality": "Good" }
+    { "equip_id": "P-3101", "tag_id": "TI-B-P3101", "ts": "2026-11-09T17:23:50+09:00", "value": 63.4, "quality": "Good" }
   ]
 }
 ```

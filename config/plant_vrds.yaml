@@ -1,13 +1,13 @@
 # 구성안: VRDS (감압 잔사유 수첨탈황) (PL-VRDS) — 다중 공장 설계 docs/superpowers/specs/2026-11-09-multi-plant-design.md
 # - 출처: RHDS_VRDS_v3/data/VRDS_*.xlsx 의 `설비 설명`(계층)·`설비 태그`(태그명·설명·단위·정상 기준·경고/알람/정지 상·하한·근거) 시트. 마스터 값은 그대로.
-# - 태그명은 같은 설비 안에서만 고유하다 (복합키 (equip_id, tag_id)). 한계값·정상 기준·근거는 자료 그대로이며 빈 칸은 적지 않았다.
+# - 태그명은 자료의 이름에 설비 종류 문자를 넣어 공장 안에서 고유하게 바꿨다 (P-4101 의 TI-B-4101 → TI-B-P4101). 키는 그대로 (equip_id, tag_id). 한계값·정상 기준·근거는 자료 그대로이며 빈 칸은 적지 않았다.
 # - normal.base 는 데이터 첫 6시간 Good·Uncertain 평균, noise_sd 는 첫 1시간을 추세 제거한 표준편차의 0.9배, decimals 는 데이터의 소수 자릿수.
 # - 온도 10초, 나머지 1초. 신호 모델은 rfcc. seed_key 는 공장 접두어를 붙여 다른 공장과 겹치지 않는다.
 
 plant:
   plant_id: PL-VRDS
   name: "VRDS (감압 잔사유 수첨탈황)"
-  config_version: 1
+  config_version: 2
   signal_model: rfcc
   unit_groups:
     - id: UG-VRDS-01
@@ -67,7 +67,7 @@ equipment:
     unit_id: UNIT-VRDS-01
     seed_key: vrds-e01
     tags:
-      - { tag_id: VI-A-4101,
+      - { tag_id: VI-A-P4101,
           signal: vibration,
           unit: "mm/s RMS",
           description: "구동측 수평 케이싱 진동",
@@ -77,7 +77,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r001,
           normal: { base: 1.653, noise_sd: 0.040222 } }
-      - { tag_id: TI-B-4101,
+      - { tag_id: TI-B-P4101,
           signal: bearing_temp,
           unit: "DEG C",
           description: "구동측 베어링 온도",
@@ -87,7 +87,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r002,
           normal: { base: 63.731, noise_sd: 0.094124 } }
-      - { tag_id: PI-S-4101,
+      - { tag_id: PI-S-P4101,
           signal: suction_pressure,
           unit: "bar(g)",
           description: "흡입 압력",
@@ -97,7 +97,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r003,
           normal: { base: 5.198, noise_sd: 0.016354 } }
-      - { tag_id: PI-D-4101,
+      - { tag_id: PI-D-P4101,
           signal: discharge_pressure,
           unit: "bar(g)",
           description: "토출 압력",
@@ -107,7 +107,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r004,
           normal: { base: 164.448, noise_sd: 0.123008 } }
-      - { tag_id: FI-4101,
+      - { tag_id: FI-P4101,
           signal: flow,
           unit: "m3/h",
           description: "원료 유량",
@@ -117,7 +117,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r005,
           normal: { base: 186.886, noise_sd: 1.109013 } }
-      - { tag_id: II-4101,
+      - { tag_id: II-P4101,
           signal: current,
           unit: "A",
           description: "모터 전류",
@@ -134,7 +134,7 @@ equipment:
     unit_id: UNIT-VRDS-02
     seed_key: vrds-e02
     tags:
-      - { tag_id: VI-A-4102,
+      - { tag_id: VI-A-C4102,
           signal: vibration,
           unit: "mm/s RMS",
           description: "프레임 케이싱 진동",
@@ -144,7 +144,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r007,
           normal: { base: 2.304, noise_sd: 0.05946 } }
-      - { tag_id: TI-B-4102,
+      - { tag_id: TI-B-C4102,
           signal: bearing_temp,
           unit: "DEG C",
           description: "프레임 베어링 온도",
@@ -154,7 +154,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r008,
           normal: { base: 61.726, noise_sd: 0.097427 } }
-      - { tag_id: PI-S-4102,
+      - { tag_id: PI-S-C4102,
           signal: suction_pressure,
           unit: "bar(g)",
           description: "첫 단 흡입 압력",
@@ -164,7 +164,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r009,
           normal: { base: 24.987, noise_sd: 0.032106 } }
-      - { tag_id: PI-D-4102,
+      - { tag_id: PI-D-C4102,
           signal: discharge_pressure,
           unit: "bar(g)",
           description: "최종 단 토출 압력",
@@ -174,7 +174,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r010,
           normal: { base: 167.633, noise_sd: 0.139553 } }
-      - { tag_id: TI-S-4102,
+      - { tag_id: TI-S-C4102,
           signal: suction_temp,
           unit: "DEG C",
           description: "첫 단 흡입 가스 온도",
@@ -184,7 +184,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r011,
           normal: { base: 36.633, noise_sd: 0.074902 } }
-      - { tag_id: TI-D-4102,
+      - { tag_id: TI-D-C4102,
           signal: discharge_temp,
           unit: "DEG C",
           description: "최종 단 토출 가스 온도",
@@ -194,7 +194,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r012,
           normal: { base: 117.957, noise_sd: 0.206737 } }
-      - { tag_id: FI-4102,
+      - { tag_id: FI-C4102,
           signal: flow,
           unit: "Nm3/h",
           description: "보충 수소 표준 유량",
@@ -204,7 +204,7 @@ equipment:
           decimals: 0,
           seed_key: vrds-r013,
           normal: { base: 10678.864, noise_sd: 65.163711 } }
-      - { tag_id: SI-4102,
+      - { tag_id: SI-C4102,
           signal: speed,
           unit: "rpm",
           description: "크랭크축 회전속도",
@@ -221,7 +221,7 @@ equipment:
     unit_id: UNIT-VRDS-03
     seed_key: vrds-e03
     tags:
-      - { tag_id: XI-X-4101,
+      - { tag_id: XI-X-C4101,
           signal: shaft_vibration,
           unit: "um pk-pk",
           description: "구동측 X방향 축 상대 진동",
@@ -231,7 +231,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r015,
           normal: { base: 33.098, noise_sd: 0.729773 } }
-      - { tag_id: TI-B-4101,
+      - { tag_id: TI-B-C4101,
           signal: bearing_temp,
           unit: "DEG C",
           description: "저널 베어링 금속 온도",
@@ -241,7 +241,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r016,
           normal: { base: 76.729, noise_sd: 0.087659 } }
-      - { tag_id: ZI-4101,
+      - { tag_id: ZI-C4101,
           signal: axial_position,
           unit: "mm",
           description: "축방향 위치·기준점 대비",
@@ -251,7 +251,7 @@ equipment:
           decimals: 3,
           seed_key: vrds-r017,
           normal: { base: 0.05, noise_sd: 0.00134 } }
-      - { tag_id: PI-S-4101,
+      - { tag_id: PI-S-C4101,
           signal: suction_pressure,
           unit: "bar(g)",
           description: "흡입 압력",
@@ -261,7 +261,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r018,
           normal: { base: 148.313, noise_sd: 0.082757 } }
-      - { tag_id: PI-D-4101,
+      - { tag_id: PI-D-C4101,
           signal: discharge_pressure,
           unit: "bar(g)",
           description: "토출 압력",
@@ -271,7 +271,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r019,
           normal: { base: 162.32, noise_sd: 0.109358 } }
-      - { tag_id: TI-S-4101,
+      - { tag_id: TI-S-C4101,
           signal: suction_temp,
           unit: "DEG C",
           description: "흡입 가스 온도",
@@ -281,7 +281,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r020,
           normal: { base: 45.639, noise_sd: 0.059331 } }
-      - { tag_id: TI-D-4101,
+      - { tag_id: TI-D-C4101,
           signal: discharge_temp,
           unit: "DEG C",
           description: "토출 가스 온도",
@@ -291,7 +291,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r021,
           normal: { base: 67.957, noise_sd: 0.204777 } }
-      - { tag_id: FI-4101,
+      - { tag_id: FI-C4101,
           signal: flow,
           unit: "Nm3/h",
           description: "순환가스 표준 유량",
@@ -301,7 +301,7 @@ equipment:
           decimals: 0,
           seed_key: vrds-r022,
           normal: { base: 133481.274, noise_sd: 769.250663 } }
-      - { tag_id: SI-4101,
+      - { tag_id: SI-C4101,
           signal: speed,
           unit: "rpm",
           description: "압축기 회전속도",
@@ -311,7 +311,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r023,
           normal: { base: 9215.556, noise_sd: 7.893197 } }
-      - { tag_id: PI-LO-4101,
+      - { tag_id: PI-LO-C4101,
           signal: oil_pressure,
           unit: "bar(g)",
           description: "윤활유 헤더 압력",
@@ -321,7 +321,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r024,
           normal: { base: 2.7, noise_sd: 0.0066 } }
-      - { tag_id: TI-LO-4101,
+      - { tag_id: TI-LO-C4101,
           signal: oil_temp,
           unit: "DEG C",
           description: "윤활유 공급 온도",
@@ -338,7 +338,7 @@ equipment:
     unit_id: UNIT-VRDS-04
     seed_key: vrds-e04
     tags:
-      - { tag_id: VI-A-4101,
+      - { tag_id: VI-A-F4101,
           signal: vibration,
           unit: "mm/s RMS",
           description: "팬 구동측 케이싱 진동",
@@ -348,7 +348,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r026,
           normal: { base: 1.902, noise_sd: 0.05006 } }
-      - { tag_id: TI-B-4101,
+      - { tag_id: TI-B-F4101,
           signal: bearing_temp,
           unit: "DEG C",
           description: "팬 구동측 베어링 온도",
@@ -358,7 +358,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r027,
           normal: { base: 54.732, noise_sd: 0.105882 } }
-      - { tag_id: SI-4101,
+      - { tag_id: SI-F4101,
           signal: speed,
           unit: "rpm",
           description: "팬 회전속도",
@@ -368,7 +368,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r028,
           normal: { base: 1465.479, noise_sd: 2.96248 } }
-      - { tag_id: II-4101,
+      - { tag_id: II-F4101,
           signal: current,
           unit: "A",
           description: "모터 전류",
@@ -378,7 +378,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r029,
           normal: { base: 58.658, noise_sd: 0.359111 } }
-      - { tag_id: FI-4101,
+      - { tag_id: FI-F4101,
           signal: flow,
           unit: "m3/h",
           description: "연소공기 실제 체적 유량",
@@ -388,7 +388,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r030,
           normal: { base: 42399.85, noise_sd: 132.624119 } }
-      - { tag_id: PDI-4101,
+      - { tag_id: PDI-F4101,
           signal: differential_pressure,
           unit: "Pa",
           description: "팬 입출구 차압",
@@ -405,7 +405,7 @@ equipment:
     unit_id: UNIT-VRDS-05
     seed_key: vrds-e05
     tags:
-      - { tag_id: VI-A-4102,
+      - { tag_id: VI-A-P4102,
           signal: vibration,
           unit: "mm/s RMS",
           description: "구동측 케이싱 진동",
@@ -415,7 +415,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r032,
           normal: { base: 1.854, noise_sd: 0.043631 } }
-      - { tag_id: TI-B-4102,
+      - { tag_id: TI-B-P4102,
           signal: bearing_temp,
           unit: "DEG C",
           description: "구동측 베어링 온도",
@@ -425,7 +425,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r033,
           normal: { base: 72.731, noise_sd: 0.096212 } }
-      - { tag_id: TI-F-4102,
+      - { tag_id: TI-F-P4102,
           signal: process_temp,
           unit: "DEG C",
           description: "흡입 유체 온도",
@@ -435,7 +435,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r034,
           normal: { base: 294.991, noise_sd: 0.169734 } }
-      - { tag_id: PI-S-4102,
+      - { tag_id: PI-S-P4102,
           signal: suction_pressure,
           unit: "bar(g)",
           description: "흡입 압력",
@@ -445,7 +445,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r035,
           normal: { base: 4.597, noise_sd: 0.016756 } }
-      - { tag_id: PI-D-4102,
+      - { tag_id: PI-D-P4102,
           signal: discharge_pressure,
           unit: "bar(g)",
           description: "토출 압력",
@@ -455,7 +455,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r036,
           normal: { base: 20.158, noise_sd: 0.036003 } }
-      - { tag_id: FI-4102,
+      - { tag_id: FI-P4102,
           signal: flow,
           unit: "m3/h",
           description: "잔사유 유량",
@@ -465,7 +465,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r037,
           normal: { base: 164.649, noise_sd: 0.975056 } }
-      - { tag_id: II-4102,
+      - { tag_id: II-P4102,
           signal: current,
           unit: "A",
           description: "모터 전류",
@@ -482,7 +482,7 @@ equipment:
     unit_id: UNIT-VRDS-06
     seed_key: vrds-e06
     tags:
-      - { tag_id: VI-A-4103,
+      - { tag_id: VI-A-P4103,
           signal: vibration,
           unit: "mm/s RMS",
           description: "구동측 케이싱 진동",
@@ -492,7 +492,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r039,
           normal: { base: 1.355, noise_sd: 0.03702 } }
-      - { tag_id: TI-B-4103,
+      - { tag_id: TI-B-P4103,
           signal: bearing_temp,
           unit: "DEG C",
           description: "구동측 베어링 온도",
@@ -502,7 +502,7 @@ equipment:
           decimals: 1,
           seed_key: vrds-r040,
           normal: { base: 57.732, noise_sd: 0.102482 } }
-      - { tag_id: PI-S-4103,
+      - { tag_id: PI-S-P4103,
           signal: suction_pressure,
           unit: "bar(g)",
           description: "흡입 압력",
@@ -512,7 +512,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r041,
           normal: { base: 3.098, noise_sd: 0.011222 } }
-      - { tag_id: PI-D-4103,
+      - { tag_id: PI-D-P4103,
           signal: discharge_pressure,
           unit: "bar(g)",
           description: "토출 압력",
@@ -522,7 +522,7 @@ equipment:
           decimals: 2,
           seed_key: vrds-r042,
           normal: { base: 11.671, noise_sd: 0.022339 } }
-      - { tag_id: FI-4103,
+      - { tag_id: FI-P4103,
           signal: flow,
           unit: "m3/h",
           description: "환류액 유량",
