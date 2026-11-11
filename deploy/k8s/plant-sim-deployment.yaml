@@ -6,6 +6,7 @@ metadata:
   labels: { app: plant-sim }
 spec:
   replicas: 1
+  revisionHistoryLimit: 2          # 롤백용으로 남기는 예전 ReplicaSet 수. 빌드마다 태그가 바뀌므로 작게 둔다
   strategy: { type: Recreate }
   selector:
     matchLabels: { app: plant-sim }
