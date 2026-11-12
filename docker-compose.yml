@@ -6,6 +6,7 @@
 # 바인드 마운트(./data)를 쓰지 않는 이유: macOS Docker Desktop 의 바인드 마운트 위에서 SQLite WAL 이 손상된 적이 있다.
 # 파일을 꺼내려면 docker compose cp plant-sim:/app/data/cdu.db ./data/ 처럼 복사한다.
 # SIM_TIME_MODE 기본 backfill: 각 공장이 runtime 의 backfill_days(1일)를 채운 뒤 실시간으로 이어진다.
+# DB v3: 이전 버전의 볼륨이 있으면 열리지 않는다. docker compose down -v 로 plant-data 를 지우고 다시 띄운다.
 services:
   plant-sim:
     build: .
@@ -13,7 +14,8 @@ services:
     ports: ["8000:8000"]
     environment:
       ROOT_PATH: ${ROOT_PATH:-}
-      INGEST_TOKEN: ${INGEST_TOKEN:-}
+      INGEST_TOKEN: ${INGEST_TOKEN:-}                                   # 주입·멈춤(/anomalies)·외부 /ingest 에 필요. 없으면 403
+      PERSISTENT_FAULT_INTERVAL_MIN: ${PERSISTENT_FAULT_INTERVAL_MIN:-}   # 비우면 runtime yaml 값, 0 이면 지속 고장 끔
     volumes:
       - plant-data:/app/data
       - ./config:/app/config:ro

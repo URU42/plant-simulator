@@ -79,7 +79,10 @@ macOS Docker Desktop 의 바인드 마운트(`./data`) 위에서는 SQLite WAL �
 ```bash
 docker compose up --build -d                    # 통합 실행 1 컨테이너
 docker compose --profile split up --build -d    # 분리 실행 6 컨테이너
+INGEST_TOKEN=<긴 문자열> PERSISTENT_FAULT_INTERVAL_MIN=0 docker compose up -d   # 주입·멈춤을 쓰려면 토큰, 지속 고장을 끄려면 0
 ```
+
+**DB v3 로 올릴 때(이전 버전의 볼륨이 있으면)**: 이전 DB 파일은 열리지 않으므로 볼륨을 지우고 다시 띄운다. `docker compose down -v` (또는 `docker volume rm <프로젝트>_plant-data`).
 
 확인:
 
@@ -104,8 +107,8 @@ curl -N localhost:8000/rfcc/stream
 | 수집 서버 | `--time-mode`, `--backfill-days` | | 통합 실행에서 각 공장 runtime 값을 덮어쓴다 |
 | 수집 서버 | | `ROOT_PATH` | 경로 접두어(예: `/plant-sim`). 루트 링크·리다이렉트·`/docs` 가 붙인다 |
 | 수집 서버 | | `CORS_ORIGINS` | 쉼표 구분. 있으면 GET 에 CORS 헤더 |
-| 수집 서버 | | `INGEST_TOKEN` | 있으면 외부 `POST /ingest` 는 헤더 `X-Ingest-Token` 필수. 통합 실행인데 없으면 외부 `/ingest` 는 닫힌다(403). 통합 실행의 생성기는 거치지 않는다. 시뮬레이터 `HttpSender` 도 같은 변수를 읽어 헤더를 붙인다 |
-| 수집 서버 | | `PERSISTENT_FAULT_INTERVAL_MIN` | 있으면 모든 공장의 지속 고장 간격(분)을 덮어쓴다. 0 이면 끈다 |
+| 수집 서버 | | `INGEST_TOKEN` | 있으면 외부 `POST /ingest` 와 `POST /anomalies…`(주입·멈춤)는 헤더 `X-Ingest-Token` 필수. 통합 실행인데 없으면 둘 다 닫힌다(403). 통합 실행의 생성기는 거치지 않는다. 시뮬레이터 `HttpSender` 도 같은 변수를 읽어 헤더를 붙인다 |
+| 수집 서버 | | `PERSISTENT_FAULT_INTERVAL_MIN` | 있으면 모든 공장의 지속 고장 간격(분)을 덮어쓴다. 0 이면 끈다. 0 이상의 수가 아니면 시작하지 않는다 |
 | 시뮬레이터 | `--plant` | `PLANT_CONFIG` | `config/plant_rhds.yaml` |
 | 시뮬레이터 | `--runtime` | `RUNTIME_CONFIG` | `config/runtime_rhds.yaml` |
 | 시뮬레이터 | `--time-mode` | | `runtime.yaml` 의 `time_mode` |
@@ -155,13 +158,18 @@ RFCC 는 `limits` 를 μ ± 3σ 로 다시 계산해 두었다(`limit_basis`). `
 | 요청 | 동작 |
 | --- | --- |
 | `POST /{공장}/anomalies` `{"equip_id","rule"}` | 시뮬레이터 시각 기준 `ceil(sim_now)+3`초 첫 표본부터 사건 시작. 201 + `{event_id, equip_id, rule, start_at}` |
-| `POST /{공장}/anomalies/{equip_id}/stop` | 그 설비의 살아 있는 사건(주입·지속 고장·자동 이상)을 `ceil(sim_now)+3`초에 끝내고 회복. 사건이 없으면 404 |
-| `POST /{공장}/anomalies/stop` | 공장의 살아 있는 사건 전부를 같은 방식으로 끝낸다. 200 + `{"stopped": [event_id…]}`. 앞으로의 자동 이상·지속 고장 일정은 이어진다 |
+| `POST /{공장}/anomalies/{equip_id}/stop` | 그 설비의 살아 있는 사건(주입·지속 고장·자동 이상)을 `ceil(sim_now)+3`초에 끝내고 회복. 200 + `{"stopped": [event_id…], "stop_requested_at"}`. 사건이 없으면 404 |
+| `POST /{공장}/anomalies/stop` | 공장의 살아 있는 사건 전부를 같은 방식으로 끝낸다. 200 + `{"stopped": [event_id…], "stop_requested_at"}`(없으면 빈 목록). 앞으로의 자동 이상·지속 고장 일정은 이어진다 |
 | `GET /{공장}/anomalies?equip_id=&from=&to=` | 정답지: `event_id`, `origin`, `equip_id`, `rule`, `kind`, `cause`, `action`, `response_tags`, `start_at`, `stop_requested_at`, `end_at` |
 
-`POST` 는 `/ingest` 와 같은 토큰 규칙(`INGEST_TOKEN` 이 있으면 `X-Ingest-Token`, 통합 실행인데 토큰이 없으면 403)이다. 그 밖의 오류: 분리 실행 409(`embedded only`), 백필 중이거나 `sim_now` 를 모를 때 503(`/health` 의 `live` 가 true 가 되면 가능),
+생성기가 이미 `ceil(sim_now)+3` 보다 뒤까지 표본을 만들었으면 그 끝으로 미룬다(이미 만든 표본은 바뀌지 않는다). 응답의 `start_at`·`stop_requested_at` 이 실제 시각이다.
+`POST` 는 `/ingest` 와 같은 토큰 규칙(`INGEST_TOKEN` 이 있으면 `X-Ingest-Token`, 통합 실행인데 토큰이 없으면 403)이다. 그 밖의 오류: 분리 실행 409(`embedded only`), 생성기가 죽었으면 503(`simulator stopped…`),
+백필 중이거나 밀린 구간을 아직 따라잡지 못했거나 `sim_now` 를 모를 때 503(`backfilling`, `/health` 의 `live` 가 true 가 되면 가능),
 모르는 설비 404, 그 설비에 주입·지속 고장이 살아 있어 주입이 겹치면 409, 규칙이 1~8 이 아니면 422. 같은 설비에 자동 이상이 진행 중이면 주입이 그 사건을 끝내고 대신한다.
-정답(원인·분류·조치)은 `/alarms` 에 싣지 않는다. 심각도도 없다.
+정답(원인·분류·조치)은 `/alarms` 에 싣지 않는다. 심각도도 없다. 시작 시각에 바로 멈춘 사건(길이 0)은 정답지에 없다.
+
+지속 고장은 멈출 때까지 쌓인다. `persistent_fault_interval_min` 마다 놀고 있는 설비에 하나씩 열리므로 설비가 N 개인 공장은 N×간격 뒤 모든 설비가 고장 상태가 되고,
+그때부터 주입은 409 이며 자동 이상도 나오지 않는다. 시험 사례마다 먼저 `POST /{공장}/anomalies/stop` 으로 공장을 비운 뒤 주입한다.
 
 ## 신호 생성
 
@@ -171,7 +179,7 @@ RFCC 는 `limits` 를 μ ± 3σ 로 다시 계산해 두었다(`limit_basis`). `
   뽑은 z 가 Nelson 규칙을 위반하면 최대 100번 다시 뽑아(억제 표집) 정상 구간을 거의 깨끗하게 둔다. 값 = `round(μ + σ·z, decimals)`.
   `speed` 태그는 이상에서 바뀌지 않고, RFCC 의 `driven_by` 짝은 같은 값을 낸다. 하루 주기·드리프트·공정 부하는 없다.
 - 순차 생성이라 태그별 최근 14개 z 가 상태다. 백필 → 실시간은 같은 상태로 이어지고, 재시작 때는 `ts_raw` 에서 마지막 14개 값을 읽어 상태를 되살린다.
-- 이상 사건은 규칙별 z 템플릿(data-v3 `signal_engine.cpp`)을 대표 태그와 연관 태그(진동·온도·전류·압력·유량…, 지연·방향·회복 시간 포함)에 덮어쓴다. 규칙 3 은 끝을 모르는 사건이라 20 표본 주기의 톱니로 만든다.
+- 이상 사건은 규칙별 z 템플릿(data-v3 `signal_engine.cpp`)을 대표 태그와 연관 태그(진동·온도·전류·압력·유량…, 지연·방향·회복 시간 포함)에 덮어쓴다. 규칙 3 은 끝을 모르는 사건이라 16 표본 주기의 톱니로 만든다(주기마다 알람이 열고 닫히지 않도록 15 표본보다 짧은 간격으로 위반이 이어진다).
   끝나면 태그마다 회복 시간 동안 z 를 0 쪽으로 줄이고 정상 표집으로 돌아간다.
 - 판정은 생성기(`status` 채움)와 수집 서버가 같은 `common/nelson.py` 로 한다.
 
@@ -209,12 +217,14 @@ RFCC 는 `limits` 를 μ ± 3σ 로 다시 계산해 두었다(`limit_basis`). `
 | `GET /{공장}/current` | 모든 태그의 현재값과 `status` |
 | `GET /{공장}/equipment/{equip_id}/tags/{tag_id}/current` | 태그 현재값. `status` 는 `Good` / `Bad`, 전송 주기와 태그 주기 중 긴 쪽의 3배 동안 안 들어오면 `NoData` |
 | `GET /{공장}/timeseries?equip_id=&tag_id=&from=&to=&interval=1h` | 집계 시계열 (`10m` / `1h`) |
-| `GET /{공장}/alarms?equip_id=&rule=&from=&to=&open=` | Nelson 알람(`nelson_alarm`). `from`/`to` 는 구간과 겹치는 알람(5분 전에 열려 아직 열린 것도 나온다), `open=true` 는 열린 것만. 심각도·원인은 없다 |
+| `GET /{공장}/alarms?equip_id=&rule=&from=&to=&open=` | Nelson 알람(`nelson_alarm`). `from`/`to` 는 구간과 겹치는 알람(5분 전에 열려 아직 열린 것도 나온다), `open=true` 는 열린 것만. 심각도·원인은 없다. `cleared_at` 은 15 연속 미성립 표본 중 첫 표본 시각으로 거슬러 적으므로, `from` = 지난 조회 시각으로 부르면 닫힌 시각이 조회 구간보다 앞선 알람이 보일 수 있다 |
 | `POST /{공장}/anomalies` | 설비에 이상 주입 (토큰 필요, 통합 실행 전용) |
 | `POST /{공장}/anomalies/{equip_id}/stop` | 그 설비의 이상 멈춤 |
 | `POST /{공장}/anomalies/stop` | 공장의 이상 전부 멈춤 |
 | `GET /{공장}/anomalies?equip_id=&from=&to=` | 정답지 (원인·분류·조치·반응 태그) |
 | `GET /{공장}/stream` | SSE 로 새 값 실시간 전달 |
+
+`from`/`to` 는 ISO 8601 이다. 쿼리 문자열의 `+` 는 공백이 되므로 `Z`(UTC) 를 쓰거나 오프셋을 `%2B09:00` 으로 인코딩한다. 읽지 못하면 400.
 
 ## DB (`data/{공장}.db`)
 
@@ -245,7 +255,7 @@ RFCC 는 `limits` 를 μ ± 3σ 로 다시 계산해 두었다(`limit_basis`). `
 | 스토리지 | PVC `plant-sim-data` 10Gi(gp3, RWO, 매니페스트에 포함). 다섯 공장 SQLite: 원시값은 하루 보관으로 약 3.5 GB 에서 고정, 집계는 1년에 약 2 GB 증가. 늘릴 수는 있지만 줄일 수는 없다 |
 | 외부 | Ingress `https://u4-2.skala-us.com/plant-sim/…` (접두어 제거, SSE 용 버퍼링 off·타임아웃 3600s). 조회·화면·SSE |
 | 내부 | `http://plant-sim.u4-2.svc.cluster.local:8000/{공장}/…` (접두어 없음, CORS 불필요) |
-| 쓰기 보호 | 통합 실행에서 외부 `POST /ingest` 는 기본적으로 닫혀 있다(403). 열려면 Secret `plant-sim` 의 `ingest-token` 을 만들고 보내는 쪽이 `X-Ingest-Token` 을 붙인다 |
+| 쓰기 보호 | 통합 실행에서 외부 `POST /ingest` 와 이상 주입·멈춤(`POST /{공장}/anomalies…`)은 기본적으로 닫혀 있다(403). 쓰려면 Secret `plant-sim` 의 `ingest-token` 을 만들고 부르는 쪽이 `X-Ingest-Token` 을 붙인다 |
 | 프로브 | startupProbe 30초×60회(첫 백필 30분까지), readiness 10초, liveness 30초. 값 계산·저장은 워커 스레드에서 돌고 조회 핸들러는 스레드풀에서 돌아 백필 중에도 응답한다. 생성기 태스크가 죽으면 `/health` 가 503 이 되어 liveness 가 다시 띄운다 |
 
 이미지 빌드·push·배포는 `Jenkinsfile` 로 자동화돼 있다: `rootless-docker` 에이전트에서 테스트(uv 이미지 안) → 빌드(`test-<빌드번호>-<커밋8자리>`) → Harbor push(`harbor-jenkins-robot`) → GitOps 저장소 `URU42/being-gitops` 의 `k8s/plant-sim/kustomization.yaml` 이미지 태그 갱신(`gitops-github-pat`).
@@ -255,7 +265,7 @@ RFCC 는 `limits` 를 μ ± 3σ 로 다시 계산해 두었다(`limit_basis`). `
 # 1. 이미지 (PC 에서 빌드·push)
 docker build --platform linux/amd64 -t harbor.uru42.space/uru42/plant-simulator:<TAG> . && docker push harbor.uru42.space/uru42/plant-simulator:<TAG>
 # 2. kustomization.yaml 의 images.newTag 를 그 태그로 바꾼다 (주소는 harbor.uru42.space/uru42 로 적혀 있다)
-# 3. Secret (선택, 외부에서 /ingest 로 쓸 때만): kubectl -n u4-2 create secret generic plant-sim --from-literal=ingest-token='<긴 문자열>'
+# 3. Secret (이상 주입·멈춤 API 나 외부 /ingest 를 쓸 때 필수): kubectl -n u4-2 create secret generic plant-sim --from-literal=ingest-token='<긴 문자열>'
 # 4. 적용·확인
 kubectl apply -k deploy/k8s -n u4-2
 kubectl -n u4-2 rollout status deploy/plant-sim

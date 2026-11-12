@@ -37,7 +37,7 @@ spec:
           env:
             - { name: ROOT_PATH, value: /plant-sim }          # Ingress 접두어. 루트 링크·리다이렉트·/docs 가 붙인다
             - { name: WITH_SIMULATORS, value: "1" }
-            - name: INGEST_TOKEN                               # 있으면 외부 /ingest 는 X-Ingest-Token 필수
+            - name: INGEST_TOKEN                               # 있으면 외부 /ingest·/anomalies(주입·멈춤)는 X-Ingest-Token 필수
               valueFrom:
                 secretKeyRef: { name: plant-sim, key: ingest-token, optional: true }
             - name: CORS_ORIGINS                               # 브라우저 frontend 가 다른 origin 이면 적는다
