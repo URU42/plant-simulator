@@ -27,10 +27,14 @@ BATCH = 256                 # 난수를 한 번에 뽑는 개수
 DAY_SEC = 86400
 KST_OFFSET = 9 * 3600
 EPOCH_ORDINAL = date(1970, 1, 1).toordinal()
+EXTERNAL_LOOKBACK_SEC = 3600 + MAX_RECOVERY_SEC   # 외부 사건을 되돌아보는 길이 (가장 긴 자동 이상 < 1시간 + 회복)
 
 
 class EventSource(Protocol):
-    """생성기 밖에서 오는 사건(주입·지속 고장)과 멈춤, 자동 이상이 열렸다는 알림을 받는 쪽."""
+    """생성기 밖에서 오는 사건(주입·지속 고장)과 멈춤, 자동 이상이 열렸다는 알림을 받는 쪽.
+    external 은 [start, end) 와 겹치는 외부 사건을 모두 돌려준다(end=None 은 열린 사건, 멈춤은 stops 로 따로 알린다).
+    opened 는 재시작·restore 뒤 같은 event_id 로 다시 불릴 수 있으므로 event_id 기준으로 멱등이어야 한다.
+    """
 
     def external(self, start: float, end: float) -> list[AnomalyEvent]: ...
     def stops(self) -> dict[str, float]: ...
@@ -166,7 +170,8 @@ class NelsonGenerator:
 
     def _windows(self, s0: int, s1: int, epochs: range, positions: dict[int, list[int]]):
         """태그별 반응 구간 [(시작, 끝, 사건, 반응)]. 자동 이상이 처음 표본에 걸리면 source.opened 를 부른다."""
-        events = list(self.source.external(s0, s1))
+        # 자동 이상의 건너뜀·자르기와 끝난 고장의 회복이 창마다 같게 나오도록 멀리 되돌아가 묻는다
+        events = list(self.source.external(s0 - EXTERNAL_LOOKBACK_SEC, s1))
         if self.spontaneous:
             for day in range(_kst_day(s0 - MAX_RECOVERY_SEC), _kst_day(s1 - 1) + 1):
                 for e in self.equipment:

@@ -6,6 +6,7 @@ from common.nelson import NelsonState, zscore
 from common.sim_clock import KST
 from simulator.anomaly import AnomalyEvent
 from simulator.nelson_model import NelsonGenerator, NoEvents
+from simulator.schedule import daily_events
 
 T0 = datetime(2026, 11, 12, 0, 0, tzinfo=KST)
 
@@ -80,3 +81,23 @@ def test_rfcc_driven_speed_equal(config_dir):
     s = NelsonGenerator(plant, rt, spontaneous=False).generate(T0, T0 + timedelta(minutes=2))
     speed = lambda eq: [x.value for x in s if x.equip_id == eq and plant.tag_by_key()[(eq, x.tag_id)].signal == "speed"]
     assert speed("B-1201") == speed("E-1202") and speed("C-1401") == speed("T-1401")
+
+class Overlapping(Fixed):
+    """요청한 [start, end) 와 겹치는 사건만 돌려주는 소스 (계약의 최소 구현)."""
+    def external(self, start, end):
+        return [e for e in self.events if e.start < end and (e.end is None or e.end > start)]
+
+def test_cut_spontaneous_stays_cut_across_small_windows(rhds):
+    plant, rt = rhds
+    rt = rt.model_copy(update={"units": [plant.equipment_by_id()["P-3101"].unit_id]})
+    sp = daily_events(rt.seed, "P-3101", T0.date())[0]      # 562초 규칙 1 사건
+    S = sp.start
+    fault = AnomalyEvent("I1", "injected", "P-3101", 6, S + 50, S + 150)
+    a, b = datetime.fromtimestamp(S - 10, KST), datetime.fromtimestamp(S + 600, KST)
+    whole = NelsonGenerator(plant, rt, Overlapping([fault])).generate(a, b)
+    g, split = NelsonGenerator(plant, rt, Overlapping([fault])), []
+    for k in range(610):
+        split += g.generate(a + timedelta(seconds=k), a + timedelta(seconds=k + 1))
+    assert split == whole
+    assert not [x for x in split if x.equip_id == "P-3101" and x.quality == "Bad"
+                and S + 150 + 60 + 150 <= x.ts.timestamp() < sp.end]
