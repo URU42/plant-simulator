@@ -94,3 +94,35 @@ def test_reopens_after_close_in_one_batch(rhds_client):
     assert [(a["occurred_at"][:19], a["cleared_at"][:19], a["direction"]) for a in r] == [
         ("2026-11-12T00:00:49", "2026-11-12T00:00:50", "lo"), ("2026-11-12T00:00:32", "2026-11-12T00:00:33", "lo")]
     assert r[1]["value_at_occurrence"] == round(MU - SIG * 3.5, 4)
+
+
+def rule3_alarm_rows(config_dir, tmp_path) -> dict[tuple[str, int], int]:
+    """RHDS P-3101 에 12분짜리 규칙 3 사건 하나를 만들어 수집 서버 판정에 넣고, (태그, 규칙)별 nelson_alarm 행 수를 센다."""
+    from collector.alarms import AlarmTracker
+    from collector.seed_master import seed_master
+    from collector.storage import Storage
+    from common.config_models import load_plant, load_runtime
+    from common.timefmt import to_db
+    from simulator.anomaly import AnomalyEvent
+    from simulator.nelson_model import NelsonGenerator, NoEvents
+
+    class One(NoEvents):
+        def external(self, start, end):
+            return [event]
+
+    plant, rt = load_plant(config_dir / "plant_rhds.yaml"), load_runtime(config_dir / "runtime_rhds.yaml")
+    rt = rt.model_copy(update={"units": [plant.equipment_by_id()["P-3101"].unit_id]})
+    t = T0.timestamp() + 60
+    event = AnomalyEvent("I1", "injected", "P-3101", 3, t, t + 720)
+    samples = NelsonGenerator(plant, rt, One(), spontaneous=False).generate(T0, T0 + timedelta(minutes=15))
+    st = Storage(tmp_path / "r3.db"); seed_master(st, plant)
+    AlarmTracker(st, plant).observe([(s.equip_id, s.tag_id, to_db(s.ts), s.value, s.status) for s in samples])
+    return {(r[0], r[1]): r[2] for r in st.query(
+        "SELECT tag_id, rule, COUNT(*) FROM nelson_alarm WHERE equip_id = 'P-3101' GROUP BY tag_id, rule")}
+
+
+def test_rule3_sawtooth_event_is_few_alarm_rows(config_dir, tmp_path):
+    """톱니(주기 16)의 양 끝에서 나는 규칙 5·8 위반 사이가 닫힘(15 표본)보다 짧아, 12분 사건이 태그·규칙마다 몇 행으로 묶인다."""
+    counts = rule3_alarm_rows(config_dir, tmp_path)
+    assert counts.get(("VI-A-P3101", 3), 0) >= 1                          # 대표 태그에 규칙 3 이 난다
+    assert all(n <= 2 for (_, rule), n in counts.items() if rule in (5, 8)), counts

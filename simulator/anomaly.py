@@ -1,7 +1,7 @@
 """이상 사건의 모양과 반응 태그, 분류 (data-v3 의 build_dataset.py·signal_engine.cpp 방식).
 
 사건은 설비 하나에서 규칙 하나를 일으킨다. 설비의 대표 진동 태그가 사건 규칙대로 움직이고, 규칙에 따라 다른 태그가
-시차를 두고 따라 움직인다. 모양은 z(관리 기준 μ·σ 대비 편차) 템플릿이며 규칙 3 만 주기 20 의 톱니(data-v3 와 다른 점)다.
+시차를 두고 따라 움직인다. 모양은 z(관리 기준 μ·σ 대비 편차) 템플릿이며 규칙 3 만 주기 16 의 톱니(data-v3 와 다른 점)다.
 순수 계산만 하며 입출력은 없다.
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from common.config_models import PlantConfig
 
 Origin = Literal["spontaneous", "persistent", "injected"]
 
-SAWTOOTH = 20           # 규칙 3 톱니의 주기(표본 수)
+SAWTOOTH = 16           # 규칙 3 톱니의 주기(표본 수). 극단 사이 위반 간격이 판정 묶음의 닫힘(15 표본) 안에 들도록
 MAX_RECOVERY_SEC = 60   # 반응 표의 가장 긴 회복 시간
 
 VIBRATION = ("vibration", "shaft_vibration")
