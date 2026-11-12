@@ -68,3 +68,12 @@ CREATE INDEX IF NOT EXISTS ix_nelson_alarm_cleared ON nelson_alarm (cleared_at);
 -- 수신 묶음 (중복 확인)과 배치 진행 상태
 CREATE TABLE IF NOT EXISTS ingest_batch (batch_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, received_at TEXT NOT NULL, stored INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS job_state (name TEXT PRIMARY KEY, last_bucket_end TEXT NOT NULL);
+
+-- 이상 사건 장부 (설계 2026-11-12-nelson-anomaly §4.5–4.6). 정답지 겸 생성기에 알리는 상태.
+-- origin: injected(주입) / persistent(지속 고장) / spontaneous(자동 이상). kind·cause·action 은 분류, response_tags 는 반응 태그 JSON 목록.
+-- scheduled_end_at 은 자동 이상의 정해진 끝(주입·지속 고장은 NULL), stop_requested_at 은 멈춤 시각(멈추지 않았으면 NULL).
+CREATE TABLE IF NOT EXISTS anomaly_event (
+    event_id TEXT PRIMARY KEY, origin TEXT NOT NULL, equip_id TEXT NOT NULL, rule INTEGER NOT NULL, normal_change INTEGER NOT NULL,
+    kind TEXT NOT NULL, cause TEXT NOT NULL, action TEXT NOT NULL, response_tags TEXT NOT NULL,
+    start_at TEXT NOT NULL, scheduled_end_at TEXT, stop_requested_at TEXT
+);

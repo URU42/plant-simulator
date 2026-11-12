@@ -3,6 +3,7 @@
 HTTP 대신 LocalSender 가 그 공장의 PlantContext.receive 를 부른다. 값 계산과 저장·배치 전진은 워커 스레드에서 돌고
 (이벤트 루프는 비어 있다), 백필 창은 10분이며 동시에 저장하는 공장 수를 EMBEDDED_CONCURRENCY 로 제한한다.
 그래서 첫 백필 중에도 조회 API 와 프로브가 응답한다. 재시작하면 그 공장 DB 의 태그별 최근 값으로 생성기를 되살린다.
+생성기는 그 공장의 사건 장부(ctx.book)에서 주입·지속 고장을 읽고, 실시간으로 넘어가면 ctx.set_live 로 알린다.
 """
 from __future__ import annotations
 
@@ -33,4 +34,5 @@ async def run_plant_simulator(ctx: PlantContext, entry: PlantEntry, settings: Se
         runtime = runtime.model_validate(runtime.model_dump() | overrides)
     log.info("plant %s: embedded simulator %s", entry.key, runtime.time_mode)
     sender = LocalSender(ctx.receive_local, ctx.storage.sim_now, limiter, recent_values=ctx.storage.recent_values)
-    await run_mode(ctx.plant, runtime, sender, window_sec=EMBEDDED_BACKFILL_WINDOW_SEC)
+    await run_mode(ctx.plant, runtime, sender, source=ctx.book, window_sec=EMBEDDED_BACKFILL_WINDOW_SEC,
+                   on_live=lambda t: ctx.set_live(t.timestamp()))

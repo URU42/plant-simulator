@@ -2,6 +2,7 @@
 
 실행: python -m collector.app --plants config/plants.yaml --port 8000
 라우트는 한 번만 정의하고 경로 앞의 {plant_key} 로 공장 문맥(PlantContext)을 고른다. 루트 / 는 공장 목록, /health 는 전체 상태.
+통합 실행에서는 /{공장}/anomalies 로 이상 사건을 주입·멈추고 정답지를 낸다.
 """
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import argparse
 import asyncio
 import hmac
 import logging
+import math
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -19,14 +21,15 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
+from collector.anomaly_book import Busy
 from collector.ingest import RawBatch, schema_supported, validate_samples
 from collector.plant_context import PlantContext
 from collector.plants import PlantEntry, PlantsConfig, load_plants
 from collector.settings import Settings
 from common.config_models import ConfigError
-from common.timefmt import parse_iso, to_db
+from common.timefmt import from_db, parse_iso, to_db
 
 STATIC_DIR = Path(__file__).with_name("static")     # 디버깅 화면
 log = logging.getLogger("collector")
@@ -137,6 +140,73 @@ def alarms(equip_id: str | None = None, rule: int | None = Query(default=None, g
     return ctx.storage.query_dicts(f"SELECT * FROM nelson_alarm WHERE {' AND '.join(where)} ORDER BY occurred_at DESC", params)
 
 
+# --- 이상 사건: 주입·멈춤·정답지 (Nelson 이상 설계 §4.6) ----------------------------
+START_DELAY_SEC = 3     # 주입·멈춤은 시뮬레이터 시각 기준 이만큼 뒤부터 (이미 만든 표본을 건드리지 않도록)
+
+
+class InjectBody(BaseModel):
+    equip_id: str
+    rule: int = Field(ge=1, le=8)
+
+
+def require_live(request: Request, ctx: PlantContext) -> float:
+    """사건 쓰기(POST) 확인: 토큰 → 통합 실행(409) → 실시간(503). 사건 시각(epoch 초) = ceil(시뮬레이터 현재 시각) + 3."""
+    require_ingest_token(request)
+    if not request.app.state.settings.with_simulators:
+        raise HTTPException(409, "embedded only")
+    sim_now = ctx.storage.sim_now()
+    if not ctx.live or sim_now is None:
+        raise HTTPException(503, "backfilling")
+    return math.ceil(from_db(sim_now).timestamp()) + START_DELAY_SEC
+
+
+def _require_equipment(ctx: PlantContext, equip_id: str) -> None:
+    if equip_id not in ctx.plant.equipment_by_id():
+        raise HTTPException(404, f"unknown equipment {equip_id}")
+
+
+@router.post("/anomalies", status_code=201)
+async def inject_anomaly(request: Request, ctx: PlantContext = Depends(context)):
+    """설비 하나에 규칙 하나의 사건을 연다. 멈출 때까지 간다. 그 설비에 주입·지속 고장이 살아 있으면 409."""
+    at = require_live(request, ctx)               # 본문보다 먼저 (post_ingest 와 같은 이유)
+    try:
+        body = InjectBody.model_validate(await request.json())
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, f"invalid body: {str(e)[:300]}")
+    _require_equipment(ctx, body.equip_id)
+    try:
+        event = await asyncio.to_thread(ctx.book.inject, body.equip_id, body.rule, at)
+    except Busy:
+        raise HTTPException(409, f"{body.equip_id} has a live injected or persistent fault: stop it first")
+    return {"event_id": event.event_id, "equip_id": event.equip_id, "rule": event.rule,
+            "start_at": to_db(datetime.fromtimestamp(event.start, timezone.utc))}
+
+
+@router.post("/anomalies/stop")
+async def stop_all_anomalies(request: Request, ctx: PlantContext = Depends(context)):
+    """그 공장의 살아 있는 사건을 모두 멈춘다. 예정된 자동 이상·지속 고장 일정은 그대로 이어진다."""
+    at = require_live(request, ctx)
+    return {"stopped": await asyncio.to_thread(ctx.book.stop, None, at)}
+
+
+@router.post("/anomalies/{equip_id}/stop")
+async def stop_anomaly(equip_id: str, request: Request, ctx: PlantContext = Depends(context)):
+    """그 설비의 살아 있는 사건(주입·지속 고장·자동 이상)을 멈춘다. 모르는 설비이거나 멈출 사건이 없으면 404."""
+    at = require_live(request, ctx)
+    _require_equipment(ctx, equip_id)
+    stopped = await asyncio.to_thread(ctx.book.stop, equip_id, at)
+    if not stopped:
+        raise HTTPException(404, f"no live anomaly on {equip_id}")
+    return {"stopped": stopped}
+
+
+@router.get("/anomalies")
+def answer_key(equip_id: str | None = None, from_: str | None = Query(default=None, alias="from"), to: str | None = None,
+               ctx: PlantContext = Depends(context)):
+    """정답지: 사건마다 출처·규칙·분류·반응 태그·시작·멈춤·끝(마지막 태그 회복 끝). from/to 는 구간과 겹치는 사건."""
+    return ctx.book.answer_key(equip_id, to_db(parse_iso(from_)) if from_ else None, to_db(parse_iso(to)) if to else None)
+
+
 @router.get("/stream")
 async def stream(ctx: PlantContext = Depends(context)):
     return StreamingResponse(ctx.broadcaster.subscribe(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
@@ -148,7 +218,7 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.plants = {entry.key: PlantContext.open(entry) for entry in plants.plants}
+        app.state.plants = {entry.key: PlantContext.open(entry, settings.persistent_fault_interval_min) for entry in plants.plants}
         app.state.started_at = to_db(datetime.now(timezone.utc))
         tasks: list[asyncio.Task] = []
         switch_interval = sys.getswitchinterval()

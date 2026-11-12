@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from collector.alarms import AlarmTracker
+from collector.anomaly_book import AnomalyBook
 from collector.ingest import IngestResult, Rejection
 from collector.jobs import MAX_WINDOWS_PER_ADVANCE, JobRunner
 from collector.plants import PlantEntry
@@ -39,6 +40,8 @@ class PlantContext:
     listing: list[dict]                       # GET /equipment 응답 (계층 순서)
     tag_keys: set[TagKey]
     alarms: AlarmTracker                      # 받을 때마다 Nelson 판정해 nelson_alarm 에 적는다
+    book: AnomalyBook                         # 이상 사건 장부 (통합 실행 생성기의 EventSource, 정답지)
+    live: bool = False                        # 생성기가 실시간(또는 가속)으로 도는가. 백필 중이면 False
     catch_up_task: asyncio.Task | None = field(default=None)
     simulator_error: str | None = field(default=None)               # 통합 실행의 생성기 태스크가 예외로 끝났을 때
     # 저장·배치 전진은 워커 스레드에서도 돌 수 있다(통합 실행). 한 공장의 SQLite 트랜잭션이 겹치지 않도록 락으로 직렬화한다.
@@ -46,7 +49,8 @@ class PlantContext:
     loop: asyncio.AbstractEventLoop | None = field(default=None)    # SSE 발행을 루프 스레드로 넘기기 위해
 
     @classmethod
-    def open(cls, entry: PlantEntry) -> "PlantContext":
+    def open(cls, entry: PlantEntry, persistent_fault_interval_min: float | None = None) -> "PlantContext":
+        """persistent_fault_interval_min 이 있으면 runtime 의 지속 고장 간격을 덮어쓴다."""
         plant = load_plant(entry.plant)
         runtime = load_runtime(entry.runtime)
         Path(entry.db).parent.mkdir(parents=True, exist_ok=True) if entry.db != ":memory:" else None
@@ -58,7 +62,14 @@ class PlantContext:
             loop = None
         return cls(key=entry.key, plant=plant, runtime=runtime, storage=storage, jobs=JobRunner(storage, plant, runtime),
                    broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime), tag_keys=storage.tag_keys(),
-                   alarms=AlarmTracker(storage, plant), loop=loop)
+                   alarms=AlarmTracker(storage, plant), loop=loop,
+                   book=AnomalyBook(storage, plant, runtime.seed, runtime.persistent_fault_interval_min
+                                    if persistent_fault_interval_min is None else persistent_fault_interval_min))
+
+    def set_live(self, at: float) -> None:
+        """생성기가 실시간으로 넘어갔다(at = 실시간 첫 시각, epoch 초). 이때부터 주입을 받고 지속 고장을 연다."""
+        self.book.set_live(at)
+        self.live = True
 
     def close(self) -> None:
         if self.catch_up_task:
@@ -141,7 +152,7 @@ class PlantContext:
     def health(self) -> dict:
         return {"key": self.key, "plant_id": self.plant.plant.plant_id, "plant_name": self.plant.plant.name,
                 "last_received_at": self.storage.last_received_at(), "sim_now": self.storage.sim_now(),
-                "catching_up": self.catching_up, "simulator_error": self.simulator_error}
+                "catching_up": self.catching_up, "live": self.live, "simulator_error": self.simulator_error}
 
     def oldest_allowed(self) -> str | None:
         """시뮬레이터 현재 시각 기준 보관 기간 밖의 행은 받지 않는다. 백필을 다시 돌려도 DB가 부풀지 않는다."""
