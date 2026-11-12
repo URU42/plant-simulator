@@ -169,6 +169,7 @@ def equipment_listing(plant: PlantConfig, runtime: RuntimeConfig) -> list[dict]:
                     "tags": [{"tag_id": t.tag_id, "signal": t.signal, "unit": t.unit, "description": t.description,
                               "interval_sec": plant.tag_interval_sec((e.equip_id, t.tag_id), runtime.sample_interval_sec),
                               "decimals": t.decimals, "normal_ref": t.normal_ref, "limit_basis": t.limit_basis,
-                              "limits": t.limits.model_dump(exclude_none=True) if t.limits else None} for t in e.tags],
+                              "limits": t.limits.model_dump(exclude_none=True) if t.limits else None,
+                              "control": t.control.model_dump() if t.control else None} for t in e.tags],
                 })
     return out

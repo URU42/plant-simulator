@@ -8,7 +8,7 @@
 plant:
   plant_id: PL-VRDS
   name: "VRDS (감압 잔사유 수첨탈황)"
-  config_version: 3
+  config_version: 4
   signal_model: rfcc
   unit_groups:
     - id: UG-VRDS-01
@@ -75,8 +75,9 @@ equipment:
           limits: { warn_hi: 4.5, alarm_hi: 7.1, trip_hi: 11 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람·정지=경고 위 ISO 20816 영역 경계 두 개",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 3,
           seed_key: vrds-r001,
+          control: { mean: 1.65, sigma: 0.04472219729122836 },
           normal: { base: 1.653, noise_sd: 0.040222 } }
       - { tag_id: TI-B-P4101,
           signal: bearing_temp,
@@ -85,8 +86,9 @@ equipment:
           limits: { warn_hi: 85, alarm_hi: 95, trip_hi: 105 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 +10, 정지 +20",
           interval_sec: 10,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r002,
+          control: { mean: 63.2, sigma: 0.11572503597155205 },
           normal: { base: 63.731, noise_sd: 0.094124 } }
       - { tag_id: PI-S-P4101,
           signal: suction_pressure,
@@ -95,8 +97,9 @@ equipment:
           limits: { warn_lo: 3.5, alarm_lo: 2.8, trip_lo: 2.24 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×0.8, 정지 = 알람 ×0.8",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 3,
           seed_key: vrds-r003,
+          control: { mean: 5.2, sigma: 0.01824657502108273 },
           normal: { base: 5.198, noise_sd: 0.016354 } }
       - { tag_id: PI-D-P4101,
           signal: discharge_pressure,
@@ -107,6 +110,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: vrds-r004,
+          control: { mean: 164.35, sigma: 0.1374126557317299 },
           normal: { base: 164.448, noise_sd: 0.123008 } }
       - { tag_id: FI-P4101,
           signal: flow,
@@ -117,6 +121,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: vrds-r005,
+          control: { mean: 185.3, sigma: 1.232405461778802 },
           normal: { base: 186.886, noise_sd: 1.109013 } }
       - { tag_id: II-P4101,
           signal: current,
@@ -125,8 +130,9 @@ equipment:
           limits: { warn_hi: 210, alarm_hi: 223, trip_hi: 240 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×1.06, 정지 = 알람 ×1.08",
           interval_sec: 1,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r006,
+          control: { mean: 165.3, sigma: 0.7011922628681617 },
           normal: { base: 166.217, noise_sd: 0.630521 } }
   # ---------------- UNIT-VRDS-02 보충 수소 압축 ----------------
   - equip_id: C-4102
@@ -142,8 +148,9 @@ equipment:
           limits: { warn_hi: 6, alarm_hi: 7.1, trip_hi: 11 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람·정지=경고 위 ISO 20816 영역 경계 두 개",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 3,
           seed_key: vrds-r007,
+          control: { mean: 2.3, sigma: 0.0661279343090925 },
           normal: { base: 2.304, noise_sd: 0.05946 } }
       - { tag_id: TI-B-C4102,
           signal: bearing_temp,
@@ -152,8 +159,9 @@ equipment:
           limits: { warn_hi: 85, alarm_hi: 95, trip_hi: 105 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 +10, 정지 +20",
           interval_sec: 10,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r008,
+          control: { mean: 61.2, sigma: 0.11009781004987129 },
           normal: { base: 61.726, noise_sd: 0.097427 } }
       - { tag_id: PI-S-C4102,
           signal: suction_pressure,
@@ -162,8 +170,9 @@ equipment:
           limits: { warn_lo: 20, alarm_lo: 16, trip_lo: 12.8 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×0.8, 정지 = 알람 ×0.8",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 3,
           seed_key: vrds-r009,
+          control: { mean: 25.0, sigma: 0.03567406465331487 },
           normal: { base: 24.987, noise_sd: 0.032106 } }
       - { tag_id: PI-D-C4102,
           signal: discharge_pressure,
@@ -174,6 +183,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: vrds-r010,
+          control: { mean: 167.53, sigma: 0.1557821805280107 },
           normal: { base: 167.633, noise_sd: 0.139553 } }
       - { tag_id: TI-S-C4102,
           signal: suction_temp,
@@ -182,8 +192,9 @@ equipment:
           limits: { warn_hi: 50, alarm_hi: 60, trip_hi: 70 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 +10, 정지 +20",
           interval_sec: 10,
-          decimals: 1,
+          decimals: 3,
           seed_key: vrds-r011,
+          control: { mean: 36.3, sigma: 0.0839955172231235 },
           normal: { base: 36.633, noise_sd: 0.074902 } }
       - { tag_id: TI-D-C4102,
           signal: discharge_temp,
@@ -192,8 +203,9 @@ equipment:
           limits: { warn_hi: 145, alarm_hi: 155, trip_hi: 165 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 +10, 정지 +20",
           interval_sec: 10,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r012,
+          control: { mean: 117.3, sigma: 0.2297334741299199 },
           normal: { base: 117.957, noise_sd: 0.206737 } }
       - { tag_id: FI-C4102,
           signal: flow,
@@ -204,6 +216,7 @@ equipment:
           interval_sec: 1,
           decimals: 0,
           seed_key: vrds-r013,
+          control: { mean: 10586.5, sigma: 72.41847600294766 },
           normal: { base: 10678.864, noise_sd: 65.163711 } }
       - { tag_id: SI-C4102,
           signal: speed,
@@ -212,8 +225,9 @@ equipment:
           limits: { warn_lo: 570, alarm_lo: 547, warn_hi: 610, alarm_hi: 634, trip_hi: 659 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 상한 알람 ×1.04·정지 ×1.08, 하한 알람 ×0.96",
           interval_sec: 1,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r014,
+          control: { mean: 590.0, sigma: 0.2499543152702556 },
           normal: { base: 589.997, noise_sd: 0.224906 } }
   # ---------------- UNIT-VRDS-03 수소 순환 ----------------
   - equip_id: C-4101
@@ -229,8 +243,9 @@ equipment:
           limits: { warn_hi: 75, alarm_hi: 95.2, trip_hi: 130 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×1.27, 정지 ×1.73",
           interval_sec: 1,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r015,
+          control: { mean: 33.1, sigma: 0.8124151902555888 },
           normal: { base: 33.098, noise_sd: 0.729773 } }
       - { tag_id: TI-B-C4101,
           signal: bearing_temp,
@@ -239,8 +254,9 @@ equipment:
           limits: { warn_hi: 95, alarm_hi: 105, trip_hi: 115 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 +10, 정지 +20",
           interval_sec: 10,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r016,
+          control: { mean: 76.2, sigma: 0.11028022667306278 },
           normal: { base: 76.729, noise_sd: 0.087659 } }
       - { tag_id: ZI-C4101,
           signal: axial_position,
@@ -249,8 +265,9 @@ equipment:
           limits: { warn_lo: -0.35, alarm_lo: -0.525, trip_lo: -0.875, warn_hi: 0.35, alarm_hi: 0.525, trip_hi: 0.875 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×1.5, 정지 ×2.5 (양방향)",
           interval_sec: 1,
-          decimals: 3,
+          decimals: 4,
           seed_key: vrds-r017,
+          control: { mean: 0.05, sigma: 0.001489190449353084 },
           normal: { base: 0.05, noise_sd: 0.00134 } }
       - { tag_id: PI-S-C4101,
           signal: suction_pressure,
@@ -259,8 +276,9 @@ equipment:
           limits: { warn_lo: 125, alarm_lo: 100, trip_lo: 80 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×0.8, 정지 = 알람 ×0.8",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 3,
           seed_key: vrds-r018,
+          control: { mean: 148.37, sigma: 0.09214440090034688 },
           normal: { base: 148.313, noise_sd: 0.082757 } }
       - { tag_id: PI-D-C4101,
           signal: discharge_pressure,
@@ -271,6 +289,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: vrds-r019,
+          control: { mean: 162.22, sigma: 0.12151951717956927 },
           normal: { base: 162.32, noise_sd: 0.109358 } }
       - { tag_id: TI-S-C4101,
           signal: suction_temp,
@@ -279,8 +298,9 @@ equipment:
           limits: { warn_hi: 60, alarm_hi: 70, trip_hi: 80 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 +10, 정지 +20",
           interval_sec: 10,
-          decimals: 1,
+          decimals: 3,
           seed_key: vrds-r020,
+          control: { mean: 45.3, sigma: 0.06624636025408064 },
           normal: { base: 45.639, noise_sd: 0.059331 } }
       - { tag_id: TI-D-C4101,
           signal: discharge_temp,
@@ -289,8 +309,9 @@ equipment:
           limits: { warn_hi: 95, alarm_hi: 105, trip_hi: 115 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 +10, 정지 +20",
           interval_sec: 10,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r021,
+          control: { mean: 67.25, sigma: 0.22766663955316785 },
           normal: { base: 67.957, noise_sd: 0.204777 } }
       - { tag_id: FI-C4101,
           signal: flow,
@@ -301,6 +322,7 @@ equipment:
           interval_sec: 1,
           decimals: 0,
           seed_key: vrds-r022,
+          control: { mean: 132321.5, sigma: 855.1521095247858 },
           normal: { base: 133481.274, noise_sd: 769.250663 } }
       - { tag_id: SI-C4101,
           signal: speed,
@@ -311,6 +333,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: vrds-r023,
+          control: { mean: 9203.6, sigma: 8.780911159755851 },
           normal: { base: 9215.556, noise_sd: 7.893197 } }
       - { tag_id: PI-LO-C4101,
           signal: oil_pressure,
@@ -319,8 +342,9 @@ equipment:
           limits: { warn_lo: 2, alarm_lo: 1.6, trip_lo: 1.33 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×0.8, 정지 = 알람 ×0.83",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 4,
           seed_key: vrds-r024,
+          control: { mean: 2.7, sigma: 0.007334161885011518 },
           normal: { base: 2.7, noise_sd: 0.0066 } }
       - { tag_id: TI-LO-C4101,
           signal: oil_temp,
@@ -329,8 +353,9 @@ equipment:
           limits: { warn_hi: 55, alarm_hi: 62, trip_hi: 72 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 +7, 정지 +17",
           interval_sec: 10,
-          decimals: 1,
+          decimals: 3,
           seed_key: vrds-r025,
+          control: { mean: 43.4, sigma: 0.054670731556189865 },
           normal: { base: 43.672, noise_sd: 0.049166 } }
   # ---------------- UNIT-VRDS-04 연소공기 공급 ----------------
   - equip_id: F-4101
@@ -346,8 +371,9 @@ equipment:
           limits: { warn_hi: 4.5, alarm_hi: 7.1, trip_hi: 11 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람·정지=경고 위 ISO 20816 영역 경계 두 개",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 3,
           seed_key: vrds-r026,
+          control: { mean: 1.9, sigma: 0.05563024416949848 },
           normal: { base: 1.902, noise_sd: 0.05006 } }
       - { tag_id: TI-B-F4101,
           signal: bearing_temp,
@@ -356,8 +382,9 @@ equipment:
           limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 +10, 정지 +20",
           interval_sec: 10,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r027,
+          control: { mean: 54.2, sigma: 0.13560108525003556 },
           normal: { base: 54.732, noise_sd: 0.105882 } }
       - { tag_id: SI-F4101,
           signal: speed,
@@ -368,6 +395,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: vrds-r028,
+          control: { mean: 1461.4, sigma: 3.2961913749427425 },
           normal: { base: 1465.479, noise_sd: 2.96248 } }
       - { tag_id: II-F4101,
           signal: current,
@@ -376,8 +404,9 @@ equipment:
           limits: { warn_hi: 80, alarm_hi: 84.8, trip_hi: 91.6 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×1.06, 정지 = 알람 ×1.08",
           interval_sec: 1,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r029,
+          control: { mean: 58.2, sigma: 0.3990120167440736 },
           normal: { base: 58.658, noise_sd: 0.359111 } }
       - { tag_id: FI-F4101,
           signal: flow,
@@ -388,6 +417,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: vrds-r030,
+          control: { mean: 42283.7, sigma: 147.49398793317675 },
           normal: { base: 42399.85, noise_sd: 132.624119 } }
       - { tag_id: PDI-F4101,
           signal: differential_pressure,
@@ -398,6 +428,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: vrds-r031,
+          control: { mean: 2205.0, sigma: 12.424860035975465 },
           normal: { base: 2216.479, noise_sd: 11.156256 } }
   # ---------------- UNIT-VRDS-05 잔사유 이송 ----------------
   - equip_id: P-4102
@@ -413,8 +444,9 @@ equipment:
           limits: { warn_hi: 4.5, alarm_hi: 7.1, trip_hi: 11 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람·정지=경고 위 ISO 20816 영역 경계 두 개",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 3,
           seed_key: vrds-r032,
+          control: { mean: 1.85, sigma: 0.04867301962593003 },
           normal: { base: 1.854, noise_sd: 0.043631 } }
       - { tag_id: TI-B-P4102,
           signal: bearing_temp,
@@ -423,8 +455,9 @@ equipment:
           limits: { warn_hi: 90, alarm_hi: 100, trip_hi: 110 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 +10, 정지 +20",
           interval_sec: 10,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r033,
+          control: { mean: 72.2, sigma: 0.1242306571376005 },
           normal: { base: 72.731, noise_sd: 0.096212 } }
       - { tag_id: TI-F-P4102,
           signal: process_temp,
@@ -433,8 +466,9 @@ equipment:
           limits: { warn_hi: 310, alarm_hi: 320, trip_hi: 335 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 +10, 정지 +25",
           interval_sec: 10,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r034,
+          control: { mean: 294.5, sigma: 0.1887057936132608 },
           normal: { base: 294.991, noise_sd: 0.169734 } }
       - { tag_id: PI-S-P4102,
           signal: suction_pressure,
@@ -443,8 +477,9 @@ equipment:
           limits: { warn_lo: 3, alarm_lo: 2.4, trip_lo: 1.92 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×0.8, 정지 = 알람 ×0.8",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 3,
           seed_key: vrds-r035,
+          control: { mean: 4.6, sigma: 0.018673410653442506 },
           normal: { base: 4.597, noise_sd: 0.016756 } }
       - { tag_id: PI-D-P4102,
           signal: discharge_pressure,
@@ -453,8 +488,9 @@ equipment:
           limits: { warn_hi: 25, alarm_hi: 26.2, trip_hi: 27.5 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×1.05, 정지 ×1.10",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 3,
           seed_key: vrds-r036,
+          control: { mean: 20.15, sigma: 0.04006078367791745 },
           normal: { base: 20.158, noise_sd: 0.036003 } }
       - { tag_id: FI-P4102,
           signal: flow,
@@ -465,6 +501,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: vrds-r037,
+          control: { mean: 163.3, sigma: 1.0844513173592543 },
           normal: { base: 164.649, noise_sd: 0.975056 } }
       - { tag_id: II-P4102,
           signal: current,
@@ -473,8 +510,9 @@ equipment:
           limits: { warn_hi: 145, alarm_hi: 154, trip_hi: 166 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×1.06, 정지 = 알람 ×1.08",
           interval_sec: 1,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r038,
+          control: { mean: 112.2, sigma: 0.4901665879582342 },
           normal: { base: 112.821, noise_sd: 0.441147 } }
   # ---------------- UNIT-VRDS-06 환류·순환 ----------------
   - equip_id: P-4103
@@ -490,8 +528,9 @@ equipment:
           limits: { warn_hi: 4.5, alarm_hi: 7.1, trip_hi: 11 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람·정지=경고 위 ISO 20816 영역 경계 두 개",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 3,
           seed_key: vrds-r039,
+          control: { mean: 1.35, sigma: 0.041147347018570514 },
           normal: { base: 1.355, noise_sd: 0.03702 } }
       - { tag_id: TI-B-P4103,
           signal: bearing_temp,
@@ -500,8 +539,9 @@ equipment:
           limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 +10, 정지 +20",
           interval_sec: 10,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r040,
+          control: { mean: 57.2, sigma: 0.12565384549980407 },
           normal: { base: 57.732, noise_sd: 0.102482 } }
       - { tag_id: PI-S-P4103,
           signal: suction_pressure,
@@ -510,8 +550,9 @@ equipment:
           limits: { warn_lo: 2, alarm_lo: 1.6, trip_lo: 1.28 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×0.8, 정지 = 알람 ×0.8",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 3,
           seed_key: vrds-r041,
+          control: { mean: 3.1, sigma: 0.012478039660356604 },
           normal: { base: 3.098, noise_sd: 0.011222 } }
       - { tag_id: PI-D-P4103,
           signal: discharge_pressure,
@@ -520,8 +561,9 @@ equipment:
           limits: { warn_hi: 15, alarm_hi: 15.8, trip_hi: 16.5 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×1.05, 정지 ×1.10",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 3,
           seed_key: vrds-r042,
+          control: { mean: 11.66, sigma: 0.024855482137426832 },
           normal: { base: 11.671, noise_sd: 0.022339 } }
       - { tag_id: FI-P4103,
           signal: flow,
@@ -530,6 +572,7 @@ equipment:
           limits: { warn_lo: 65, alarm_lo: 55.9, trip_lo: 44.7 },
           limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×0.86, 정지 = 알람 ×0.8",
           interval_sec: 1,
-          decimals: 1,
+          decimals: 2,
           seed_key: vrds-r043,
+          control: { mean: 83.9, sigma: 0.6103814608732623 },
           normal: { base: 84.548, noise_sd: 0.549338 } }

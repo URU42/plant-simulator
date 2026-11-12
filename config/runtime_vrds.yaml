@@ -9,3 +9,4 @@ backfill_days: 1             # 원시값을 하루까지 되돌아본다
 seed: 20261111               # RHDS 와 구조가 같아 쌍둥이 값이 되지 않도록 하나 올린다
 collector_url: http://localhost:8000/vrds   # 수집 서버의 공장 접두어까지
 raw_retention_days: 1        # 10분마다 이보다 오래된 원시값을 지운다
+persistent_fault_interval_min: 15   # 지속 고장을 여는 간격(분). 0 이면 끈다

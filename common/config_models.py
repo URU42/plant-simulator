@@ -73,6 +73,13 @@ class NormalModel(StrictModel):
     drift_sd: float = 0.0     # 천천히 떠도는 성분(시간당 랜덤 워크 걸음)의 표준편차 (hds 모델만)
 
 
+class ControlLimits(StrictModel):
+    """Nelson 관리도의 고정 관리 기준: 중심 μ 와 표준편차 σ (팀의 baselines.json)."""
+
+    mean: float
+    sigma: float = Field(gt=0)
+
+
 class TagConfig(StrictModel):
     tag_id: str
     signal: str                           # signals 목록의 signal 값. 신호 모델이 식을 고르는 키
@@ -85,6 +92,7 @@ class TagConfig(StrictModel):
     delay_samples: int = Field(default=1, ge=1)   # 알람 지연 판정: 연속된 10분 구간 수
     interval_sec: int | None = Field(default=None, ge=1)   # 태그별 측정 주기. 없으면 runtime.sample_interval_sec
     decimals: int = Field(default=3, ge=0)        # 값 반올림 자릿수
+    control: ControlLimits | None = None  # Nelson 관리 기준 μ·σ. HDS 구성안이 남아 있는 동안만 선택
     seed_key: str                         # 시드용 고정 키. ID를 바꿔도 생성 값이 유지된다
     normal: NormalModel
 
@@ -281,6 +289,7 @@ class RuntimeConfig(StrictModel):
     seed: int = 20261108
     collector_url: str = "http://localhost:8000"
     raw_retention_days: int = Field(default=7, ge=1)
+    persistent_fault_interval_min: float = Field(default=15, ge=0)   # 지속 고장을 여는 간격(분). 0 이면 끈다
 
     @model_validator(mode="after")
     def _intervals(self) -> "RuntimeConfig":
