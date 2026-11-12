@@ -48,3 +48,17 @@ def test_resolve_truncates_spontaneous():
     out = {e.event_id: e for e in resolve([sp, inj, other], {"SP2": 400.0})}
     assert out["SP"].end == 300 and out["INJ"].end is None and out["SP2"].end == 400
     assert "SP3" not in {e.event_id for e in resolve([ev(1, start=500, end=600, origin="spontaneous", eid="SP3"), inj], {})}
+
+def test_resolve_drops_event_stopped_before_start():
+    inj = ev(1, start=300, eid="INJ")
+    assert resolve([inj], {"INJ": 300.0}) == [] and resolve([inj], {"INJ": 100.0}) == []
+
+def test_resolve_ignores_fault_stopped_before_start_for_cutting():
+    sp = ev(2, start=0, end=1000, origin="spontaneous", eid="SP")
+    inj = ev(1, start=300, eid="INJ")
+    out = resolve([sp, inj], {"INJ": 200.0})
+    assert [(e.event_id, e.end) for e in out] == [("SP", 1000)]
+
+def test_resolve_stop_shortens_injected_end():
+    out = resolve([ev(1, start=300, eid="INJ")], {"INJ": 500.0})
+    assert out[0].end == 500.0

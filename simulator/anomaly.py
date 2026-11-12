@@ -128,6 +128,7 @@ def resolve(events: list[AnomalyEvent], stops: dict[str, float]) -> list[Anomaly
     자동 이상은 시작 때 이미 고장이 살아 있으면 빼고, 도중에 고장이 시작하면 그 시작에서 끝낸다."""
     stopped = [replace(e, end=min(e.end if e.end is not None else math.inf, stops[e.event_id]))
                if e.event_id in stops else e for e in events]
+    stopped = [e for e in stopped if e.end is None or e.end > e.start]     # 시작 전에 멈춘 사건은 일어난 적 없다
     faults = [e for e in stopped if e.origin != "spontaneous"]
     out: list[AnomalyEvent] = []
     for e in stopped:
