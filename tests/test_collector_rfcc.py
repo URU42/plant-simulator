@@ -33,13 +33,14 @@ def test_ten_second_tag_is_good_until_three_of_its_intervals(client):
     assert client.get("/plant/equipment/P-1101A/tags/TI-P-1101A/current").json()["status"] == "NoData"
 
 
-def test_aggregates_exist_without_limit_alarms(client):
-    _send(client, "VI-P-1101A", "P-1101A", T0, 600, 1, 9.9)                 # 경고 상한 1.5703 위, 한계값 알람은 만들지 않는다
+def test_aggregates_exist_and_alarms_are_nelson_only(client):
+    _send(client, "VI-P-1101A", "P-1101A", T0, 600, 1, 9.9)                 # 경고 상한 1.5703 위, 한계값 알람은 만들지 않는다 (Nelson 판정만)
     _send(client, "VI-P-1101A", "P-1101A", T0 + timedelta(minutes=10), 1, 1, 9.9)
     st = client.app.state.plants["plant"].storage
     assert st.query("SELECT COUNT(*) FROM ts_10m WHERE tag_id = 'VI-P-1101A' AND count > 0")[0][0] == 1
     _send(client, "VI-P-1101A", "P-1101A", T0 + timedelta(minutes=20), 1, 1, 9.9)
-    assert client.get("/plant/alarms").json() == []
+    rule1 = [(a["direction"], a["hit_count"], a["cleared_at"]) for a in client.get("/plant/alarms", params={"rule": 1}).json()]
+    assert rule1 == [("hi", 602, None)]                                      # 표본마다 |z|>3: 열린 한 건으로 묶인다
 
 
 def test_old_ingest_batches_are_deleted(client):

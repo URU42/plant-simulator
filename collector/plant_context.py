@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from collector.alarms import AlarmTracker
 from collector.ingest import IngestResult, Rejection
 from collector.jobs import MAX_WINDOWS_PER_ADVANCE, JobRunner
 from collector.plants import PlantEntry
@@ -20,6 +22,8 @@ from collector.stream import Broadcaster
 from common.config_models import PlantConfig, RuntimeConfig, TagKey, load_plant, load_runtime
 from common.message import Sample
 from common.timefmt import from_db, to_db
+
+log = logging.getLogger("collector")
 
 NO_DATA_SEND_INTERVALS = 3      # 전송 주기(또는 더 긴 태그 주기) 3번 동안 안 들어오면 NoData (기획서 6.2)
 
@@ -34,6 +38,7 @@ class PlantContext:
     broadcaster: Broadcaster
     listing: list[dict]                       # GET /equipment 응답 (계층 순서)
     tag_keys: set[TagKey]
+    alarms: AlarmTracker                      # 받을 때마다 Nelson 판정해 nelson_alarm 에 적는다
     catch_up_task: asyncio.Task | None = field(default=None)
     simulator_error: str | None = field(default=None)               # 통합 실행의 생성기 태스크가 예외로 끝났을 때
     # 저장·배치 전진은 워커 스레드에서도 돌 수 있다(통합 실행). 한 공장의 SQLite 트랜잭션이 겹치지 않도록 락으로 직렬화한다.
@@ -52,7 +57,8 @@ class PlantContext:
         except RuntimeError:
             loop = None
         return cls(key=entry.key, plant=plant, runtime=runtime, storage=storage, jobs=JobRunner(storage, plant, runtime),
-                   broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime), tag_keys=storage.tag_keys(), loop=loop)
+                   broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime), tag_keys=storage.tag_keys(),
+                   alarms=AlarmTracker(storage, plant), loop=loop)
 
     def close(self) -> None:
         if self.catch_up_task:
@@ -62,7 +68,7 @@ class PlantContext:
     # --- 수신 핵심 (HTTP 라우트와 LocalSender 가 함께 쓴다) -------------------------
     def receive(self, batch_id: str, source_id: str, samples: list[Sample], received_at: str,
                 rejections: list[Rejection] = ()) -> IngestResult:
-        """검증을 마친 샘플을 저장하고 배치를 전진시킨다. 같은 batch_id 는 저장하지 않고, 보관 기간 밖 행은 거절한다."""
+        """검증을 마친 샘플을 저장하고 Nelson 판정을 반영한 뒤 배치를 전진시킨다. 같은 batch_id 는 저장하지 않고, 보관 기간 밖 행은 거절한다."""
         reasons = list(rejections)
         oldest = self.oldest_allowed()
         accepted: list[Sample] = []
@@ -77,7 +83,10 @@ class PlantContext:
                 return IngestResult(batch_id=batch_id, duplicate=True, accepted=len(accepted), stored=0,
                                     rejected=len(reasons), reasons=reasons)
             stored = self.storage.store_batch(batch_id, source_id, received_at, rows)
+            mismatched = self.alarms.observe(rows)
             behind = self.jobs.advance(self.storage.sim_now()) >= MAX_WINDOWS_PER_ADVANCE if accepted else False
+        if mismatched:      # /alarms 는 수집 서버 판정을 따른다
+            log.warning("plant %s: status mismatch on %d samples", self.key, mismatched)
         if behind:
             self.start_catch_up()
         if accepted and self.broadcaster.has_subscribers():   # 구독자가 없으면 직렬화도 하지 않는다

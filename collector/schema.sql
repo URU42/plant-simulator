@@ -1,6 +1,7 @@
 -- 프로젝트 DB (SQLite, WAL). 시각 컬럼은 모두 UTC ISO 문자열.
 -- 스키마 v3: 태그는 (equip_id, tag_id) 복합키로 식별한다. 태그명은 같은 설비 안에서만 고유하다.
--- v3 에서 태그에 Nelson 관리 기준(control_mean·control_sigma)을 더하고 알람 지연·측정 위치 칸과 정비·고장 이력 테이블을 뺐다.
+-- v3 에서 태그에 Nelson 관리 기준(control_mean·control_sigma)을 더하고 알람 지연·측정 위치 칸과 정비·고장 이력 테이블을 뺐고,
+-- 한계값 알람(alarm_detail)을 Nelson 알람(nelson_alarm)으로 바꿨다.
 CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL);
 
 -- 시설 계층 (구성안에서 적재)
@@ -52,17 +53,17 @@ CREATE TABLE IF NOT EXISTS ts_1h (
     PRIMARY KEY (equip_id, tag_id, bucket_start)
 ) WITHOUT ROWID;
 
--- 알람 (7.3). direction: hi(상한 초과) / lo(하한 미달)
-CREATE TABLE IF NOT EXISTS alarm_detail (
+-- Nelson 알람 (설계 2026-11-12-nelson-anomaly §4.8). (태그, 규칙)마다 연속 위반을 한 행으로 묶는다.
+-- rule 1~8. direction: hi / lo (규칙 1·2·3·5·6), 규칙 4·7·8 은 NULL. cleared_at 은 15 표본 연속 미성립의 첫 표본 시각, 열려 있으면 NULL.
+-- value_at_occurrence 는 처음 성립한 표본의 값. 심각도는 두지 않는다.
+CREATE TABLE IF NOT EXISTS nelson_alarm (
     alarm_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    occurred_at TEXT NOT NULL, cleared_at TEXT,
-    equip_id TEXT NOT NULL, tag_id TEXT NOT NULL,
-    limit_type TEXT NOT NULL,          -- Soft / Alarm / Trip
-    direction TEXT NOT NULL,           -- hi / lo
-    limit_value REAL NOT NULL, actual_value REAL NOT NULL, exceed_pct REAL NOT NULL,
-    severity TEXT NOT NULL             -- Low / Medium / High
+    equip_id TEXT NOT NULL, tag_id TEXT NOT NULL, rule INTEGER NOT NULL, direction TEXT,
+    occurred_at TEXT NOT NULL, cleared_at TEXT, last_hit_at TEXT NOT NULL,
+    hit_count INTEGER NOT NULL, value_at_occurrence REAL NOT NULL
 );
-CREATE INDEX IF NOT EXISTS ix_alarm_equip ON alarm_detail (equip_id, occurred_at);
+CREATE INDEX IF NOT EXISTS ix_nelson_alarm_occurred ON nelson_alarm (occurred_at);
+CREATE INDEX IF NOT EXISTS ix_nelson_alarm_cleared ON nelson_alarm (cleared_at);
 
 -- 수신 묶음 (중복 확인)과 배치 진행 상태
 CREATE TABLE IF NOT EXISTS ingest_batch (batch_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, received_at TEXT NOT NULL, stored INTEGER NOT NULL);

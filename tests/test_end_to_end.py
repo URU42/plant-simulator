@@ -39,7 +39,7 @@ class ClientSender:
         return None
 
 
-async def test_resumed_backfill_through_collector(plant_path, runtime_path):
+async def test_resumed_backfill_through_collector(plant_path, runtime_path, caplog):
     plant = load_plant(plant_path)
     runtime = RuntimeConfig(units=["UNIT-RHDS-06"], source_id="SIM-U6", sample_interval_sec=1, send_interval_sec=60,
                             time_mode="backfill", backfill_days=1, raw_retention_days=1)
@@ -61,7 +61,8 @@ async def test_resumed_backfill_through_collector(plant_path, runtime_path):
         assert st.count("ts_raw") == 2 * len(keys) + (per_hour - len(keys)) + per_hour // 30
         # 10분 구간: 시드의 10:50 구간 + 이어 보낸 6개 (12:00 구간은 아직 미완료)
         assert st.query("SELECT COUNT(*) FROM ts_10m WHERE tag_id = 'VI-A-P3103' AND count > 0")[0][0] == 7
-        assert client.get("/plant/alarms").json() == []               # 한계값 알람은 만들지 않는다
+        # 수집 서버가 생성기와 같은 판정을 한다: 알람이 생기고 받은 status 와 어긋난 표본이 없다
+        assert client.get("/plant/alarms").json() and "status mismatch" not in caplog.text
 
         recent = st.recent_values(3)
         assert set(recent) == set(keys) and all(len(v) == 3 for v in recent.values())

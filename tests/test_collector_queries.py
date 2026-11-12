@@ -31,7 +31,7 @@ def test_timeseries_after_ingest_and_no_limit_alarms(client):
     assert len(ts) == 6 and ts[0]["max"] == 56.0 and ts[1]["avg"] == 48.0   # 60~70분 구간은 아직 미완료
     hourly = client.get("/plant/timeseries", params=params).json()
     assert len(hourly) == 1 and hourly[0]["count"] == 360
-    assert client.get("/plant/alarms").json() == []                          # 한계값 알람은 만들지 않는다
+    assert all("limit_type" not in a for a in client.get("/plant/alarms").json())   # 한계값 알람은 만들지 않는다 (Nelson 알람만)
     assert client.get("/plant/timeseries", params=params | {"from": "x", "to": "y", "interval": "5m"}).status_code == 400
 
 

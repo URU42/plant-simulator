@@ -96,11 +96,11 @@ def test_advance_processes_at_most_a_cap_per_call_and_reports_progress(env):
 
 
 def test_limit_breach_makes_no_alarm(env):
-    """한계값은 참고값이다. 10분 배치는 집계·보관만 하고 alarm_detail 에 행을 만들지 않는다."""
+    """한계값은 참고값이다. 10분 배치는 집계·보관만 하고 알람(nelson_alarm)을 만들지 않는다."""
     storage, plant, jobs = env
     _feed(storage, "P-3101", "VI-A-P3101", T0, 30, 12.0)                     # 경고 4.5 · 정지 11 위
     jobs.advance(storage.sim_now())
-    assert storage.count("ts_10m") > 0 and storage.count("alarm_detail") == 0
+    assert storage.count("ts_10m") > 0 and storage.count("nelson_alarm") == 0
 
 
 

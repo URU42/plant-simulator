@@ -119,16 +119,22 @@ def timeseries(equip_id: str, tag_id: str, from_: str = Query(alias="from"), to:
 
 
 @router.get("/alarms")
-def alarms(equip_id: str | None = None, from_: str | None = Query(default=None, alias="from"), to: str | None = None,
-                 ctx: PlantContext = Depends(context)):
+def alarms(equip_id: str | None = None, rule: int | None = Query(default=None, ge=1, le=8),
+           from_: str | None = Query(default=None, alias="from"), to: str | None = None, open_: bool = Query(default=False, alias="open"),
+           ctx: PlantContext = Depends(context)):
+    """Nelson 알람 (nelson_alarm). from/to 는 구간과 겹치는 알람(열린 시각 < to, 아직 열렸거나 닫힌 시각 ≥ from), open=true 는 열린 것만."""
     where, params = ["1=1"], []
     if equip_id:
         where.append("equip_id = ?"); params.append(equip_id)
+    if rule is not None:
+        where.append("rule = ?"); params.append(rule)
     if from_:
-        where.append("occurred_at >= ?"); params.append(to_db(parse_iso(from_)))
+        where.append("(cleared_at IS NULL OR cleared_at >= ?)"); params.append(to_db(parse_iso(from_)))
     if to:
         where.append("occurred_at < ?"); params.append(to_db(parse_iso(to)))
-    return ctx.storage.query_dicts(f"SELECT * FROM alarm_detail WHERE {' AND '.join(where)} ORDER BY occurred_at DESC", params)
+    if open_:
+        where.append("cleared_at IS NULL")
+    return ctx.storage.query_dicts(f"SELECT * FROM nelson_alarm WHERE {' AND '.join(where)} ORDER BY occurred_at DESC", params)
 
 
 @router.get("/stream")
