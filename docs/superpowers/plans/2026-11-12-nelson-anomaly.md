@@ -17,7 +17,7 @@
 - 규칙 비트: 규칙 r 은 `1 << (r - 1)`. 판정은 보낸 값(구성안 `decimals` 로 반올림)에서 `z = (value − mean) / sigma` 로 한다.
 - 경계와 같은 값은 '밖'이 아니다. 같은 값은 추세·교대를 끊는다. 조건이 성립한 마지막 표본에 표시한다.
 - 정상 AR(1): `z = ρ·clip(z_prev, −2, 2) + √(1−ρ²)·N(0,1)`, ρ 0.12(온도 신호 0.25), 최대 100번 다시 뽑고 안 되면 `N(0,1)` 한 번 뽑은 값을 그대로.
-- 자동 이상: 설비·KST 날짜마다 12건, 사건 시간 합 = 86400 × 0.105 = 9072초, 길이 lognormal(ln 650, 0.52)를 200~1800초로 자른 뒤 비례 조정, 간격 Dirichlet(3)×13.
+- 자동 이상: 설비·KST 날짜마다 12건, 사건 시간 합 = 86400 × 0.094 = 8122초, 길이 lognormal(ln 650, 0.52)를 200~1800초로 자른 뒤 비례 조정, 간격 Dirichlet(3)×13.
 - 지속 고장 간격 기본 15분(`persistent_fault_interval_min`), 환경 변수 `PERSISTENT_FAULT_INTERVAL_MIN` 이 덮어쓰고 0 이면 끈다. 백필 중에는 열지 않는다.
 - 주입 시작 = 시뮬레이터 현재 시각(`sim_now`)을 초 단위로 올림 + 3초.
 - 알람 묶음: (태그, 규칙)마다 15 표본 연속 그 규칙이 없으면 닫고 `cleared_at` = 그 15 표본 중 첫 표본 시각.
@@ -339,7 +339,7 @@ git commit -m "feat: 이상 사건 모양·반응 태그·분류 (data-v3 방식
 
 **Interfaces:**
 - Consumes: Task 3 `AnomalyEvent`
-- Produces: `EVENTS_PER_DAY = 12`, `EVENT_FRACTION = 0.105`, `daily_events(seed: int, equip_id: str, day: date) -> list[AnomalyEvent]` (KST 날짜, `origin="spontaneous"`, `end` 있음, 시작 순)
+- Produces: `EVENTS_PER_DAY = 12`, `EVENT_FRACTION = 0.094`, `daily_events(seed: int, equip_id: str, day: date) -> list[AnomalyEvent]` (KST 날짜, `origin="spontaneous"`, `end` 있음, 시작 순)
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
@@ -354,7 +354,7 @@ def test_daily_events_shape():
     evs = daily_events(7, "C-3101", D)
     day0 = datetime(2026, 11, 12, tzinfo=KST).timestamp()
     assert len(evs) == 12
-    assert sum(e.end - e.start for e in evs) == 9072
+    assert sum(e.end - e.start for e in evs) == 8122
     assert all(day0 <= e.start < e.end <= day0 + 86400 for e in evs)
     assert all(a.end <= b.start for a, b in zip(evs, evs[1:]))
     assert {e.rule for e in evs} == set(range(1, 9))
@@ -373,7 +373,7 @@ Expected: FAIL
 
 - [ ] **Step 3: `daily_events` 구현**
 
-`rng = np.random.default_rng([seed, zlib.crc32(equip_id.encode()), day.toordinal()])`. 길이·간격은 Global Constraints 대로, 정수로 반올림한 뒤 오차는 마지막 항목에 몰아 합이 정확히 9072·(86400−9072)가 되게 한다. 규칙은 `(offset + k) % 8 + 1`(`offset = rng.integers(8)`), `normal_change = rule == 2 and rng.random() < 0.2`, id 는 `SP-{equip_id}-{day:%Y%m%d}-{k+1:02d}`.
+`rng = np.random.default_rng([seed, zlib.crc32(equip_id.encode()), day.toordinal()])`. 길이·간격은 Global Constraints 대로, 정수로 반올림한 뒤 오차는 마지막 항목에 몰아 합이 정확히 8122·(86400−8122)가 되게 한다. 규칙은 `(offset + k) % 8 + 1`(`offset = rng.integers(8)`), `normal_change = rule == 2 and rng.random() < 0.2`, id 는 `SP-{equip_id}-{day:%Y%m%d}-{k+1:02d}`.
 
 - [ ] **Step 4: 통과 확인** — Run: `uv run pytest tests/test_schedule.py -q` → PASS
 

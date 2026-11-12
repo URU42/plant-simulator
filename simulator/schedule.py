@@ -1,4 +1,4 @@
-"""설비·KST 날짜마다 자동 이상 사건 12건을 정한다. 사건 시간 합은 하루의 10.5%(9072초)이고, 길이는 lognormal 을
+"""설비·KST 날짜마다 자동 이상 사건 12건을 정한다. 사건 시간 합은 하루의 9.4%(8122초, 회복 꼬리·우연 위반을 더해 합집합 ≈10%)이고, 길이는 lognormal 을
 200~1800초로 잘라 합에 맞게 비례 조정하며, 나머지 시간은 Dirichlet 로 13개 간격에 나눈다. 같은 (seed, 설비, 날짜)는 항상 같은 일정이다.
 """
 from __future__ import annotations
@@ -12,9 +12,9 @@ from common.sim_clock import KST
 from simulator.anomaly import AnomalyEvent
 
 EVENTS_PER_DAY = 12
-EVENT_FRACTION = 0.105
+EVENT_FRACTION = 0.094
 DAY_SEC = 86400
-EVENT_TOTAL = round(DAY_SEC * EVENT_FRACTION)   # 9072
+EVENT_TOTAL = round(DAY_SEC * EVENT_FRACTION)   # 8122
 
 
 def _round_to_total(values: np.ndarray, total: int) -> list[int]:

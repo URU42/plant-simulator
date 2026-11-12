@@ -8,7 +8,7 @@ def test_daily_events_shape():
     evs = daily_events(7, "C-3101", D)
     day0 = datetime(2026, 11, 12, tzinfo=KST).timestamp()
     assert len(evs) == 12
-    assert sum(e.end - e.start for e in evs) == 9072
+    assert sum(e.end - e.start for e in evs) == 8122
     assert all(day0 <= e.start < e.end <= day0 + 86400 for e in evs)
     assert all(a.end <= b.start for a, b in zip(evs, evs[1:]))
     assert {e.rule for e in evs} == set(range(1, 9))
