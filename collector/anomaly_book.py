@@ -3,7 +3,7 @@
 주입 사건은 API 가, 지속 고장은 실시간 시작부터 interval 마다 장부가 열고, 자동 이상은 생성기가 처음 표본을 만들 때 opened 로 알린다.
 세 가지 모두 한 테이블에 두어 정답지가 되고, 재시작하면 테이블에서 다시 읽어 열린 주입·지속 고장을 이어 간다.
 멈춤은 사건의 끝이 아니라 stop_requested_at 으로 따로 적어 stops 로 알린다. 생성기 워커 스레드와 요청 핸들러가 함께 부르므로
-장부 상태는 자체 락으로 지킨다.
+장부 상태는 자체 락으로 지킨다. 생성기가 이미 물어본 구간 끝(high-water)보다 앞선 주입·멈춤은 그 끝으로 미뤄 이미 만든 표본을 건드리지 않는다.
 """
 from __future__ import annotations
 
@@ -46,6 +46,7 @@ class AnomalyBook:
         self._events: dict[str, AnomalyEvent] = {}         # 장부의 모든 사건 (자동 이상은 end = 예정된 끝)
         self._stops: dict[str, float] = {}                 # event_id → 멈춤 시각
         self._next_fault: float | None = None              # 다음 지속 고장 예정 시각. 실시간 전에는 None
+        self._high = -math.inf                             # 생성기가 external 로 물어본 구간 끝의 최대 (그 앞 표본은 이미 만들었다)
         for r in storage.query_dicts("SELECT * FROM anomaly_event ORDER BY start_at"):
             self._events[r["event_id"]] = AnomalyEvent(r["event_id"], r["origin"], r["equip_id"], r["rule"],
                                                        _epoch(r["start_at"]), _epoch(r["scheduled_end_at"]),
@@ -65,6 +66,7 @@ class AnomalyBook:
     def external(self, start: float, end: float) -> list[AnomalyEvent]:
         """[start, end) 와 겹치는 주입·지속 고장. 예정 시각이 end 이하인 지속 고장은 이때 연다."""
         with self._lock:
+            self._high = max(self._high, end)
             while self._next_fault is not None and self._next_fault <= end:
                 self._open_fault(self._next_fault)
                 self._next_fault += self.interval
@@ -83,8 +85,9 @@ class AnomalyBook:
 
     # --- 주입·멈춤 -------------------------------------------------------------
     def inject(self, equip_id: str, rule: int, at: float) -> AnomalyEvent:
-        """at 부터 멈출 때까지 가는 주입 사건을 연다. 진행 중인 자동 이상은 at 에서 멈춘다."""
+        """at(이미 만든 구간 끝보다 앞서면 그 끝)부터 멈출 때까지 가는 주입 사건을 연다. 진행 중인 자동 이상은 그 시각에 멈춘다."""
         with self._lock:
+            at = max(at, self._high)
             if self._faulty(equip_id, at):
                 raise Busy(equip_id)
             n = 1 + sum(e.origin == "injected" for e in self._events.values())
@@ -93,18 +96,21 @@ class AnomalyBook:
             self._insert(event)
             return event
 
-    def stop(self, equip_id: str | None, at: float) -> list[str]:
-        """그 설비(None 이면 전체)의 살아 있는 사건(아직 안 멈춘 주입·지속 고장, at 에 진행 중인 자동 이상)을 at 에서 멈춘다."""
+    def stop(self, equip_id: str | None, at: float) -> tuple[float, list[str]]:
+        """그 설비(None 이면 전체)의 살아 있는 사건(아직 안 멈춘 주입·지속 고장, 그 시각에 진행 중인 자동 이상)을 멈춘다.
+        멈춤 시각은 at(이미 만든 구간 끝보다 앞서면 그 끝)이며 (멈춤 시각, 멈춘 event_id 목록)을 돌려준다."""
         with self._lock:
+            at = max(at, self._high)
             ids = [e.event_id for e in self._events.values()
                    if (equip_id is None or e.equip_id == equip_id) and self._alive(e, at)]
             for event_id in ids:
                 self._set_stop(event_id, at)
-            return ids
+            return at, ids
 
     # --- 정답지 ---------------------------------------------------------------
     def answer_key(self, equip_id: str | None, from_: str | None, to: str | None) -> list[dict]:
-        """사건 목록(시작 순). from/to(UTC ISO 문자열)는 구간과 겹치는 사건: 시작 < to 이고 끝이 없거나 끝 ≥ from."""
+        """사건 목록(시작 순). from/to(UTC ISO 문자열)는 구간과 겹치는 사건: 시작 < to 이고 끝이 없거나 끝 ≥ from.
+        시작 전이나 시작 시각에 멈춘 사건(길이 0, 표본에 나온 적 없다)은 싣지 않는다."""
         where, params = ["1=1"], []
         if equip_id:
             where.append("equip_id = ?"); params.append(equip_id)
@@ -114,6 +120,8 @@ class AnomalyBook:
                                         params)
         out = []
         for r in rows:
+            if r["stop_requested_at"] is not None and r["stop_requested_at"] <= r["start_at"]:
+                continue
             tags = json.loads(r["response_tags"])
             ends = [_epoch(x) for x in (r["scheduled_end_at"], r["stop_requested_at"]) if x is not None]
             recovery = max((resp.recovery_sec for resp in responses(self.plant, r["equip_id"], r["rule"]).values()), default=0)

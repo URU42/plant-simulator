@@ -54,7 +54,7 @@ def require_ingest_token(request: Request) -> None:
         if not hmac.compare_digest(request.headers.get("X-Ingest-Token", ""), settings.ingest_token):
             raise HTTPException(403, "invalid or missing X-Ingest-Token")
     elif settings.with_simulators:
-        raise HTTPException(403, "external ingest is disabled: set INGEST_TOKEN to allow POST /ingest in embedded mode")
+        raise HTTPException(403, "external writes are disabled: set INGEST_TOKEN to allow POST /ingest and /anomalies in embedded mode")
 
 
 @router.post("/ingest")
@@ -71,6 +71,15 @@ async def post_ingest(request: Request, ctx: PlantContext = Depends(context)):
 
 
 # --- 조회 ---------------------------------------------------------------------
+def query_time(name: str, value: str) -> str:
+    """조회 파라미터 시각을 저장 형식으로. 못 읽으면 400 (URL 의 '+' 는 공백이 되므로 Z 나 %2B 로 쓰라고 알린다)."""
+    try:
+        return to_db(parse_iso(value))
+    except ValueError:
+        raise HTTPException(400, f"invalid {name} {value!r}: use ISO 8601 with Z (2026-11-12T00:00:00Z) "
+                                 "or an encoded offset (2026-11-12T09:00:00%2B09:00)")
+
+
 @router.get("/")
 async def plant_page(ctx: PlantContext = Depends(context)):
     # 디버깅 화면은 자주 바뀌므로 브라우저가 캐시하지 않게 한다
@@ -117,7 +126,7 @@ def timeseries(equip_id: str, tag_id: str, from_: str = Query(alias="from"), to:
     return ctx.storage.query_dicts(
         f"SELECT equip_id, tag_id, bucket_start AS ts, avg, min, max, sd, count, status FROM ts_{interval} "
         "WHERE equip_id = ? AND tag_id = ? AND bucket_start >= ? AND bucket_start < ? ORDER BY bucket_start",
-        (equip_id, tag_id, to_db(parse_iso(from_)), to_db(parse_iso(to))),
+        (equip_id, tag_id, query_time("from", from_), query_time("to", to)),
     )
 
 
@@ -132,16 +141,16 @@ def alarms(equip_id: str | None = None, rule: int | None = Query(default=None, g
     if rule is not None:
         where.append("rule = ?"); params.append(rule)
     if from_:
-        where.append("(cleared_at IS NULL OR cleared_at >= ?)"); params.append(to_db(parse_iso(from_)))
+        where.append("(cleared_at IS NULL OR cleared_at >= ?)"); params.append(query_time("from", from_))
     if to:
-        where.append("occurred_at < ?"); params.append(to_db(parse_iso(to)))
+        where.append("occurred_at < ?"); params.append(query_time("to", to))
     if open_:
         where.append("cleared_at IS NULL")
     return ctx.storage.query_dicts(f"SELECT * FROM nelson_alarm WHERE {' AND '.join(where)} ORDER BY occurred_at DESC", params)
 
 
 # --- 이상 사건: 주입·멈춤·정답지 (Nelson 이상 설계 §4.6) ----------------------------
-START_DELAY_SEC = 3     # 주입·멈춤은 시뮬레이터 시각 기준 이만큼 뒤부터 (이미 만든 표본을 건드리지 않도록)
+START_DELAY_SEC = 3     # 주입·멈춤은 시뮬레이터 시각 기준 이만큼 뒤부터. 장부가 이미 만든 구간 끝보다 앞서면 더 미룬다
 
 
 class InjectBody(BaseModel):
@@ -149,15 +158,27 @@ class InjectBody(BaseModel):
     rule: int = Field(ge=1, le=8)
 
 
-def require_live(request: Request, ctx: PlantContext) -> float:
-    """사건 쓰기(POST) 확인: 토큰 → 통합 실행(409) → 실시간(503). 사건 시각(epoch 초) = ceil(시뮬레이터 현재 시각) + 3."""
+def require_live(request: Request, ctx: PlantContext) -> None:
+    """사건 쓰기(POST) 확인: 토큰 → 통합 실행(409) → 생성기 죽음(503) → 실시간(503). DB 는 읽지 않는다(이벤트 루프 위)."""
     require_ingest_token(request)
     if not request.app.state.settings.with_simulators:
         raise HTTPException(409, "embedded only")
+    if ctx.simulator_error:
+        raise HTTPException(503, f"simulator stopped: {ctx.simulator_error}")
+    if not ctx.live:
+        raise HTTPException(503, "backfilling")
+
+
+def event_time(ctx: PlantContext) -> float:
+    """요청 시각(epoch 초) = ceil(시뮬레이터 현재 시각) + 3. 저장소를 읽으므로 워커 스레드에서 부른다. sim_now 를 모르면 503."""
     sim_now = ctx.storage.sim_now()
-    if not ctx.live or sim_now is None:
+    if sim_now is None:
         raise HTTPException(503, "backfilling")
     return math.ceil(from_db(sim_now).timestamp()) + START_DELAY_SEC
+
+
+def _utc(epoch: float) -> str:
+    return to_db(datetime.fromtimestamp(epoch, timezone.utc))
 
 
 def _require_equipment(ctx: PlantContext, equip_id: str) -> None:
@@ -167,44 +188,46 @@ def _require_equipment(ctx: PlantContext, equip_id: str) -> None:
 
 @router.post("/anomalies", status_code=201)
 async def inject_anomaly(request: Request, ctx: PlantContext = Depends(context)):
-    """설비 하나에 규칙 하나의 사건을 연다. 멈출 때까지 간다. 그 설비에 주입·지속 고장이 살아 있으면 409."""
-    at = require_live(request, ctx)               # 본문보다 먼저 (post_ingest 와 같은 이유)
+    """설비 하나에 규칙 하나의 사건을 연다. 멈출 때까지 간다. 그 설비에 주입·지속 고장이 살아 있으면 409.
+    start_at 은 실제 시작 시각(ceil(sim_now)+3, 생성기가 이미 그 뒤까지 만들었으면 그 끝)."""
+    require_live(request, ctx)                    # 본문보다 먼저 (post_ingest 와 같은 이유)
     try:
         body = InjectBody.model_validate(await request.json())
     except (ValueError, ValidationError) as e:
         raise HTTPException(422, f"invalid body: {str(e)[:300]}")
     _require_equipment(ctx, body.equip_id)
     try:
-        event = await asyncio.to_thread(ctx.book.inject, body.equip_id, body.rule, at)
+        event = await asyncio.to_thread(lambda: ctx.book.inject(body.equip_id, body.rule, event_time(ctx)))
     except Busy:
         raise HTTPException(409, f"{body.equip_id} has a live injected or persistent fault: stop it first")
-    return {"event_id": event.event_id, "equip_id": event.equip_id, "rule": event.rule,
-            "start_at": to_db(datetime.fromtimestamp(event.start, timezone.utc))}
+    return {"event_id": event.event_id, "equip_id": event.equip_id, "rule": event.rule, "start_at": _utc(event.start)}
 
 
 @router.post("/anomalies/stop")
 async def stop_all_anomalies(request: Request, ctx: PlantContext = Depends(context)):
-    """그 공장의 살아 있는 사건을 모두 멈춘다. 예정된 자동 이상·지속 고장 일정은 그대로 이어진다."""
-    at = require_live(request, ctx)
-    return {"stopped": await asyncio.to_thread(ctx.book.stop, None, at)}
+    """그 공장의 살아 있는 사건을 모두 멈춘다. 예정된 자동 이상·지속 고장 일정은 그대로 이어진다.
+    stop_requested_at 은 실제 멈춤 시각(주입의 start_at 과 같은 규칙)."""
+    require_live(request, ctx)
+    at, stopped = await asyncio.to_thread(lambda: ctx.book.stop(None, event_time(ctx)))
+    return {"stopped": stopped, "stop_requested_at": _utc(at)}
 
 
 @router.post("/anomalies/{equip_id}/stop")
 async def stop_anomaly(equip_id: str, request: Request, ctx: PlantContext = Depends(context)):
     """그 설비의 살아 있는 사건(주입·지속 고장·자동 이상)을 멈춘다. 모르는 설비이거나 멈출 사건이 없으면 404."""
-    at = require_live(request, ctx)
+    require_live(request, ctx)
     _require_equipment(ctx, equip_id)
-    stopped = await asyncio.to_thread(ctx.book.stop, equip_id, at)
+    at, stopped = await asyncio.to_thread(lambda: ctx.book.stop(equip_id, event_time(ctx)))
     if not stopped:
         raise HTTPException(404, f"no live anomaly on {equip_id}")
-    return {"stopped": stopped}
+    return {"stopped": stopped, "stop_requested_at": _utc(at)}
 
 
 @router.get("/anomalies")
 def answer_key(equip_id: str | None = None, from_: str | None = Query(default=None, alias="from"), to: str | None = None,
                ctx: PlantContext = Depends(context)):
     """정답지: 사건마다 출처·규칙·분류·반응 태그·시작·멈춤·끝(마지막 태그 회복 끝). from/to 는 구간과 겹치는 사건."""
-    return ctx.book.answer_key(equip_id, to_db(parse_iso(from_)) if from_ else None, to_db(parse_iso(to)) if to else None)
+    return ctx.book.answer_key(equip_id, query_time("from", from_) if from_ else None, query_time("to", to) if to else None)
 
 
 @router.get("/stream")
@@ -326,9 +349,9 @@ def main(argv=None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args = _parse_args(argv)
     plants = load_plants(args.plants)
-    settings = Settings.from_env(with_simulators=args.with_simulators or None, time_mode=args.time_mode,
-                                 backfill_days=args.backfill_days)
     try:
+        settings = Settings.from_env(with_simulators=args.with_simulators or None, time_mode=args.time_mode,
+                                     backfill_days=args.backfill_days)
         check_plants(plants)
     except ConfigError as e:
         sys.exit(f"error: {e}")

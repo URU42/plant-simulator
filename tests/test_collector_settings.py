@@ -1,10 +1,12 @@
 """배포 설정 (k8s 설계 §4.2): ROOT_PATH, CORS_ORIGINS, INGEST_TOKEN."""
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from collector.app import create_single_app
 from collector.settings import Settings
+from common.config_models import ConfigError
 from common.message import IngestBatch, Sample
 
 T0 = datetime(2026, 11, 9, 1, 0, tzinfo=timezone.utc)
@@ -53,10 +55,18 @@ def test_embedded_mode_without_token_closes_http_ingest(rfcc_plant_path, rfcc_ru
         s = [Sample(equip_id="P-1101A", tag_id="VI-P-1101A", ts=T0, value=1.45, status="Good")]
         body = IngestBatch(source_id="T", batch_id="b-ext", sent_at=T0, samples=s).model_dump_json()
         r = c.post("/plant/ingest", content=body, headers={"content-type": "application/json"})
-        assert r.status_code == 403 and "INGEST_TOKEN" in r.json()["detail"]
+        assert r.status_code == 403 and "INGEST_TOKEN" in r.json()["detail"] and "/anomalies" in r.json()["detail"]
+        assert c.post("/plant/anomalies", json={"equip_id": "P-1101A", "rule": 1}).status_code == 403
 
 
 def test_token_is_checked_before_body_is_parsed(plant_path, runtime_path):
     with TestClient(create_single_app(plant_path, runtime_path, ":memory:", settings=Settings(ingest_token="s3cret"))) as c:
         r = c.post("/plant/ingest", content="not json", headers={"content-type": "application/json"})
         assert r.status_code == 403                                  # 422 (스키마 상세) 가 아니라 403
+
+
+@pytest.mark.parametrize("raw", ["abc", "-1", "nan"])
+def test_invalid_persistent_fault_interval_names_the_variable(monkeypatch, raw):
+    monkeypatch.setenv("PERSISTENT_FAULT_INTERVAL_MIN", raw)
+    with pytest.raises(ConfigError, match="PERSISTENT_FAULT_INTERVAL_MIN"):
+        Settings.from_env()

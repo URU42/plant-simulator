@@ -18,14 +18,14 @@ def test_inject_busy_and_stop(book):
     assert e.origin == "injected" and e.start == 1000.0 and e.end is None
     with pytest.raises(Busy):
         b.inject("C-3101", 2, at=1010.0)
-    assert b.stop("C-3101", at=1100.0) == [e.event_id]
+    assert b.stop("C-3101", at=1100.0) == (1100.0, [e.event_id])
     assert b.stops()[e.event_id] == 1100.0
 
 def test_stop_twice_and_empty(book):
     b, _, _ = book
-    assert b.stop("C-3101", at=10.0) == [] and b.stop(None, at=10.0) == []
+    assert b.stop("C-3101", at=10.0)[1] == [] and b.stop(None, at=10.0)[1] == []
     e = b.inject("C-3101", 3, at=20.0)
-    assert b.stop(None, at=30.0) == [e.event_id] and b.stop("C-3101", at=40.0) == []
+    assert b.stop(None, at=30.0)[1] == [e.event_id] and b.stop("C-3101", at=40.0)[1] == []
 
 def test_inject_truncates_active_spontaneous(book):
     b, _, _ = book
@@ -56,3 +56,40 @@ def test_answer_key_fields(book):
     e = b.inject("C-3101", 7, at=50.0); b.stop("C-3101", at=80.0)
     row = b.answer_key(None, None, None)[0]
     assert row["kind"] == "계측 이상" and row["response_tags"] == ["XI-X-C3101"] and row["end_at"] is not None
+
+
+def test_inject_and_stop_never_land_in_generated_samples(book, config_dir):
+    """생성기가 시계보다 늦게 재생 중이어도(요청 시각 < 이미 만든 구간 끝) 주입·멈춤은 이미 만든 표본 뒤로 미뤄진다."""
+    from datetime import datetime, timedelta
+    from common.config_models import load_runtime
+    from common.sim_clock import KST
+    from common.timefmt import to_db
+    from simulator.anomaly import primary_tag
+    from simulator.nelson_model import NelsonGenerator
+
+    b, _, plant = book
+    rt = load_runtime(config_dir / "runtime_rhds.yaml")
+    rt = rt.model_copy(update={"units": [plant.equipment_by_id()["C-3101"].unit_id]})
+    t0 = datetime(2026, 11, 12, 0, 0, tzinfo=KST)
+    g = NelsonGenerator(plant, rt, b, spontaneous=False)
+    first = g.generate(t0, t0 + timedelta(seconds=60))              # 장부의 high-water = t0 + 60
+    high = t0.timestamp() + 60
+    e = b.inject("C-3101", 1, at=t0.timestamp() + 10)              # 10초 시점 요청 (이미 만든 구간 안)
+    row = b.answer_key("C-3101", None, None)[0]
+    assert e.start == high and row["start_at"] == to_db(datetime.fromtimestamp(high, KST))
+    second = g.generate(t0 + timedelta(seconds=60), t0 + timedelta(seconds=120))
+    tag = primary_tag(plant, "C-3101")
+    assert not [s for s in first if s.equip_id == "C-3101" and s.status == "Bad"]
+    first_bad = next(s for s in second if s.tag_id == tag and s.status == "Bad")
+    assert first_bad.ts.timestamp() == e.start
+    at, ids = b.stop("C-3101", at=t0.timestamp() + 30)             # 멈춤도 같은 규칙 (high-water = t0 + 120)
+    assert ids == [e.event_id] and at == t0.timestamp() + 120
+
+
+def test_answer_key_skips_zero_length_event(book):
+    """시작 시각에 멈춘 사건은 표본에 나온 적이 없으므로 정답지에 싣지 않는다."""
+    b, _, _ = book
+    e = b.inject("C-3101", 2, at=50.0)
+    b.stop("C-3101", at=50.0)
+    assert b.answer_key(None, None, None) == []
+    assert e.event_id in b.stops()

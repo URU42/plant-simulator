@@ -8,8 +8,11 @@ PERSISTENT_FAULT_INTERVAL_MIN  있으면 모든 공장 runtime 의 지속 고장
 """
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
+
+from common.config_models import ConfigError
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
@@ -33,9 +36,22 @@ class Settings:
             cors_origins=[o.strip() for o in env.get("CORS_ORIGINS", "").split(",") if o.strip()],
             ingest_token=env.get("INGEST_TOKEN") or None,
             with_simulators=env.get("WITH_SIMULATORS", "").strip().lower() in TRUE_VALUES,
-            persistent_fault_interval_min=float(env["PERSISTENT_FAULT_INTERVAL_MIN"]) if env.get("PERSISTENT_FAULT_INTERVAL_MIN") else None,
+            persistent_fault_interval_min=_interval_min(env.get("PERSISTENT_FAULT_INTERVAL_MIN")),
         )
         for name, value in overrides.items():
             if value is not None:
                 setattr(s, name, value)
         return s
+
+
+def _interval_min(raw: str | None) -> float | None:
+    """PERSISTENT_FAULT_INTERVAL_MIN 값(분). 비었으면 None. 0 이상의 수가 아니면 변수 이름을 담은 ConfigError."""
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or value < 0:
+        raise ConfigError(f"PERSISTENT_FAULT_INTERVAL_MIN must be a number of minutes ≥ 0 (0 turns it off), got {raw!r}")
+    return value

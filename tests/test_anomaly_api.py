@@ -60,10 +60,11 @@ def test_inject_then_bad_then_stop(client):
         x["equip_id"] == "C-3101" and x["tag_id"] == "XI-X-C3101" and x["status"] == "Bad" for x in rows), timeout=6.0)
     alarms = _wait(client, "/plant/alarms?equip_id=C-3101&rule=1", bool, timeout=6.0)
     assert not {"kind", "cause", "event_id"} & set(alarms[0])
-    assert client.post("/plant/anomalies/C-3101/stop", headers=TOKEN).json() == {"stopped": [body["event_id"]]}
+    stop = client.post("/plant/anomalies/C-3101/stop", headers=TOKEN).json()
+    assert stop["stopped"] == [body["event_id"]] and stop["stop_requested_at"] >= body["start_at"]
     assert client.post("/plant/anomalies/C-3101/stop", headers=TOKEN).status_code == 404
     row = next(x for x in client.get("/plant/anomalies?equip_id=C-3101").json() if x["event_id"] == body["event_id"])
-    assert row["origin"] == "injected" and row["stop_requested_at"] is not None and row["end_at"] is not None
+    assert row["origin"] == "injected" and row["stop_requested_at"] == stop["stop_requested_at"] and row["end_at"] is not None
 
 
 def test_unknown_equipment_and_bad_rule(client):
@@ -74,9 +75,32 @@ def test_unknown_equipment_and_bad_rule(client):
 
 def test_stop_all_returns_list(client):
     r = client.post("/plant/anomalies/stop", headers=TOKEN)
-    assert r.status_code == 200 and isinstance(r.json()["stopped"], list)
+    assert r.status_code == 200 and isinstance(r.json()["stopped"], list) and r.json()["stop_requested_at"]
 
 
 def test_env_overrides_interval(monkeypatch):
     monkeypatch.setenv("PERSISTENT_FAULT_INTERVAL_MIN", "0")
     assert Settings.from_env().persistent_fault_interval_min == 0
+
+
+def test_dead_simulator_returns_503(client):
+    """생성기가 죽었으면 주입·멈춤은 실시간 확인보다 먼저 503 이다."""
+    ctx = client.app.state.plants["plant"]
+    ctx.simulator_error = "RuntimeError('boom')"
+    try:
+        for path, body in (("/plant/anomalies", {"equip_id": "C-3101", "rule": 1}), ("/plant/anomalies/stop", None)):
+            r = client.post(path, json=body, headers=TOKEN)
+            assert r.status_code == 503 and r.json()["detail"].startswith("simulator stopped")
+    finally:
+        ctx.simulator_error = None
+
+
+TS = {"equip_id": "C-3101", "tag_id": "XI-X-C3101", "to": "2026-11-13T00:00:00Z"}
+
+
+@pytest.mark.parametrize("path,extra", [("/plant/alarms", {}), ("/plant/anomalies", {}), ("/plant/timeseries", TS)])
+def test_unparseable_time_is_400(client, path, extra):
+    """'+09:00' 을 인코딩하지 않으면 공백이 되어 못 읽는다 → 500 이 아니라 Z·%2B 를 알려 주는 400."""
+    r = client.get(path, params=extra | {"from": "2026-11-12T09:00:00 09:00"})
+    assert r.status_code == 400 and "from" in r.json()["detail"] and "%2B" in r.json()["detail"]
+    assert client.get(path, params=extra | {"from": "2026-11-12T00:00:00Z"}).status_code == 200

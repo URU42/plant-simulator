@@ -41,7 +41,7 @@ class PlantContext:
     tag_keys: set[TagKey]
     alarms: AlarmTracker                      # 받을 때마다 Nelson 판정해 nelson_alarm 에 적는다
     book: AnomalyBook                         # 이상 사건 장부 (통합 실행 생성기의 EventSource, 정답지)
-    live: bool = False                        # 생성기가 실시간(또는 가속)으로 도는가. 백필 중이면 False
+    live: bool = False                        # 생성기가 실시간(또는 가속)으로 시계를 따라잡았는가. 백필·밀린 구간 재생 중이면 False
     catch_up_task: asyncio.Task | None = field(default=None)
     simulator_error: str | None = field(default=None)               # 통합 실행의 생성기 태스크가 예외로 끝났을 때
     # 저장·배치 전진은 워커 스레드에서도 돌 수 있다(통합 실행). 한 공장의 SQLite 트랜잭션이 겹치지 않도록 락으로 직렬화한다.
@@ -67,7 +67,7 @@ class PlantContext:
                                     if persistent_fault_interval_min is None else persistent_fault_interval_min))
 
     def set_live(self, at: float) -> None:
-        """생성기가 실시간으로 넘어갔다(at = 실시간 첫 시각, epoch 초). 이때부터 주입을 받고 지속 고장을 연다."""
+        """생성기가 실시간으로 넘어가 시계를 따라잡았다(at = 따라잡은 첫 구간 시작, epoch 초). 이때부터 주입을 받고 지속 고장을 연다."""
         self.book.set_live(at)
         self.live = True
 

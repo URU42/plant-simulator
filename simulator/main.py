@@ -37,9 +37,16 @@ class Simulator:
         # 다음에 만들 구간의 시작. 재시작 때는 catch_up_windows 만큼 되감아 죽어 있던 구간을 다시 보낸다(수집 서버가 중복은 버린다)
         self.cursor: datetime = align_down(clock.now(), runtime.send_interval_sec) - self.window * catch_up_windows
 
-    async def run(self, until: datetime | None = None) -> None:
-        """until 까지(없으면 끝없이) 구간을 만들어 보낸다. 구간이 끝나는 시각까지 기다렸다가 보낸다."""
+    async def run(self, until: datetime | None = None, on_live: Callable[[datetime], None] | None = None) -> None:
+        """until 까지(없으면 끝없이) 구간을 만들어 보낸다. 구간이 끝나는 시각까지 기다렸다가 보낸다.
+
+        on_live 가 있으면 커서가 시계를 따라잡은 첫 구간(구간 끝 ≥ 지금) 앞에서 그 커서로 한 번 부른다.
+        실시간 시계는 지난 시각을 기다리지 않으므로, 그 전까지는 밀린 구간을 몰아서 만드는 중이다.
+        """
         while until is None or self.cursor < until:
+            if on_live is not None and self.cursor + self.window >= self.clock.now():
+                on_live(self.cursor)
+                on_live = None
             end = self.cursor + self.window
             if until is not None:
                 end = min(end, until)
@@ -80,7 +87,7 @@ async def run_backfill_then_live(plant: PlantConfig, runtime: RuntimeConfig, sen
     """지난 backfill_days 를 1시간 묶음으로 빠르게 보낸 뒤, 끝난 구간부터 실시간으로 이어 간다.
 
     수집 서버에 이미 값이 있으면(재시작) 그 마지막 측정 시각의 구간부터 이어서 보내 90일을 다시 보내지 않고,
-    그 최근 값으로 생성기를 되살린다. 실시간으로 넘어가는 순간 on_live(실시간 시작 시각)를 한 번 부른다.
+    그 최근 값으로 생성기를 되살린다. 실시간 구간이 시계를 따라잡는 순간 on_live(그 구간 시작 시각)를 한 번 부른다.
     now / live_clock / live_until 은 테스트용이다. 실제 실행에서는 현재 시각과 실제 시계를 쓴다.
     """
     start, live_start = backfill_range(runtime, now or datetime.now(KST))
@@ -99,16 +106,15 @@ async def run_backfill_then_live(plant: PlantConfig, runtime: RuntimeConfig, sen
     # 백필이 끝난 구간부터 같은 생성기(판정 이력·난수)와 같은 일련번호로 이어 간다
     live.generator, live.cursor, live.seq = backfill.generator, live_start, backfill.seq
     log.info("switch to live from %s", live_start)
-    if on_live is not None:
-        on_live(live_start)
-    await live.run(until=live_until)
+    await live.run(until=live_until, on_live=on_live)
 
 
 async def run_mode(plant: PlantConfig, runtime: RuntimeConfig, sender: Sender, source: EventSource | None = None,
                    window_sec: int = BACKFILL_WINDOW_SEC, on_live: Callable[[datetime], None] | None = None) -> None:
     """time_mode 에 따라 시계를 고르고 실행한다. window_sec 은 백필 묶음 길이.
 
-    on_live(시각) 는 실시간(또는 가속)으로 도는 첫 시각에 한 번 불린다: backfill 은 실시간 전환 때, live·accelerated 는 시작 때.
+    on_live(시각) 는 모든 모드에서 한 번, 커서가 시계를 따라잡은 첫 구간의 시작 시각으로 불린다
+    (backfill 은 실시간 구간이 밀린 몫을 다 만든 뒤, live·accelerated 는 대개 시작하자마자).
     """
     if runtime.time_mode == "backfill":
         await run_backfill_then_live(plant, runtime, sender, source, window_sec=window_sec, on_live=on_live)
@@ -119,9 +125,7 @@ async def run_mode(plant: PlantConfig, runtime: RuntimeConfig, sender: Sender, s
     else:
         sim = Simulator(plant, runtime, sender, SimClock.live(), source, catch_up_windows=1)
     await restore_from_collector(sim, sender)
-    if on_live is not None:
-        on_live(sim.cursor)
-    await sim.run()
+    await sim.run(on_live=on_live)
 
 
 def _parse_args(argv=None) -> argparse.Namespace:

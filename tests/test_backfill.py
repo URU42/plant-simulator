@@ -133,19 +133,35 @@ class _Stop(Exception):
     pass
 
 
-class StopAfterFirst(MemorySender):
-    """첫 묶음을 받고 실행을 끝낸다 (끝없이 도는 live·accelerated 를 시험하려고)."""
+class StopAfterSecond(MemorySender):
+    """두 번째 묶음을 받고 실행을 끝낸다 (끝없이 도는 live·accelerated 를 시험하려고)."""
 
     async def send(self, batch):
-        await super().send(batch)
-        raise _Stop
+        result = await super().send(batch)
+        if len(self.batches) == 2:
+            raise _Stop
+        return result
 
 
-@pytest.mark.parametrize("mode", ["live", "accelerated"])
-async def test_run_mode_calls_on_live_once_at_first_cursor(plant_path, mode):
+@pytest.mark.parametrize("mode,caught_up", [("live", 1), ("accelerated", 0)])
+async def test_run_mode_calls_on_live_once_when_caught_up(plant_path, mode, caught_up):
+    """on_live 는 커서가 시계를 따라잡은 첫 구간에서 한 번. live 는 재시작용으로 되감은 첫 구간(이미 지난 1초)을 보낸 다음,
+    accelerated 는 첫 구간부터다."""
     plant = load_plant(plant_path)
     runtime = _runtime(time_mode=mode, speed=1200, send_interval_sec=1)
-    sender, on_live = StopAfterFirst(), []
+    sender, on_live = StopAfterSecond(), []
     with pytest.raises(_Stop):
         await run_mode(plant, runtime, sender, on_live=on_live.append)
-    assert len(on_live) == 1 and on_live[0] == sender.batches[0].samples[0].ts
+    assert on_live == [sender.batches[caught_up].samples[0].ts]
+
+
+async def test_on_live_waits_for_live_loop_to_catch_up(plant_path):
+    """실시간 구간이 시계보다 5분 늦게 시작하면(밀린 몫을 몰아서 만든다) on_live 는 따라잡은 구간에서 한 번만 불린다."""
+    plant = load_plant(plant_path)
+    runtime = _runtime(time_mode="backfill", backfill_days=1)
+    sender, on_live = ResumingSender(LIVE_START - timedelta(seconds=1)), []
+    clock = SimClock.backfill(NOW + timedelta(minutes=5))                # 지금 = 12:05:37, 실시간 시작 = 12:00:00
+    await run_backfill_then_live(plant, runtime, sender, now=NOW, live_clock=clock,
+                                 live_until=LIVE_START + timedelta(minutes=7), on_live=on_live.append)
+    assert on_live == [LIVE_START + timedelta(minutes=5)]               # 12:05:00 구간 끝(12:06) ≥ 지금
+    assert len(sender.batches) == 7
