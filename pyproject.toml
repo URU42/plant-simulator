@@ -1,7 +1,7 @@
 [project]
 name = "plant-simulator"
 version = "0.1.0"
-description = "Skadi 앞단 데이터 생성기: 가상 공장 여섯 곳(HDS · RFCC · CDU · HOU · RHDS · VRDS) 설비 시뮬레이터 + 중앙 수집 서버"
+description = "Skadi 앞단 데이터 생성기: 가상 공장 다섯 곳(RFCC · CDU · HOU · RHDS · VRDS) 설비 시뮬레이터 + 중앙 수집 서버"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.7",
