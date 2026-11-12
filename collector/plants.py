@@ -2,7 +2,7 @@
 
 ```yaml
 plants:
-  - { key: cdu, plant: config/plant_cdu.yaml, runtime: config/runtime_cdu.yaml, scenario: config/scenario_cdu.yaml, db: data/cdu.db }
+  - { key: cdu, plant: config/plant_cdu.yaml, runtime: config/runtime_cdu.yaml, db: data/cdu.db }
 ```
 key 는 URL 접두어(`/cdu/...`)이자 로그·루트 목록의 이름이다. 파일 존재는 서버가 공장을 열 때 확인한다.
 """
@@ -21,7 +21,6 @@ class PlantEntry(BaseModel):
     key: str = Field(pattern=r"^[a-z0-9-]+$")   # URL 접두어
     plant: str                                   # 구성안 yaml
     runtime: str                                 # 실행 설정 yaml
-    scenario: str | None = None                  # 개발용 시나리오 (정비·고장 이력 적재용)
     db: str                                      # SQLite 파일
 
 

@@ -17,9 +17,9 @@ def client(plant_path, runtime_path):
 
 def _batch(batch_id="b-20261108-172400-SIM-ALL-0001", samples=None):
     samples = samples or [
-        Sample(equip_id="C-1101", tag_id="VI-C1101", ts=f"2026-11-08T17:23:10{KST}", value=2.34, quality="Good"),
-        Sample(equip_id="C-1101", tag_id="VI-C1101", ts=f"2026-11-08T17:23:20{KST}", value=2.36, quality="Good"),
-        Sample(equip_id="P-1101", tag_id="TI-P1101", ts=f"2026-11-08T17:23:10{KST}", value=None, quality="ScanOff"),
+        Sample(equip_id="C-3101", tag_id="XI-X-C3101", ts=f"2026-11-08T17:23:10{KST}", value=2.34, quality="Good"),
+        Sample(equip_id="C-3101", tag_id="XI-X-C3101", ts=f"2026-11-08T17:23:20{KST}", value=2.36, quality="Good"),
+        Sample(equip_id="P-3101", tag_id="TI-B-P3101", ts=f"2026-11-08T17:23:10{KST}", value=None, quality="ScanOff"),
     ]
     return IngestBatch(source_id="SIM-ALL", batch_id=batch_id, sent_at=f"2026-11-08T17:24:00{KST}", samples=samples)
 
@@ -31,13 +31,15 @@ def _post(client, batch: IngestBatch, **overrides):
 
 def test_master_is_seeded_from_plant_config(client):
     storage = client.app.state.plants["plant"].storage
-    assert storage.count("equipment") == 20
-    assert storage.count("equipment_tag") == 46
+    assert storage.count("equipment") == 6
+    assert storage.count("equipment_tag") == 43
     assert storage.count("unit") == 6
-    assert storage.count("equipment_type") == 7
-    assert storage.count("tag_std") == 3
-    assert storage.count("equipment_alias") >= 22
-    assert ("C-1101",) in storage.query("SELECT equip_id FROM equipment_alias WHERE alias = ?", ("1호기 압축기",))
+    assert storage.count("equipment_type") == 3
+    assert storage.count("tag_std") == 15
+    row = storage.query_dicts("SELECT * FROM equipment_tag WHERE equip_id = 'P-3101' AND tag_id = 'VI-A-P3101'")[0]
+    assert (row["control_mean"], row["control_sigma"]) == (1.65, 0.04614035877985053)
+    assert (row["warn_hi"], row["alarm_hi"], row["trip_hi"], row["interval_sec"], row["decimals"]) == (4.5, 7.1, 11, 1, 3)
+    assert "delay_samples" not in row and "location" not in row
 
 
 def test_ingest_stores_rows_and_updates_current(client):
@@ -47,7 +49,7 @@ def test_ingest_stores_rows_and_updates_current(client):
     assert body["stored"] == 3 and body["rejected"] == 0 and body["duplicate"] is False
     assert client.app.state.plants["plant"].storage.count("ts_raw") == 3
 
-    cur = client.get("/plant/equipment/C-1101/tags/VI-C1101/current").json()
+    cur = client.get("/plant/equipment/C-3101/tags/XI-X-C3101/current").json()
     assert cur["value"] == 2.36 and cur["quality"] == "Good"
     assert cur["ts"] == "2026-11-08T08:23:20+00:00"   # 저장 시각은 UTC
 
@@ -68,9 +70,9 @@ def test_same_tag_ts_in_another_batch_is_stored_once(client):
 
 def test_unknown_tag_and_malformed_rows_are_rejected_with_reason(client):
     body = _batch().model_dump(mode="json")
-    body["samples"].append({"equip_id": "C-1101", "tag_id": "VI-NOPE", "ts": f"2026-11-08T17:23:10{KST}", "value": 1.0, "quality": "Good"})
-    body["samples"].append({"equip_id": "C-1101", "tag_id": "VI-C1101", "ts": "not-a-time", "value": 1.0, "quality": "Good"})
-    body["samples"].append({"equip_id": "P-1101", "tag_id": "VI-C1101", "ts": f"2026-11-08T17:23:30{KST}", "value": 1.0, "quality": "Good"})
+    body["samples"].append({"equip_id": "C-3101", "tag_id": "VI-NOPE", "ts": f"2026-11-08T17:23:10{KST}", "value": 1.0, "quality": "Good"})
+    body["samples"].append({"equip_id": "C-3101", "tag_id": "XI-X-C3101", "ts": "not-a-time", "value": 1.0, "quality": "Good"})
+    body["samples"].append({"equip_id": "P-3101", "tag_id": "XI-X-C3101", "ts": f"2026-11-08T17:23:30{KST}", "value": 1.0, "quality": "Good"})
     r = client.post("/plant/ingest", json=body)
     assert r.status_code == 200
     res = r.json()
@@ -78,16 +80,16 @@ def test_unknown_tag_and_malformed_rows_are_rejected_with_reason(client):
     reasons = {x["index"]: x["reason"] for x in res["reasons"]}
     assert "VI-NOPE" in reasons[3]
     assert "ts" in reasons[4]
-    assert "P-1101/VI-C1101" in reasons[5]          # 그 설비에는 그 태그가 없다
+    assert "P-3101/XI-X-C3101" in reasons[5]          # 그 설비에는 그 태그가 없다
 
 
 def test_out_of_order_rows_do_not_move_current_backwards(client):
     _post(client, _batch())
     late = _batch(batch_id="b-late", samples=[
-        Sample(equip_id="C-1101", tag_id="VI-C1101", ts=f"2026-11-08T17:22:50{KST}", value=9.9, quality="Good"),
+        Sample(equip_id="C-3101", tag_id="XI-X-C3101", ts=f"2026-11-08T17:22:50{KST}", value=9.9, quality="Good"),
     ])
     assert _post(client, late).json()["stored"] == 1
-    cur = client.get("/plant/equipment/C-1101/tags/VI-C1101/current").json()
+    cur = client.get("/plant/equipment/C-3101/tags/XI-X-C3101/current").json()
     assert cur["value"] == 2.36
 
 
@@ -119,6 +121,6 @@ def test_sample_with_added_field_is_accepted_v1x(client):
 def test_rows_older_than_retention_are_rejected(client):
     _post(client, _batch())
     old = _batch(batch_id="b-old", samples=[
-        Sample(equip_id="C-1101", tag_id="VI-C1101", ts=f"2026-10-01T00:00:00{KST}", value=2.0, quality="Good")])
+        Sample(equip_id="C-3101", tag_id="XI-X-C3101", ts=f"2026-10-01T00:00:00{KST}", value=2.0, quality="Good")])
     res = _post(client, old).json()
     assert res["stored"] == 0 and res["rejected"] == 1 and "retention" in res["reasons"][0]["reason"]

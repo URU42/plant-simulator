@@ -40,3 +40,12 @@ def test_receive_publishes_only_with_subscribers(ctx, monkeypatch):
     monkeypatch.setattr(ctx.broadcaster, "has_subscribers", lambda: True)
     ctx.receive("b-2", "T", _samples(T0 + timedelta(seconds=10), 3), to_db(T0))
     assert len(calls) == 1 and len(calls[0][1]) == 3
+
+
+def test_storage_recent_values_are_last_n_per_tag_oldest_first(ctx):
+    ctx.receive("b-1", "T", _samples(T0, 5, 1.0) + [Sample(equip_id="P-1101A", tag_id="TI-P-1101A", ts=T0, value=65.0, quality="Bad")],
+                to_db(T0))
+    ctx.receive("b-2", "T", [Sample(equip_id="P-1101A", tag_id="VI-P-1101A", ts=T0 + timedelta(seconds=5 + i), value=2.0 + i,
+                                    quality="Good") for i in range(2)], to_db(T0))
+    assert ctx.storage.recent_values(3) == {("P-1101A", "VI-P-1101A"): [1.0, 2.0, 3.0], ("P-1101A", "TI-P-1101A"): [65.0]}
+    assert ctx.storage.recent_values(14)[("P-1101A", "VI-P-1101A")] == [1.0] * 5 + [2.0, 3.0]

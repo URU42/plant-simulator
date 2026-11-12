@@ -131,20 +131,6 @@ def alarms(equip_id: str | None = None, from_: str | None = Query(default=None, 
     return ctx.storage.query_dicts(f"SELECT * FROM alarm_detail WHERE {' AND '.join(where)} ORDER BY occurred_at DESC", params)
 
 
-@router.get("/maintenance")
-def maintenance(equip_id: str | None = None, ctx: PlantContext = Depends(context)):
-    """정비 이력 (개발용 시나리오에서 적재). 다른 파드는 DB 를 직접 읽지 못하므로 API 로 연다."""
-    where, params = ("WHERE equip_id = ?", [equip_id]) if equip_id else ("", [])
-    return ctx.storage.query_dicts(f"SELECT * FROM maintenance_history {where} ORDER BY start_ts", params)
-
-
-@router.get("/failures")
-def failures(equip_id: str | None = None, ctx: PlantContext = Depends(context)):
-    """고장 이력 (개발용 시나리오에서 적재)."""
-    where, params = ("WHERE equip_id = ?", [equip_id]) if equip_id else ("", [])
-    return ctx.storage.query_dicts(f"SELECT * FROM failure_history {where} ORDER BY start_ts", params)
-
-
 @router.get("/stream")
 async def stream(ctx: PlantContext = Depends(context)):
     return StreamingResponse(ctx.broadcaster.subscribe(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
@@ -159,8 +145,10 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
         app.state.plants = {entry.key: PlantContext.open(entry) for entry in plants.plants}
         app.state.started_at = to_db(datetime.now(timezone.utc))
         tasks: list[asyncio.Task] = []
+        switch_interval = sys.getswitchinterval()
         if settings.with_simulators:
-            from collector.embedded import EMBEDDED_CONCURRENCY, run_plant_simulator
+            from collector.embedded import EMBEDDED_CONCURRENCY, EMBEDDED_SWITCH_INTERVAL_SEC, run_plant_simulator
+            sys.setswitchinterval(EMBEDDED_SWITCH_INTERVAL_SEC)
             limiter = asyncio.Semaphore(EMBEDDED_CONCURRENCY)
             for entry in plants.plants:
                 ctx = app.state.plants[entry.key]
@@ -174,6 +162,7 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
             await asyncio.gather(*tasks, return_exceptions=True)   # 워커 스레드의 마지막 묶음이 끝날 때까지 기다린 뒤 닫는다
         for ctx in app.state.plants.values():
             ctx.close()
+        sys.setswitchinterval(switch_interval)
 
     app = FastAPI(title="Skadi 앞단 수집 서버", lifespan=lifespan, root_path=settings.root_path)
     app.state.plants = {}
@@ -222,11 +211,9 @@ def check_plants(plants: PlantsConfig) -> None:
             raise ConfigError(f"plant {entry.key}: {e}") from None
 
 
-def create_single_app(plant_path, runtime_path, db_path, scenario_path=None, key: str = "plant",
-                      settings: Settings | None = None) -> FastAPI:
+def create_single_app(plant_path, runtime_path, db_path, key: str = "plant", settings: Settings | None = None) -> FastAPI:
     """공장 하나짜리 서버 (테스트·호환용). 경로는 /{key}/... 다."""
-    entry = PlantEntry(key=key, plant=str(plant_path), runtime=str(runtime_path), db=str(db_path),
-                       scenario=str(scenario_path) if scenario_path else None)
+    entry = PlantEntry(key=key, plant=str(plant_path), runtime=str(runtime_path), db=str(db_path))
     return create_app(PlantsConfig(plants=[entry]), settings)
 
 

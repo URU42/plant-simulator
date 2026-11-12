@@ -1,4 +1,4 @@
-# RFCC 구성안 실행 설정 (설계 §4.4). 설정 파일 경로(plant / scenario / db)는 명령행 인자로 준다.
+# RFCC 구성안 실행 설정 (설계 §4.4). 설정 파일 경로(plant / db)는 명령행 인자로 준다.
 units: [all]                 # 이 프로세스가 맡을 Unit. [UNIT-RFCC-01] 처럼 주면 그 Unit만 돌린다
 source_id: SIM-RFCC          # 메시지의 source_id
 sample_interval_sec: 1       # 값 생성 주기. 온도 태그는 구성안의 interval_sec(10)을 따른다

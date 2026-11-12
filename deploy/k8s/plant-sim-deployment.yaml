@@ -37,7 +37,6 @@ spec:
           env:
             - { name: ROOT_PATH, value: /plant-sim }          # Ingress 접두어. 루트 링크·리다이렉트·/docs 가 붙인다
             - { name: WITH_SIMULATORS, value: "1" }
-            - { name: SIM_SCENARIO_DIR, value: /app/private }  # 평가용 시나리오 Secret (선택)
             - name: INGEST_TOKEN                               # 있으면 외부 /ingest 는 X-Ingest-Token 필수
               valueFrom:
                 secretKeyRef: { name: plant-sim, key: ingest-token, optional: true }
@@ -63,9 +62,6 @@ spec:
             failureThreshold: 5
           volumeMounts:
             - { name: data, mountPath: /app/data }
-            - { name: private, mountPath: /app/private, readOnly: true }
       volumes:
         - name: data
           persistentVolumeClaim: { claimName: plant-sim-data }
-        - name: private
-          secret: { secretName: plant-sim-scenarios, optional: true }

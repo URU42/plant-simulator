@@ -35,7 +35,6 @@ class PlantContext:
     listing: list[dict]                       # GET /equipment 응답 (계층 순서)
     tag_keys: set[TagKey]
     catch_up_task: asyncio.Task | None = field(default=None)
-    simulator_scenarios: list[str] = field(default_factory=list)   # 통합 실행에서 시뮬레이터에만 준 시나리오 파일 (로그·테스트용, API 에는 내지 않는다)
     simulator_error: str | None = field(default=None)               # 통합 실행의 생성기 태스크가 예외로 끝났을 때
     # 저장·배치 전진은 워커 스레드에서도 돌 수 있다(통합 실행). 한 공장의 SQLite 트랜잭션이 겹치지 않도록 락으로 직렬화한다.
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -48,9 +47,6 @@ class PlantContext:
         Path(entry.db).parent.mkdir(parents=True, exist_ok=True) if entry.db != ":memory:" else None
         storage = Storage(entry.db)
         seed_master(storage, plant)
-        if entry.scenario:
-            from collector.seed_history import seed_history   # 시나리오 → 정비·고장 이력 (개발용)
-            seed_history(storage, entry.scenario, plant)
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:

@@ -1,5 +1,6 @@
 -- 프로젝트 DB (SQLite, WAL). 시각 컬럼은 모두 UTC ISO 문자열.
--- 스키마 v2: 태그는 (equip_id, tag_id) 복합키로 식별한다. 태그명은 같은 설비 안에서만 고유하다.
+-- 스키마 v3: 태그는 (equip_id, tag_id) 복합키로 식별한다. 태그명은 같은 설비 안에서만 고유하다.
+-- v3 에서 태그에 Nelson 관리 기준(control_mean·control_sigma)을 더하고 알람 지연·측정 위치 칸과 정비·고장 이력 테이블을 뺐다.
 CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL);
 
 -- 시설 계층 (구성안에서 적재)
@@ -15,23 +16,14 @@ CREATE TABLE IF NOT EXISTS equipment (
 );
 CREATE TABLE IF NOT EXISTS equipment_alias (alias TEXT PRIMARY KEY, equip_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tag_std (signal TEXT PRIMARY KEY, prefix TEXT NOT NULL, unit TEXT NOT NULL, name TEXT NOT NULL);
--- 한계값 여섯 칸은 자료에 있는 것만 채운다. normal_ref / limit_basis 는 자료의 "정상 기준(참고)" / "한계값 근거" 원문.
--- interval_sec 가 NULL 이면 실행 설정의 sample_interval_sec.
+-- 한계값 여섯 칸은 자료의 참고값으로, 있는 것만 채운다. normal_ref / limit_basis 는 자료의 "정상 기준(참고)" / "한계값 근거" 원문.
+-- control_mean / control_sigma 는 Nelson 관리 기준 μ·σ. interval_sec 가 NULL 이면 실행 설정의 sample_interval_sec.
 CREATE TABLE IF NOT EXISTS equipment_tag (
     equip_id TEXT NOT NULL, tag_id TEXT NOT NULL, signal TEXT NOT NULL, unit TEXT NOT NULL,
-    location TEXT, description TEXT, normal_ref TEXT, limit_basis TEXT,
+    description TEXT, normal_ref TEXT, limit_basis TEXT,
     warn_lo REAL, alarm_lo REAL, trip_lo REAL, warn_hi REAL, alarm_hi REAL, trip_hi REAL,
-    delay_samples INTEGER NOT NULL, interval_sec INTEGER, decimals INTEGER NOT NULL,
+    control_mean REAL NOT NULL, control_sigma REAL NOT NULL, interval_sec INTEGER, decimals INTEGER NOT NULL,
     PRIMARY KEY (equip_id, tag_id)
-);
-
--- 정비·고장 이력 (개발용 시나리오에서 적재)
-CREATE TABLE IF NOT EXISTS maintenance_history (
-    work_order_id TEXT PRIMARY KEY, equip_id TEXT NOT NULL, start_ts TEXT NOT NULL, end_ts TEXT NOT NULL, description TEXT
-);
-CREATE TABLE IF NOT EXISTS failure_history (
-    failure_id TEXT PRIMARY KEY, equip_id TEXT NOT NULL, tag_id TEXT, start_ts TEXT NOT NULL, end_ts TEXT,
-    work_order_id TEXT, doc_id TEXT, description TEXT
 );
 
 -- 원시 값 (7.2) — 보관 기간은 실행 설정 raw_retention_days

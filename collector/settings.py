@@ -4,7 +4,6 @@ ROOT_PATH          Ingress 경로 접두어 (예: /plant-sim). 루트 목록 링
 CORS_ORIGINS       쉼표 구분 origin 목록. 있으면 GET 에 CORS 헤더를 붙인다
 INGEST_TOKEN       있으면 POST /{공장}/ingest 는 헤더 X-Ingest-Token 이 같아야 한다. 같은 프로세스의 생성기는 거치지 않는다
 WITH_SIMULATORS    1/true 면 공장 목록의 생성기를 같은 프로세스에서 돌린다
-SIM_SCENARIO_DIR   있으면 그 안의 scenario_<key>.yaml 을 그 공장의 시뮬레이터에만 더 준다 (이력 적재에는 주지 않는다)
 """
 from __future__ import annotations
 
@@ -20,7 +19,6 @@ class Settings:
     cors_origins: list[str] = field(default_factory=list)
     ingest_token: str | None = None
     with_simulators: bool = False
-    sim_scenario_dir: str | None = None
     time_mode: str | None = None          # 통합 실행에서 각 공장 runtime 의 time_mode 를 덮어쓴다
     backfill_days: int | None = None      # 통합 실행에서 각 공장 runtime 의 backfill_days 를 덮어쓴다
 
@@ -33,7 +31,6 @@ class Settings:
             cors_origins=[o.strip() for o in env.get("CORS_ORIGINS", "").split(",") if o.strip()],
             ingest_token=env.get("INGEST_TOKEN") or None,
             with_simulators=env.get("WITH_SIMULATORS", "").strip().lower() in TRUE_VALUES,
-            sim_scenario_dir=env.get("SIM_SCENARIO_DIR") or None,
         )
         for name, value in overrides.items():
             if value is not None:

@@ -27,6 +27,9 @@ def test_k8s_manifests_build_and_fit_budget():
     assert "--with-simulators" in c["args"] and "config/plants.k8s.yaml" in " ".join(c["args"])
     env = {e["name"]: e for e in c["env"]}
     assert env["ROOT_PATH"]["value"] == "/plant-sim" and "secretKeyRef" in env["INGEST_TOKEN"]["valueFrom"]
+    assert "SIM_SCENARIO_DIR" not in env                                   # 시나리오 Secret 은 지웠다
+    assert [v["name"] for v in dep["template"]["spec"]["volumes"]] == ["data"]
+    assert [m["name"] for m in c["volumeMounts"]] == ["data"]
     assert docs["PersistentVolumeClaim"]["spec"]["storageClassName"] == "ebs-sc"
     ing = docs["Ingress"]
     rule = ing["spec"]["rules"][0]

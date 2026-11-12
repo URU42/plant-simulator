@@ -11,7 +11,7 @@ T0 = datetime(2026, 11, 9, 1, 0, tzinfo=timezone.utc)
 
 
 def _batch():
-    s = [Sample(equip_id="C-1101", tag_id="VI-C1101", ts=T0 + timedelta(seconds=10 * i), value=2.0, quality="Good") for i in range(3)]
+    s = [Sample(equip_id="P-3101", tag_id="VI-A-P3101", ts=T0 + timedelta(seconds=10 * i), value=2.0, quality="Good") for i in range(3)]
     return IngestBatch(source_id="T", batch_id="b-tok", sent_at=T0, samples=s).model_dump_json()
 
 
@@ -23,7 +23,7 @@ def test_ingest_token_blocks_http_but_not_local(plant_path, runtime_path):
         assert c.post("/plant/ingest", content=_batch(), headers=h | {"X-Ingest-Token": "nope"}).status_code == 403
         assert c.post("/plant/ingest", content=_batch(), headers=h | {"X-Ingest-Token": "s3cret"}).json()["stored"] == 3
         ctx = c.app.state.plants["plant"]
-        assert ctx.receive_local("b-local", "L", [Sample(equip_id="C-1101", tag_id="VI-C1101", ts=T0 + timedelta(minutes=1), value=2.0, quality="Good")]).stored == 1
+        assert ctx.receive_local("b-local", "L", [Sample(equip_id="P-3101", tag_id="VI-A-P3101", ts=T0 + timedelta(minutes=1), value=2.0, quality="Good")]).stored == 1
 
 
 def test_root_path_prefixes_links_and_redirect(plant_path, runtime_path):

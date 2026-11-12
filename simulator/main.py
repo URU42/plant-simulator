@@ -1,6 +1,6 @@
 """설비 시뮬레이터 실행: backfill / live / accelerated (기획서 7.4).
 
-실행: python -m simulator.main --plant config/plant_hds.yaml --runtime config/runtime.yaml --scenario config/scenario_dev.yaml
+실행: python -m simulator.main --plant config/plant_rhds.yaml --runtime config/runtime_rhds.yaml
 """
 from __future__ import annotations
 
@@ -9,11 +9,13 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timedelta
+from typing import Callable
 
 from common.config_models import PlantConfig, RuntimeConfig, load_plant, load_runtime
 from common.message import IngestBatch, make_batch_id
+from common.nelson import HISTORY
 from common.sim_clock import KST, SimClock, align_down
-from simulator.generator import SampleGenerator
+from simulator.nelson_model import EventSource, NelsonGenerator
 from simulator.sender import HttpSender, Sender
 
 log = logging.getLogger("simulator")
@@ -24,13 +26,13 @@ BACKFILL_WINDOW_SEC = 3600      # 백필은 1시간 묶음으로 보내 HTTP 횟
 class Simulator:
     """시뮬레이터 시계를 따라 구간마다 샘플을 만들어 묶음으로 보낸다."""
 
-    def __init__(self, plant: PlantConfig, runtime: RuntimeConfig, scenario, sender: Sender, clock: SimClock,
-                 window_sec: int | None = None, catch_up_windows: int = 0) -> None:
+    def __init__(self, plant: PlantConfig, runtime: RuntimeConfig, sender: Sender, clock: SimClock,
+                 source: EventSource | None = None, window_sec: int | None = None, catch_up_windows: int = 0) -> None:
         self.runtime = runtime
         self.sender = sender
         self.clock = clock
         self.window = timedelta(seconds=window_sec or runtime.send_interval_sec)
-        self.generator = SampleGenerator(plant, runtime, scenario)
+        self.generator = NelsonGenerator(plant, runtime, source)
         self.seq = 0
         # 다음에 만들 구간의 시작. 재시작 때는 catch_up_windows 만큼 되감아 죽어 있던 구간을 다시 보낸다(수집 서버가 중복은 버린다)
         self.cursor: datetime = align_down(clock.now(), runtime.send_interval_sec) - self.window * catch_up_windows
@@ -63,12 +65,22 @@ def backfill_range(runtime: RuntimeConfig, now: datetime) -> tuple[datetime, dat
     return live_start - timedelta(days=runtime.backfill_days), live_start
 
 
-async def run_backfill_then_live(plant: PlantConfig, runtime: RuntimeConfig, scenario, sender: Sender,
-                                 now: datetime | None = None, live_clock: SimClock | None = None,
-                                 live_until: datetime | None = None, window_sec: int = BACKFILL_WINDOW_SEC) -> None:
+async def restore_from_collector(sim: Simulator, sender: Sender) -> None:
+    """수집 서버가 가진 태그별 최근 HISTORY 개 값으로 생성기의 판정 상태를 되살린다. 값이 없으면 그대로 둔다."""
+    values = await sender.recent_values(HISTORY)
+    if values:
+        sim.generator.restore(values)
+
+
+async def run_backfill_then_live(plant: PlantConfig, runtime: RuntimeConfig, sender: Sender,
+                                 source: EventSource | None = None, now: datetime | None = None,
+                                 live_clock: SimClock | None = None, live_until: datetime | None = None,
+                                 window_sec: int = BACKFILL_WINDOW_SEC,
+                                 on_live: Callable[[datetime], None] | None = None) -> None:
     """지난 backfill_days 를 1시간 묶음으로 빠르게 보낸 뒤, 끝난 구간부터 실시간으로 이어 간다.
 
-    수집 서버에 이미 값이 있으면(재시작) 그 마지막 측정 시각의 구간부터 이어서 보내 90일을 다시 보내지 않는다.
+    수집 서버에 이미 값이 있으면(재시작) 그 마지막 측정 시각의 구간부터 이어서 보내 90일을 다시 보내지 않고,
+    그 최근 값으로 생성기를 되살린다. 실시간으로 넘어가는 순간 on_live(실시간 시작 시각)를 한 번 부른다.
     now / live_clock / live_until 은 테스트용이다. 실제 실행에서는 현재 시각과 실제 시계를 쓴다.
     """
     start, live_start = backfill_range(runtime, now or datetime.now(KST))
@@ -76,37 +88,48 @@ async def run_backfill_then_live(plant: PlantConfig, runtime: RuntimeConfig, sce
     if resume_from is not None:     # 수집 서버의 마지막 샘플 다음 샘플이 속한 구간부터
         next_sample = resume_from.astimezone(KST) + timedelta(seconds=runtime.sample_interval_sec)
         start = max(start, align_down(next_sample, runtime.send_interval_sec))
-    backfill = Simulator(plant, runtime, scenario, sender, SimClock.backfill(start), window_sec=window_sec)
+    backfill = Simulator(plant, runtime, sender, SimClock.backfill(start), source, window_sec=window_sec)
+    if resume_from is not None:
+        await restore_from_collector(backfill, sender)
     if start < live_start:
         log.info("backfill %s → %s", start, live_start)
         await backfill.run(until=live_start)
 
-    live = Simulator(plant, runtime, scenario, sender, live_clock or SimClock.live())
-    live.cursor, live.seq = live_start, backfill.seq     # 백필이 끝난 구간부터 같은 일련번호로 이어 간다
+    live = Simulator(plant, runtime, sender, live_clock or SimClock.live(), source)
+    # 백필이 끝난 구간부터 같은 생성기(판정 이력·난수)와 같은 일련번호로 이어 간다
+    live.generator, live.cursor, live.seq = backfill.generator, live_start, backfill.seq
     log.info("switch to live from %s", live_start)
+    if on_live is not None:
+        on_live(live_start)
     await live.run(until=live_until)
 
 
-async def run_mode(plant: PlantConfig, runtime: RuntimeConfig, scenario, sender: Sender,
-                   window_sec: int = BACKFILL_WINDOW_SEC) -> None:
-    """time_mode 에 따라 시계를 고르고 실행한다. window_sec 은 백필 묶음 길이."""
+async def run_mode(plant: PlantConfig, runtime: RuntimeConfig, sender: Sender, source: EventSource | None = None,
+                   window_sec: int = BACKFILL_WINDOW_SEC, on_live: Callable[[datetime], None] | None = None) -> None:
+    """time_mode 에 따라 시계를 고르고 실행한다. window_sec 은 백필 묶음 길이.
+
+    on_live(시각) 는 실시간(또는 가속)으로 도는 첫 시각에 한 번 불린다: backfill 은 실시간 전환 때, live·accelerated 는 시작 때.
+    """
     if runtime.time_mode == "backfill":
-        await run_backfill_then_live(plant, runtime, scenario, sender, window_sec=window_sec)
-    elif runtime.time_mode == "accelerated":
+        await run_backfill_then_live(plant, runtime, sender, source, window_sec=window_sec, on_live=on_live)
+        return
+    if runtime.time_mode == "accelerated":
         start = align_down(datetime.now(KST), runtime.send_interval_sec)
-        await Simulator(plant, runtime, scenario, sender, SimClock.accelerated(start, runtime.speed)).run()
+        sim = Simulator(plant, runtime, sender, SimClock.accelerated(start, runtime.speed), source)
     else:
-        await Simulator(plant, runtime, scenario, sender, SimClock.live(), catch_up_windows=1).run()
+        sim = Simulator(plant, runtime, sender, SimClock.live(), source, catch_up_windows=1)
+    await restore_from_collector(sim, sender)
+    if on_live is not None:
+        on_live(sim.cursor)
+    await sim.run()
 
 
 def _parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="설비 시뮬레이터")
-    p.add_argument("--plant", default=os.environ.get("PLANT_CONFIG", "config/plant_hds.yaml"))
-    p.add_argument("--runtime", default=os.environ.get("RUNTIME_CONFIG", "config/runtime.yaml"))
-    p.add_argument("--scenario", action="append", default=None,
-                   help="시나리오 파일. 여러 번 주면 모두 적용한다 (예: 개발용 + 비공개 평가용)")
-    p.add_argument("--time-mode", choices=["backfill", "live", "accelerated"], help="runtime.yaml 의 time_mode 를 덮어쓴다")
-    p.add_argument("--collector-url", default=os.environ.get("COLLECTOR_URL"), help="runtime.yaml 의 collector_url 을 덮어쓴다")
+    p.add_argument("--plant", default=os.environ.get("PLANT_CONFIG", "config/plant_rhds.yaml"))
+    p.add_argument("--runtime", default=os.environ.get("RUNTIME_CONFIG", "config/runtime_rhds.yaml"))
+    p.add_argument("--time-mode", choices=["backfill", "live", "accelerated"], help="실행 설정의 time_mode 를 덮어쓴다")
+    p.add_argument("--collector-url", default=os.environ.get("COLLECTOR_URL"), help="실행 설정의 collector_url 을 덮어쓴다")
     return p.parse_args(argv)
 
 
@@ -118,16 +141,11 @@ def main(argv=None) -> None:
     overrides = {k: v for k, v in {"time_mode": args.time_mode, "collector_url": args.collector_url}.items() if v}
     if overrides:
         runtime = runtime.model_validate(runtime.model_dump() | overrides)
-    scenario_paths = args.scenario or os.environ.get("SCENARIO_CONFIG", "").split(",")
-    scenario = None
-    if any(scenario_paths):
-        from simulator.scenario import load_scenarios
-        scenario = load_scenarios([p for p in scenario_paths if p], plant, runtime)
     sender = HttpSender(runtime.collector_url)
 
     async def run_and_close() -> None:
         try:
-            await run_mode(plant, runtime, scenario, sender)
+            await run_mode(plant, runtime, sender)
         finally:
             await sender.close()
 

@@ -43,7 +43,7 @@ services:
   sim-rfcc:
     build: .
     profiles: [split]
-    command: python -m simulator.main --plant config/plant_rfcc.yaml --runtime config/runtime_rfcc.yaml --scenario config/scenario_rfcc.yaml --time-mode ${SIM_TIME_MODE:-backfill}
+    command: python -m simulator.main --plant config/plant_rfcc.yaml --runtime config/runtime_rfcc.yaml --time-mode ${SIM_TIME_MODE:-backfill}
     environment:
       COLLECTOR_URL: http://collector:8000/rfcc
     volumes:
@@ -56,7 +56,7 @@ services:
   sim-cdu:
     build: .
     profiles: [split]
-    command: python -m simulator.main --plant config/plant_cdu.yaml --runtime config/runtime_cdu.yaml --scenario config/scenario_cdu.yaml --time-mode ${SIM_TIME_MODE:-backfill}
+    command: python -m simulator.main --plant config/plant_cdu.yaml --runtime config/runtime_cdu.yaml --time-mode ${SIM_TIME_MODE:-backfill}
     environment:
       COLLECTOR_URL: http://collector:8000/cdu
     volumes:
@@ -69,7 +69,7 @@ services:
   sim-hou:
     build: .
     profiles: [split]
-    command: python -m simulator.main --plant config/plant_hou.yaml --runtime config/runtime_hou.yaml --scenario config/scenario_hou.yaml --time-mode ${SIM_TIME_MODE:-backfill}
+    command: python -m simulator.main --plant config/plant_hou.yaml --runtime config/runtime_hou.yaml --time-mode ${SIM_TIME_MODE:-backfill}
     environment:
       COLLECTOR_URL: http://collector:8000/hou
     volumes:
@@ -82,7 +82,7 @@ services:
   sim-rhds:
     build: .
     profiles: [split]
-    command: python -m simulator.main --plant config/plant_rhds.yaml --runtime config/runtime_rhds.yaml --scenario config/scenario_rhds.yaml --time-mode ${SIM_TIME_MODE:-backfill}
+    command: python -m simulator.main --plant config/plant_rhds.yaml --runtime config/runtime_rhds.yaml --time-mode ${SIM_TIME_MODE:-backfill}
     environment:
       COLLECTOR_URL: http://collector:8000/rhds
     volumes:
@@ -95,7 +95,7 @@ services:
   sim-vrds:
     build: .
     profiles: [split]
-    command: python -m simulator.main --plant config/plant_vrds.yaml --runtime config/runtime_vrds.yaml --scenario config/scenario_vrds.yaml --time-mode ${SIM_TIME_MODE:-backfill}
+    command: python -m simulator.main --plant config/plant_vrds.yaml --runtime config/runtime_vrds.yaml --time-mode ${SIM_TIME_MODE:-backfill}
     environment:
       COLLECTOR_URL: http://collector:8000/vrds
     volumes:

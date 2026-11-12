@@ -2,7 +2,8 @@
 
 수집 서버가 DB에 닿는 유일한 곳이다. 시계열 DB로 바꿀 때 이 모듈만 바꾼다.
 시각은 common.timefmt 규칙(UTC ISO 문자열)으로 저장한다. 태그는 (equip_id, tag_id) 복합키.
-스키마 버전은 schema_meta 에 적는다. 예전 버전(v1, 태그 ID 단일 키) 파일은 바꿀 수 없으므로 열지 않고 알린다.
+스키마 버전은 schema_meta 에 적는다. 예전 버전(v1 태그 ID 단일 키, v2 한계값 알람용 태그 컬럼·이력 테이블) 파일은
+바꿀 수 없으므로 열지 않고 알린다.
 연결 하나를 이벤트 루프 스레드(조회)와 워커 스레드(통합 실행의 저장·배치)가 함께 쓰므로 모든 접근을 재진입 락으로 직렬화한다.
 """
 from __future__ import annotations
@@ -15,7 +16,7 @@ from typing import Any, Iterable
 from common.config_models import ConfigError, TagKey
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class Storage:
@@ -41,7 +42,7 @@ class Storage:
         if found is None or found < SCHEMA_VERSION:
             self._conn.close()
             raise ConfigError(f"DB {self.db_path} was created by an older schema (v{found or 1}); this version needs "
-                              f"v{SCHEMA_VERSION} (composite tag key). Move or delete the file, or point this plant's "
+                              f"v{SCHEMA_VERSION} (composite tag key, control limits). Move or delete the file, or point this plant's "
                               f"db in plants.yaml to a new file")
 
     def close(self) -> None:
@@ -103,6 +104,19 @@ class Storage:
                 (batch_id, source_id, received_at, stored),
             )
         return stored
+
+    def recent_values(self, count: int) -> dict[TagKey, list[float]]:
+        """태그별 최근 count 개 값(측정 시각 오래된 것부터). 값이 없는 행은 건너뛴다. 생성기를 재개할 때 한 번 부른다.
+
+        태그마다 기본키 (equip_id, tag_id, ts) 를 거꾸로 훑으므로 원시 값이 많아도 빠르다.
+        """
+        out: dict[TagKey, list[float]] = {}
+        for key in sorted(self.tag_keys()):
+            rows = self.query("SELECT value FROM ts_raw WHERE equip_id = ? AND tag_id = ? AND value IS NOT NULL "
+                              "ORDER BY ts DESC LIMIT ?", (*key, count))
+            if rows:
+                out[key] = [r[0] for r in reversed(rows)]
+        return out
 
     def current(self, key: TagKey) -> dict[str, Any] | None:
         rows = self.query_dicts("SELECT * FROM tag_current WHERE equip_id = ? AND tag_id = ?", key)
