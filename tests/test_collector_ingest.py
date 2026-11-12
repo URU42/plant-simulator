@@ -17,9 +17,9 @@ def client(plant_path, runtime_path):
 
 def _batch(batch_id="b-20261108-172400-SIM-ALL-0001", samples=None):
     samples = samples or [
-        Sample(equip_id="C-3101", tag_id="XI-X-C3101", ts=f"2026-11-08T17:23:10{KST}", value=2.34, quality="Good"),
-        Sample(equip_id="C-3101", tag_id="XI-X-C3101", ts=f"2026-11-08T17:23:20{KST}", value=2.36, quality="Good"),
-        Sample(equip_id="P-3101", tag_id="TI-B-P3101", ts=f"2026-11-08T17:23:10{KST}", value=None, quality="ScanOff"),
+        Sample(equip_id="C-3101", tag_id="XI-X-C3101", ts=f"2026-11-08T17:23:10{KST}", value=2.34, status="Good"),
+        Sample(equip_id="C-3101", tag_id="XI-X-C3101", ts=f"2026-11-08T17:23:20{KST}", value=2.36, status="Good"),
+        Sample(equip_id="P-3101", tag_id="TI-B-P3101", ts=f"2026-11-08T17:23:10{KST}", value=65.0, status="Bad"),
     ]
     return IngestBatch(source_id="SIM-ALL", batch_id=batch_id, sent_at=f"2026-11-08T17:24:00{KST}", samples=samples)
 
@@ -50,7 +50,7 @@ def test_ingest_stores_rows_and_updates_current(client):
     assert client.app.state.plants["plant"].storage.count("ts_raw") == 3
 
     cur = client.get("/plant/equipment/C-3101/tags/XI-X-C3101/current").json()
-    assert cur["value"] == 2.36 and cur["quality"] == "Good"
+    assert cur["value"] == 2.36 and cur["status"] == "Good"
     assert cur["ts"] == "2026-11-08T08:23:20+00:00"   # 저장 시각은 UTC
 
 
@@ -70,9 +70,9 @@ def test_same_tag_ts_in_another_batch_is_stored_once(client):
 
 def test_unknown_tag_and_malformed_rows_are_rejected_with_reason(client):
     body = _batch().model_dump(mode="json")
-    body["samples"].append({"equip_id": "C-3101", "tag_id": "VI-NOPE", "ts": f"2026-11-08T17:23:10{KST}", "value": 1.0, "quality": "Good"})
-    body["samples"].append({"equip_id": "C-3101", "tag_id": "XI-X-C3101", "ts": "not-a-time", "value": 1.0, "quality": "Good"})
-    body["samples"].append({"equip_id": "P-3101", "tag_id": "XI-X-C3101", "ts": f"2026-11-08T17:23:30{KST}", "value": 1.0, "quality": "Good"})
+    body["samples"].append({"equip_id": "C-3101", "tag_id": "VI-NOPE", "ts": f"2026-11-08T17:23:10{KST}", "value": 1.0, "status": "Good"})
+    body["samples"].append({"equip_id": "C-3101", "tag_id": "XI-X-C3101", "ts": "not-a-time", "value": 1.0, "status": "Good"})
+    body["samples"].append({"equip_id": "P-3101", "tag_id": "XI-X-C3101", "ts": f"2026-11-08T17:23:30{KST}", "value": 1.0, "status": "Good"})
     r = client.post("/plant/ingest", json=body)
     assert r.status_code == 200
     res = r.json()
@@ -86,7 +86,7 @@ def test_unknown_tag_and_malformed_rows_are_rejected_with_reason(client):
 def test_out_of_order_rows_do_not_move_current_backwards(client):
     _post(client, _batch())
     late = _batch(batch_id="b-late", samples=[
-        Sample(equip_id="C-3101", tag_id="XI-X-C3101", ts=f"2026-11-08T17:22:50{KST}", value=9.9, quality="Good"),
+        Sample(equip_id="C-3101", tag_id="XI-X-C3101", ts=f"2026-11-08T17:22:50{KST}", value=9.9, status="Good"),
     ])
     assert _post(client, late).json()["stored"] == 1
     cur = client.get("/plant/equipment/C-3101/tags/XI-X-C3101/current").json()
@@ -94,7 +94,7 @@ def test_out_of_order_rows_do_not_move_current_backwards(client):
 
 
 def test_unsupported_schema_version_rejected(client):
-    r = _post(client, _batch(), schema_version="2.0")
+    r = _post(client, _batch(), schema_version="3.0")
     assert r.status_code == 400
 
 
@@ -121,6 +121,10 @@ def test_sample_with_added_field_is_accepted_v1x(client):
 def test_rows_older_than_retention_are_rejected(client):
     _post(client, _batch())
     old = _batch(batch_id="b-old", samples=[
-        Sample(equip_id="C-3101", tag_id="XI-X-C3101", ts=f"2026-10-01T00:00:00{KST}", value=2.0, quality="Good")])
+        Sample(equip_id="C-3101", tag_id="XI-X-C3101", ts=f"2026-10-01T00:00:00{KST}", value=2.0, status="Good")])
     res = _post(client, old).json()
     assert res["stored"] == 0 and res["rejected"] == 1 and "retention" in res["reasons"][0]["reason"]
+
+
+def test_v1_batch_is_rejected(client):
+    assert _post(client, _batch(), schema_version="1.0").status_code == 400

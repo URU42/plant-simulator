@@ -66,13 +66,13 @@ async def test_backfill_then_live_has_no_gap_and_is_reproducible(plant_path):
     assert len(a.batches[2].samples) == 4 * 60 + 6
 
     b = await run_once()
-    values = [(s.tag_id, s.ts, s.value, s.quality) for x in a.batches for s in x.samples]
-    assert values == [(s.tag_id, s.ts, s.value, s.quality) for x in b.batches for s in x.samples]
+    values = [(s.tag_id, s.ts, s.value, s.status) for x in a.batches for s in x.samples]
+    assert values == [(s.tag_id, s.ts, s.value, s.status) for x in b.batches for s in x.samples]
 
     whole = MemorySender()          # 같은 구간을 한 생성기로 쭉 만든 값
     await Simulator(plant, runtime, whole, SimClock.backfill(LIVE_START - timedelta(hours=2)), window_sec=3600).run(
         until=LIVE_START + timedelta(minutes=3))
-    assert values == [(s.tag_id, s.ts, s.value, s.quality) for x in whole.batches for s in x.samples]
+    assert values == [(s.tag_id, s.ts, s.value, s.status) for x in whole.batches for s in x.samples]
 
 
 async def test_accelerated_mode_runs_faster_than_wall_clock(plant_path):

@@ -17,7 +17,7 @@ def client(plant_path, runtime_path):
 
 
 def _send(client, tag_id, equip_id, start, minutes, value):
-    samples = [Sample(equip_id=equip_id, tag_id=tag_id, ts=start + timedelta(seconds=s), value=value, quality="Good")
+    samples = [Sample(equip_id=equip_id, tag_id=tag_id, ts=start + timedelta(seconds=s), value=value, status="Good")
                for s in range(0, minutes * 60, 10)]
     batch = IngestBatch(source_id="SIM", batch_id=f"b-{tag_id}-{start.isoformat()}", sent_at=start, samples=samples)
     assert client.post("/plant/ingest", json=batch.model_dump(mode="json")).status_code == 200

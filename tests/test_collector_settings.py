@@ -11,7 +11,7 @@ T0 = datetime(2026, 11, 9, 1, 0, tzinfo=timezone.utc)
 
 
 def _batch():
-    s = [Sample(equip_id="P-3101", tag_id="VI-A-P3101", ts=T0 + timedelta(seconds=10 * i), value=2.0, quality="Good") for i in range(3)]
+    s = [Sample(equip_id="P-3101", tag_id="VI-A-P3101", ts=T0 + timedelta(seconds=10 * i), value=2.0, status="Good") for i in range(3)]
     return IngestBatch(source_id="T", batch_id="b-tok", sent_at=T0, samples=s).model_dump_json()
 
 
@@ -23,7 +23,7 @@ def test_ingest_token_blocks_http_but_not_local(plant_path, runtime_path):
         assert c.post("/plant/ingest", content=_batch(), headers=h | {"X-Ingest-Token": "nope"}).status_code == 403
         assert c.post("/plant/ingest", content=_batch(), headers=h | {"X-Ingest-Token": "s3cret"}).json()["stored"] == 3
         ctx = c.app.state.plants["plant"]
-        assert ctx.receive_local("b-local", "L", [Sample(equip_id="P-3101", tag_id="VI-A-P3101", ts=T0 + timedelta(minutes=1), value=2.0, quality="Good")]).stored == 1
+        assert ctx.receive_local("b-local", "L", [Sample(equip_id="P-3101", tag_id="VI-A-P3101", ts=T0 + timedelta(minutes=1), value=2.0, status="Good")]).stored == 1
 
 
 def test_root_path_prefixes_links_and_redirect(plant_path, runtime_path):
@@ -50,7 +50,7 @@ def test_embedded_mode_without_token_closes_http_ingest(rfcc_plant_path, rfcc_ru
     """통합 실행인데 토큰이 없으면 외부 /ingest 는 닫힌다 (fail-closed). 생성기는 LocalSender 로 들어가므로 영향 없다."""
     settings = Settings(with_simulators=True, time_mode="live")
     with TestClient(create_single_app(rfcc_plant_path, rfcc_runtime_path, ":memory:", settings=settings)) as c:
-        s = [Sample(equip_id="P-1101A", tag_id="VI-P-1101A", ts=T0, value=1.45, quality="Good")]
+        s = [Sample(equip_id="P-1101A", tag_id="VI-P-1101A", ts=T0, value=1.45, status="Good")]
         body = IngestBatch(source_id="T", batch_id="b-ext", sent_at=T0, samples=s).model_dump_json()
         r = c.post("/plant/ingest", content=body, headers={"content-type": "application/json"})
         assert r.status_code == 403 and "INGEST_TOKEN" in r.json()["detail"]

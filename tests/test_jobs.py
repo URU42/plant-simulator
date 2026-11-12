@@ -21,7 +21,7 @@ def env(plant_path):
 
 
 def _feed(storage, equip_id, tag_id, start, minutes, value, batch="b"):
-    """start 부터 minutes 분 동안 10초 간격으로 같은 값을 넣는다. 행은 (equip_id, tag_id, ts, value, quality)."""
+    """start 부터 minutes 분 동안 10초 간격으로 같은 값을 넣는다. 행은 (equip_id, tag_id, ts, value, status)."""
     rows = [(equip_id, tag_id, to_db(start + timedelta(seconds=s)), value, "Good") for s in range(0, minutes * 60, 10)]
     storage.store_batch(f"{batch}-{tag_id}-{start.isoformat()}", "SIM", to_db(start), rows)
 
@@ -103,11 +103,14 @@ def test_limit_breach_makes_no_alarm(env):
     assert storage.count("ts_10m") > 0 and storage.count("alarm_detail") == 0
 
 
-def test_uncertain_counts_as_value(env):
+
+
+def test_bucket_status_bad_when_any_bad(env):
+    """버킷 안에 Bad 표본이 하나라도 있으면 Bad, 평균·개수는 모든 표본으로 구한다."""
     storage, plant, jobs = env
-    rows = [("P-3101", "VI-A-P3101", to_db(T0 + timedelta(seconds=s)), 2.0, "Uncertain" if s % 20 else "Good") for s in range(0, 600, 10)]
-    storage.store_batch("b-unc", "SIM", to_db(T0), rows)
-    _feed(storage, "P-3101", "VI-A-P3101", T0 + timedelta(minutes=10), 1, 2.0)
-    jobs.advance(storage.sim_now())
-    r = storage.query_dicts("SELECT avg, count, status FROM ts_10m WHERE tag_id = 'VI-A-P3101' AND bucket_start = ?", (to_db(T0),))[0]
-    assert r["count"] == 60 and abs(r["avg"] - 2.0) < 1e-9 and r["status"] == "Good"
+    vals = [(33.1, "Good"), (33.2, "Good"), (40.0, "Bad")]
+    storage.store_batch("b1", "T", to_db(T0), [("C-3101", "XI-X-C3101", to_db(T0 + timedelta(seconds=i)), v, s)
+                                              for i, (v, s) in enumerate(vals)])
+    jobs._aggregate("ts_10m", T0, T0 + timedelta(minutes=10))
+    r = storage.query_dicts("SELECT status, count, avg FROM ts_10m WHERE tag_id = 'XI-X-C3101'")[0]
+    assert (r["status"], r["count"]) == ("Bad", 3) and r["avg"] == pytest.approx((33.1 + 33.2 + 40.0) / 3)

@@ -22,7 +22,7 @@ def client(plant_path, runtime_path, rfcc_plant_path, rfcc_runtime_path, tmp_pat
 
 
 def _send(client, prefix, equip_id, tag_id, start, count, step_sec, value):
-    samples = [Sample(equip_id=equip_id, tag_id=tag_id, ts=start + timedelta(seconds=i * step_sec), value=value, quality="Good") for i in range(count)]
+    samples = [Sample(equip_id=equip_id, tag_id=tag_id, ts=start + timedelta(seconds=i * step_sec), value=value, status="Good") for i in range(count)]
     batch = IngestBatch(source_id="T", batch_id=f"b-{prefix}-{tag_id}-{start.timestamp()}", sent_at=start, samples=samples)
     return client.post(f"{prefix}/ingest", content=batch.model_dump_json(), headers={"content-type": "application/json"})
 

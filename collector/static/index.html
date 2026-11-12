@@ -22,7 +22,7 @@
   th { background: var(--head); font-weight: 600; color: var(--muted); }
   td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   td.flash { background: var(--flash); transition: background 0.5s; }
-  tr.bad td { color: var(--muted); } tr.bad td.quality { color: var(--bad); font-weight: 600; }
+  td.status.bad { color: var(--bad); font-weight: 600; }
   tr.nodata td.value::after { content: " (NoData)"; color: var(--muted); font-family: inherit; }
 </style>
 </head>
@@ -53,17 +53,17 @@
       section.appendChild(h2);
       const table = el("table");
       const thead = el("thead"); const hr = el("tr");
-      for (const h of ["태그 ID", "설명", "값", "단위", "품질", "측정 시각(KST)", "주기"]) hr.appendChild(el("th", null, h));
+      for (const h of ["태그 ID", "설명", "값", "단위", "상태", "측정 시각(KST)", "주기"]) hr.appendChild(el("th", null, h));
       thead.appendChild(hr); table.appendChild(thead);
       const tbody = el("tbody");
       for (const t of e.tags) {
         const tr = el("tr"); tr.id = `tag-${e.equip_id}-${t.tag_id}`;
         const tds = {
           id: el("td", null, t.tag_id), desc: el("td", null, t.description || ""), value: el("td", "num value", "—"),
-          unit: el("td", null, t.unit), quality: el("td", "quality", "—"), ts: el("td", "num", "—"), iv: el("td", "num", t.interval_sec + "s"),
+          unit: el("td", null, t.unit), status: el("td", "status", "—"), ts: el("td", "num", "—"), iv: el("td", "num", t.interval_sec + "s"),
         };
         if (t.limits) tds.value.title = "한계값 " + Object.entries(t.limits).map(([k, v]) => `${k}=${v}`).join(", ");
-        for (const k of ["id", "desc", "value", "unit", "quality", "ts", "iv"]) tr.appendChild(tds[k]);
+        for (const k of ["id", "desc", "value", "unit", "status", "ts", "iv"]) tr.appendChild(tds[k]);
         tbody.appendChild(tr);
         rows.set(`${e.equip_id}|${t.tag_id}`, { tr, tds, decimals: t.decimals });
       }
@@ -75,11 +75,10 @@
   function update(s, flash) {
     const row = rows.get(keyOf(s));
     if (!row) return;
-    const good = (s.quality === "Good" || s.quality === "Uncertain") && s.value != null;   // Uncertain 도 값이 있다
-    row.tds.value.textContent = good ? Number(s.value).toFixed(row.decimals) : "—";
-    row.tds.quality.textContent = s.quality || "—";
+    row.tds.value.textContent = s.value != null ? Number(s.value).toFixed(row.decimals) : "—";
+    row.tds.status.textContent = s.status || "—";
+    row.tds.status.classList.toggle("bad", s.status === "Bad");
     row.tds.ts.textContent = kst(s.ts);
-    row.tr.classList.toggle("bad", !!s.ts && !good);
     row.tr.classList.toggle("nodata", s.status === "NoData" && !!s.ts);
     if (flash) {
       row.tds.value.classList.add("flash");

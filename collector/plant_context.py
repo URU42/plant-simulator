@@ -71,7 +71,7 @@ class PlantContext:
                 reasons.append(Rejection(index=i, tag_id=s.tag_id, reason=f"ts {s.ts.isoformat()} is older than raw retention"))
             else:
                 accepted.append(s)
-        rows = [(s.equip_id, s.tag_id, to_db(s.ts), s.value, s.quality) for s in accepted]
+        rows = [(s.equip_id, s.tag_id, to_db(s.ts), s.value, s.status) for s in accepted]
         with self.lock:
             if self.storage.batch_seen(batch_id):
                 return IngestResult(batch_id=batch_id, duplicate=True, accepted=len(accepted), stored=0,
@@ -142,13 +142,14 @@ class PlantContext:
         return to_db(from_db(sim_now) - timedelta(days=self.runtime.raw_retention_days))
 
     def with_status(self, row: dict | None, key: TagKey) -> dict:
-        """현재값 행에 status 를 붙인다. 행이 없거나 전송·태그 주기 중 긴 쪽의 3배를 넘게 안 들어오면 NoData."""
+        """현재값 행의 status 를 정한다. 행의 Good·Bad 를 그대로 쓰되, 행이 없거나 전송·태그 주기 중 긴 쪽의 3배를
+        넘게 안 들어오면 NoData."""
         if row is None:
-            return {"equip_id": key[0], "tag_id": key[1], "ts": None, "value": None, "quality": None,
+            return {"equip_id": key[0], "tag_id": key[1], "ts": None, "value": None,
                     "received_at": None, "status": "NoData"}
         age = (from_db(self.storage.sim_now()) - from_db(row["ts"])).total_seconds()
         interval = max(self.runtime.send_interval_sec, self.plant.tag_interval_sec(key, self.runtime.sample_interval_sec))
-        return row | {"status": "NoData" if age > NO_DATA_SEND_INTERVALS * interval else row["quality"]}
+        return row | {"status": "NoData" if age > NO_DATA_SEND_INTERVALS * interval else row["status"]}
 
 
 def equipment_listing(plant: PlantConfig, runtime: RuntimeConfig) -> list[dict]:
@@ -166,6 +167,6 @@ def equipment_listing(plant: PlantConfig, runtime: RuntimeConfig) -> list[dict]:
                               "interval_sec": plant.tag_interval_sec((e.equip_id, t.tag_id), runtime.sample_interval_sec),
                               "decimals": t.decimals, "normal_ref": t.normal_ref, "limit_basis": t.limit_basis,
                               "limits": t.limits.model_dump(exclude_none=True) if t.limits else None,
-                              "control": t.control.model_dump() if t.control else None} for t in e.tags],
+                              "control": t.control.model_dump()} for t in e.tags],
                 })
     return out

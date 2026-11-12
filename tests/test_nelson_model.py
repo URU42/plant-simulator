@@ -24,7 +24,7 @@ def rhds(config_dir):
 def test_normal_is_quiet_and_on_grid(rhds):
     plant, rt = rhds
     s = NelsonGenerator(plant, rt, spontaneous=False).generate(T0, T0 + timedelta(hours=2))
-    assert sum(x.quality == "Bad" for x in s) / len(s) < 0.005
+    assert sum(x.status == "Bad" for x in s) / len(s) < 0.005
     tags = plant.tag_by_key()
     assert all(round(x.value, tags[(x.equip_id, x.tag_id)].decimals) == x.value for x in s)
 
@@ -33,17 +33,17 @@ def test_injected_event_marks_only_its_equipment(rhds):
     t = T0.timestamp() + 60
     g = NelsonGenerator(plant, rt, Fixed([AnomalyEvent("I1", "injected", "C-3101", 1, t, None)]), spontaneous=False)
     s = g.generate(T0, T0 + timedelta(minutes=5))
-    bad = {(x.equip_id, x.tag_id) for x in s if x.quality == "Bad" and x.ts.timestamp() >= t}
+    bad = {(x.equip_id, x.tag_id) for x in s if x.status == "Bad" and x.ts.timestamp() >= t}
     assert ("C-3101", "XI-X-C3101") in bad
     assert all(e == "C-3101" for e, _ in bad)
-    assert next(x for x in s if x.tag_id == "XI-X-C3101" and x.ts.timestamp() == t).quality == "Bad"
+    assert next(x for x in s if x.tag_id == "XI-X-C3101" and x.ts.timestamp() == t).status == "Bad"
 
 def test_stop_returns_equipment_to_normal(rhds):
     plant, rt = rhds
     t = T0.timestamp() + 60
     g = NelsonGenerator(plant, rt, Fixed([AnomalyEvent("I1", "injected", "C-3101", 6, t, t + 120)]), spontaneous=False)
     s = g.generate(T0, T0 + timedelta(minutes=10))
-    assert not [x for x in s if x.equip_id == "C-3101" and x.quality == "Bad" and x.ts.timestamp() >= t + 120 + 60 + 150]
+    assert not [x for x in s if x.equip_id == "C-3101" and x.status == "Bad" and x.ts.timestamp() >= t + 120 + 60 + 150]
 
 def test_spontaneous_union_ratio_near_ten_percent(rhds):
     plant, rt = rhds
@@ -54,7 +54,7 @@ def test_spontaneous_union_ratio_near_ten_percent(rhds):
     for equip in {x.equip_id for x in s}:
         held = np.zeros(86400, dtype=bool)
         for x in s:
-            if x.equip_id == equip and x.quality == "Bad":
+            if x.equip_id == equip and x.status == "Bad":
                 i = int(x.ts.timestamp() - T0.timestamp()); held[i:i + iv[(x.equip_id, x.tag_id)]] = True
         assert 0.09 <= held.mean() <= 0.11, equip
     assert len(src.seen) == len(set(src.seen)) > 0
@@ -69,7 +69,7 @@ def test_restore_seam_has_no_violation(rhds):
     b = NelsonGenerator(plant, rt, spontaneous=False)
     b.restore({k: v[-14:] for k, v in last.items()})
     nxt = b.generate(T0 + timedelta(minutes=10), T0 + timedelta(minutes=11))
-    assert not [x for x in nxt if x.quality == "Bad"]
+    assert not [x for x in nxt if x.status == "Bad"]
 
 def test_deterministic(rhds):
     plant, rt = rhds
@@ -99,5 +99,5 @@ def test_cut_spontaneous_stays_cut_across_small_windows(rhds):
     for k in range(610):
         split += g.generate(a + timedelta(seconds=k), a + timedelta(seconds=k + 1))
     assert split == whole
-    assert not [x for x in split if x.equip_id == "P-3101" and x.quality == "Bad"
+    assert not [x for x in split if x.equip_id == "P-3101" and x.status == "Bad"
                 and S + 150 + 60 + 150 <= x.ts.timestamp() < sp.end]

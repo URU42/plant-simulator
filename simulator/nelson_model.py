@@ -115,8 +115,6 @@ class NelsonGenerator:
             driver = by_id[e.driven_by] if e.driven_by else None
             driver_speed = next((t for t in driver.tags if t.signal == "speed"), None) if driver else None
             for t in e.tags:
-                if t.control is None:
-                    raise ValueError(f"{e.equip_id}/{t.tag_id}: control (μ·σ) is required")
                 dk = (driver.equip_id, driver_speed.tag_id) if driver_speed and t.signal == "speed" else None
                 self.tags.append(_Tag(
                     (e.equip_id, t.tag_id), t.control.mean, t.control.sigma, t.decimals,
@@ -239,6 +237,6 @@ class NelsonGenerator:
                 record[ep] = zq
             zp = zq
             out.append(construct(equip_id=equip_id, tag_id=tag_id, ts=stamps[i], value=v,
-                                 quality="Bad" if push(zq) else "Good"))
+                                 status="Bad" if push(zq) else "Good"))
         t.zp = zp
         return out

@@ -47,8 +47,8 @@ async def test_resumed_backfill_through_collector(plant_path, runtime_path):
     mu = {k: t.control.mean for k, t in plant.tag_by_key().items()}
     with TestClient(create_single_app(plant_path, runtime_path, ":memory:")) as client:
         sender = ClientSender(client)
-        seed = [Sample(equip_id=e, tag_id=t, ts=RESUME - timedelta(seconds=10), value=mu[(e, t)], quality="Good") for e, t in keys]
-        seed += [Sample(equip_id=e, tag_id=t, ts=RESUME, value=mu[(e, t)], quality="Good") for e, t in keys]
+        seed = [Sample(equip_id=e, tag_id=t, ts=RESUME - timedelta(seconds=10), value=mu[(e, t)], status="Good") for e, t in keys]
+        seed += [Sample(equip_id=e, tag_id=t, ts=RESUME, value=mu[(e, t)], status="Good") for e, t in keys]
         await sender.send(IngestBatch(source_id="T", batch_id="b-seed", sent_at=RESUME, samples=seed))
 
         await run_backfill_then_live(plant, runtime, sender, now=NOW, live_clock=SimClock.backfill(NOW),

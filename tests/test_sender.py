@@ -8,7 +8,7 @@ from simulator.sender import HttpSender, LocalSender, MemorySender, SendError
 
 def _batch():
     return IngestBatch(source_id="SIM-ALL", batch_id="b-1", sent_at="2026-11-08T17:24:00+09:00",
-                       samples=[Sample(equip_id="C-1101", tag_id="VI-C1101", ts="2026-11-08T17:23:10+09:00", value=2.3, quality="Good")])
+                       samples=[Sample(equip_id="C-1101", tag_id="VI-C1101", ts="2026-11-08T17:23:10+09:00", value=2.3, status="Good")])
 
 
 async def test_http_sender_posts_batch_to_ingest():
@@ -22,7 +22,7 @@ async def test_http_sender_posts_batch_to_ingest():
     sender = HttpSender("http://collector:8000", transport=httpx.MockTransport(handler))
     result = await sender.send(_batch())
     assert seen["url"] == "http://collector:8000/ingest"
-    assert b'"schema_version":"1.0"' in seen["json"]
+    assert b'"schema_version":"2.0"' in seen["json"]
     assert result["stored"] == 1
 
 

@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS equipment_tag (
 
 -- 원시 값 (7.2) — 보관 기간은 실행 설정 raw_retention_days
 CREATE TABLE IF NOT EXISTS ts_raw (
-    equip_id TEXT NOT NULL, tag_id TEXT NOT NULL, ts TEXT NOT NULL, value REAL, quality TEXT NOT NULL,
+    equip_id TEXT NOT NULL, tag_id TEXT NOT NULL, ts TEXT NOT NULL, value REAL, status TEXT NOT NULL,
     batch_id TEXT NOT NULL, received_at TEXT NOT NULL,
     PRIMARY KEY (equip_id, tag_id, ts)
 ) WITHOUT ROWID;
@@ -36,7 +36,7 @@ CREATE INDEX IF NOT EXISTS ix_ts_raw_ts ON ts_raw (ts);
 
 -- 현재값
 CREATE TABLE IF NOT EXISTS tag_current (
-    equip_id TEXT NOT NULL, tag_id TEXT NOT NULL, ts TEXT NOT NULL, value REAL, quality TEXT NOT NULL, received_at TEXT NOT NULL,
+    equip_id TEXT NOT NULL, tag_id TEXT NOT NULL, ts TEXT NOT NULL, value REAL, status TEXT NOT NULL, received_at TEXT NOT NULL,
     PRIMARY KEY (equip_id, tag_id)
 );
 

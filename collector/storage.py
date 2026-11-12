@@ -83,20 +83,20 @@ class Storage:
         return {(r[0], r[1]) for r in self.query("SELECT equip_id, tag_id FROM equipment_tag")}
 
     def store_batch(self, batch_id: str, source_id: str, received_at: str, rows: list[tuple]) -> int:
-        """rows: (equip_id, tag_id, ts, value, quality). 같은 키·시각은 한 번만 저장하고 저장 건수를 돌려준다."""
+        """rows: (equip_id, tag_id, ts, value, status). 같은 키·시각은 한 번만 저장하고 저장 건수를 돌려준다."""
         with self.transaction():
             before = self._conn.total_changes
             self._conn.executemany(
-                "INSERT OR IGNORE INTO ts_raw (equip_id, tag_id, ts, value, quality, batch_id, received_at) "
+                "INSERT OR IGNORE INTO ts_raw (equip_id, tag_id, ts, value, status, batch_id, received_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [(*r, batch_id, received_at) for r in rows],
             )
             stored = self._conn.total_changes - before
             # 현재값: 측정 시각이 더 새로운 행만 반영한다 (시각 순서가 뒤바뀐 행 허용)
             self._conn.executemany(
-                "INSERT INTO tag_current (equip_id, tag_id, ts, value, quality, received_at) VALUES (?, ?, ?, ?, ?, ?) "
+                "INSERT INTO tag_current (equip_id, tag_id, ts, value, status, received_at) VALUES (?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(equip_id, tag_id) DO UPDATE SET ts = excluded.ts, value = excluded.value, "
-                "quality = excluded.quality, received_at = excluded.received_at WHERE excluded.ts > tag_current.ts",
+                "status = excluded.status, received_at = excluded.received_at WHERE excluded.ts > tag_current.ts",
                 [(*r, received_at) for r in rows],
             )
             self._conn.execute(

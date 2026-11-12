@@ -40,8 +40,8 @@ async def test_split_units_produce_same_values_as_all(plant_path):
     part = MemorySender()
     await Simulator(plant, _runtime(units=["UNIT-RHDS-03"], source_id="SIM-U3"), part, SimClock.backfill(START)).run(
         until=START + timedelta(minutes=1))
-    whole_u3 = {(s.tag_id, s.ts): (s.value, s.quality) for s in whole.batches[0].samples if s.equip_id == "C-3101"}
-    part_u3 = {(s.tag_id, s.ts): (s.value, s.quality) for s in part.batches[0].samples}
+    whole_u3 = {(s.tag_id, s.ts): (s.value, s.status) for s in whole.batches[0].samples if s.equip_id == "C-3101"}
+    part_u3 = {(s.tag_id, s.ts): (s.value, s.status) for s in part.batches[0].samples}
     assert whole_u3 == part_u3 and len(part_u3) == 7 * 60 + 4 * 6
 
 
