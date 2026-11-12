@@ -101,3 +101,16 @@ def test_cut_spontaneous_stays_cut_across_small_windows(rhds):
     assert split == whole
     assert not [x for x in split if x.equip_id == "P-3101" and x.status == "Bad"
                 and S + 150 + 60 + 150 <= x.ts.timestamp() < sp.end]
+
+
+def test_new_event_wins_over_stopped_fault_recovery_tail(rhds):
+    """멈춘 고장의 회복 꼬리와 새로 시작한 사건이 겹치면 새 사건의 모양이 나온다 (시작이 늦은 구간 우선)."""
+    plant, rt = rhds
+    t = T0.timestamp() + 60
+    old = AnomalyEvent("I1", "injected", "C-3101", 1, t, t + 100)       # 대표 태그 회복 5초: t+100 ~ t+105
+    new = AnomalyEvent("I2", "injected", "C-3101", 7, t + 102, None)     # 규칙 7 고착 z = 0.025
+    s = NelsonGenerator(plant, rt, Fixed([old, new]), spontaneous=False).generate(T0, T0 + timedelta(minutes=3))
+    tag = plant.tag_by_key()[("C-3101", "XI-X-C3101")]
+    stuck = round(tag.control.mean + tag.control.sigma * 0.025, tag.decimals)
+    at = {x.ts.timestamp(): x.value for x in s if x.tag_id == "XI-X-C3101"}
+    assert [at[t + k] for k in (102, 103, 104)] == [stuck] * 3

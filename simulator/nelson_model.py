@@ -167,7 +167,7 @@ class NelsonGenerator:
         return [s for r in rows for s in r]
 
     def _windows(self, s0: int, s1: int, epochs: range, positions: dict[int, list[int]]):
-        """태그별 반응 구간 [(시작, 끝, 사건, 반응)]. 자동 이상이 처음 표본에 걸리면 source.opened 를 부른다."""
+        """태그별 반응 구간 [(시작, 끝, 사건, 반응)], 사건 시작이 늦은 것부터. 자동 이상이 처음 표본에 걸리면 source.opened 를 부른다."""
         # 자동 이상의 건너뜀·자르기와 끝난 고장의 회복이 창마다 같게 나오도록 멀리 되돌아가 묻는다
         events = list(self.source.external(s0 - EXTERNAL_LOOKBACK_SEC, s1))
         if self.spontaneous:
@@ -194,6 +194,9 @@ class NelsonGenerator:
             end = math.inf if ev.end is None else ev.end
             for tag_id, r in self._responses[key].items():
                 out.setdefault((ev.equip_id, tag_id), []).append((ev.start + r.lag_sec, end + max(r.recovery_sec, 0), ev, r))
+        # 한 시각에 구간이 여럿 걸리면(멈춘 고장의 회복 꼬리 + 새로 시작한 사건) _series 는 첫 것을 쓰므로 새 사건이 앞에 오게 한다
+        for w in out.values():
+            w.sort(key=lambda x: x[2].start, reverse=True)
         return out
 
     def _series(self, t: _Tag, pos: list[int], epochs: range, stamps: list[datetime], windows,
