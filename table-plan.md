@@ -2,16 +2,16 @@
 
 설비 데이터로 DB 테이블을 구성하기 전에, 지금 어떤 공장·설비·태그가 있고 그 값이 어느 테이블에 들어가는지 정리한다.
 
-- **기준**: 2026-11-11, `main` 기준. 배포 목록 `config/plants.yaml` 의 다섯 공장(RFCC·CDU·HOU·RHDS·VRDS). 수첨탈황(HDS)은 배포에서 빠져 있어 제외했다.
-- **출처**: 구성안 `config/plant_<key>.yaml` (각 샘플 Excel `설비 태그` 시트에서 옮긴 마스터), 스키마 `collector/schema.sql` (v2), 적재 코드 `collector/seed_master.py`.
+- **기준**: 2026-11-12, Nelson 이상 생성·판정 반영(`feat/nelson-anomaly`). 배포 목록 `config/plants.yaml` 의 다섯 공장(RFCC·CDU·HOU·RHDS·VRDS). 수첨탈황(HDS)은 배포에서 빠져 있어 제외했다.
+- **출처**: 구성안 `config/plant_<key>.yaml` (각 샘플 Excel `설비 태그` 시트에서 옮긴 마스터), 스키마 `collector/schema.sql` (v3), 적재 코드 `collector/seed_master.py`.
 - **현재 구조**: 공장마다 SQLite 파일을 따로 쓴다 (`data/<key>.db`). 테이블 구성은 다섯 파일 모두 같다.
-- **결정 (2026-11-11)**: PostgreSQL 한 DB 에 **공장별 스키마**로, **이상이 탐지된 것만 지우지 않고** 담는다. 판정은 한계값 초과 + 품질 이상(Bad/ScanOff), 저장은 이상 행 + 앞뒤 원시 값. 6절 참고.
+- **결정 (2026-11-11)**: PostgreSQL 한 DB 에 **공장별 스키마**로, **이상이 탐지된 것만 지우지 않고** 담는다. 판정은 Nelson 8종(`nelson_alarm`), 저장은 이상 행 + 앞뒤 원시 값. 6절 참고. (2026-11-12 변경: 한계값 알람·품질 이벤트는 없앴다)
 
 ## 1. 공장 요약
 
 | key | plant_id | 공장 | 설비 | 태그 (1초 / 10초) | 한계값 있는 태그 | 원시 행/일 |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
-| `rfcc` | `PL-RFCC` | 가상 정유단지 RFCC | 12 | 81 (65 / 16) | 81 (통계) | 약 575만 |
+| `rfcc` | `PL-RFCC` | 가상 정유단지 RFCC | 12 | 81 (65 / 16) | 81 (μ±3σ) | 약 575만 |
 | `cdu` | `PL-CDU` | CDU (상압증류) | 7 | 46 (37 / 9) | 46 | 약 327만 |
 | `hou` | `PL-HOU` | HOU (수첨분해) | 7 | 61 (43 / 18) | 61 | 약 387만 |
 | `rhds` | `PL-RHDS` | RHDS (상압 잔사유 수첨탈황) | 6 | 43 (31 / 12) | 43 | 약 278만 |
@@ -29,7 +29,7 @@
 
 | 테이블 | 키 | 주요 컬럼 | 출처 (구성안) |
 | --- | --- | --- | --- |
-| `schema_meta` | — | `version` (=2) | 스키마 버전 |
+| `schema_meta` | — | `version` (=3) | 스키마 버전 |
 | `plant` | `plant_id` | `name`, `config_version` | `plant` |
 | `unit_group` | `unit_group_id` | `plant_id`, `name` | `plant.unit_groups` |
 | `unit` | `unit_id` | `unit_group_id`, `name` | `plant.unit_groups[].units` |
@@ -37,7 +37,7 @@
 | `equipment` | `equip_id` | `name`, `type`, `grade`, `unit_id`, `driven_by` | `equipment` |
 | `equipment_alias` | `alias` | `equip_id` | `equipment[].aliases` |
 | `tag_std` | `signal` | `prefix`, `unit`, `name` | `signals` |
-| `equipment_tag` | `(equip_id, tag_id)` | `signal`, `unit`, `location`, `description`, `normal_ref`, `limit_basis`, `warn/alarm/trip_lo`, `warn/alarm/trip_hi`, `delay_samples`, `interval_sec`, `decimals` | `equipment[].tags` |
+| `equipment_tag` | `(equip_id, tag_id)` | `signal`, `unit`, `location`, `description`, `normal_ref`, `limit_basis`, `warn/alarm/trip_lo`, `warn/alarm/trip_hi` (참고값), `control_mean`, `control_sigma` (Nelson 기준 μ·σ), `interval_sec`, `decimals` | `equipment[].tags` |
 
 공장별 마스터 행 수:
 
@@ -49,25 +49,25 @@
 | `rhds` | 1 | 6 | 6 | 3 | 15 | 6 | 0 | 43 |
 | `vrds` | 1 | 6 | 6 | 3 | 15 | 6 | 0 | 43 |
 
-### 2.2 이력 — 시나리오 파일에서 백필 때 적재 (개발용)
+### 2.2 이력 — 없앴다
 
-| 테이블 | 키 | 주요 컬럼 | 비고 |
-| --- | --- | --- | --- |
-| `maintenance_history` | `work_order_id` | `equip_id`, `start_ts`, `end_ts`, `description` | 다섯 공장 시나리오 모두 `maintenance` 없음 → 0행 |
-| `failure_history` | `failure_id` | `equip_id`, `tag_id`, `start_ts`, `end_ts`, `work_order_id`, `doc_id`, `description` | 이벤트에 `failure_id` 가 없음 (확정 고장 아님) → 0행 |
+`maintenance_history`·`failure_history` 와 시나리오 파일 적재는 Nelson 개편에서 지웠다. 정비·고장 이력은 다른 서버가 판단한다.
 
 ### 2.3 시계열 — 수집 서버가 수신·배치로 채움
 
 | 테이블 | 키 | 주요 컬럼 | 채우는 시점 | 보관 |
 | --- | --- | --- | --- | --- |
-| `ts_raw` | `(equip_id, tag_id, ts)` | `value`, `quality`, `batch_id`, `received_at` | 수신 즉시 | `raw_retention_days` (현재 1일) |
-| `tag_current` | `(equip_id, tag_id)` | `ts`, `value`, `quality`, `received_at` | 수신 즉시 | 태그당 1행 |
+| `ts_raw` | `(equip_id, tag_id, ts)` | `value`, `status`, `batch_id`, `received_at` | 수신 즉시 | `raw_retention_days` (현재 1일) |
+| `tag_current` | `(equip_id, tag_id)` | `ts`, `value`, `status`, `received_at` | 수신 즉시 | 태그당 1행 |
 | `ts_10m` | `(equip_id, tag_id, bucket_start)` | `avg`, `min`, `max`, `sd`, `count`, `status` | 10분 배치 | 계속 |
 | `ts_1h` | `(equip_id, tag_id, bucket_start)` | `avg`, `min`, `max`, `sd`, `count`, `status` | 매시 배치 | 계속 |
-| `alarm_detail` | `alarm_id` (자동 증가) | `occurred_at`, `cleared_at`, `equip_id`, `tag_id`, `limit_type`, `direction`, `limit_value`, `actual_value`, `exceed_pct`, `severity` | 10분 배치 | 계속 |
+| `nelson_alarm` | `alarm_id` (자동 증가) | `equip_id`, `tag_id`, `rule`, `direction`, `occurred_at`, `cleared_at`, `last_hit_at`, `hit_count`, `value_at_occurrence` | 수신 즉시 (받을 때마다 판정) | 계속 |
+| `anomaly_event` | `event_id` | `origin`, `equip_id`, `rule`, `normal_change`, `kind`, `cause`, `action`, `response_tags`, `start_at`, `scheduled_end_at`, `stop_requested_at` | 생성기·주입·멈춤 API | 계속 (정답지) |
 
-- `quality`: Good / Uncertain / Bad / ScanOff. `limit_type`: Soft / Alarm / Trip. `direction`: hi / lo. `severity`: Trip→High, Alarm→Medium, Soft→Low.
-- RFCC 는 자료에 한계값이 없어 통계 경고 한계를 쓴다: 정상 구간 10분 최대·최소의 평균 ± 3σ, `delay_samples` 2. 시뮬레이터 정상 7일에서 잡음만으로 연속 2구간을 넘은 건 6건.
+- `status`: 설비 상태 `Good` / `Bad`. 그 표본에 Nelson 규칙이 하나라도 성립하면 `Bad`. 측정 신뢰도(품질) 개념은 없다. 집계(`ts_10m`·`ts_1h`)의 `status` 는 구간에 `Bad` 표본이 하나라도 있으면 `Bad`, 표본이 없으면 `NoData`. 평균·최소·최대는 모든 표본으로 낸다.
+- `nelson_alarm`: (태그, 규칙)마다 연속 위반을 한 행으로 묶고, 15 표본 연속으로 그 규칙이 성립하지 않으면 닫는다(`cleared_at`). `direction` hi / lo (규칙 4·7·8 은 NULL). 심각도·원인·분류는 싣지 않는다.
+- `anomaly_event`: 정답지 겸 생성기 상태. `origin` = `injected` / `persistent` / `spontaneous`. `/alarms` 에는 노출하지 않고 `GET /{공장}/anomalies` 로만 낸다.
+- 한계값 여섯 칸은 자료의 참고값으로 마스터에 남기되 알람 판정에는 쓰지 않는다. RFCC 는 `warn_lo`·`warn_hi` 를 Nelson 관리한계 μ ± 3σ 로 다시 썼다.
 
 ### 2.4 운영 — 수집 서버 내부
 
@@ -495,8 +495,8 @@
 1. ~~공장을 한 DB 로 합칠지~~ → 공장별 스키마. 참고로 `equip_id`·`unit_id` 는 다섯 공장 사이에 겹치지 않고, `equipment` 에 `plant_id` 가 없어 공장은 `unit → unit_group → plant` 로 찾는다 (스키마 안에서는 공장이 하나뿐이라 문제없다).
 2. **`tag_std` 가 공장마다 다르다** → 스키마별로 따로 두므로 충돌 없음. 같은 `signal` 인데 접두어·단위 표기가 다르다. 예) `shaft_vibration` 접두어 VI / XI / VX, `suction_pressure` 단위 bar(g) / kg/cm2(g), `bearing_temp` 단위 DEG C / degC. 공장을 가로지르는 조회에서는 `equipment_tag.unit` 을 기준으로 본다.
 3. **`equipment_type` 도 다르다** → 스키마별로 따로 두므로 충돌 없음. `CC` 가 RFCC 에서는 “원심 압축기”, 나머지에서는 “압축기”.
-4. **비어 있는 테이블**: `equipment_alias`, `maintenance_history`, `failure_history` 는 다섯 공장 모두 0행이다 (별칭·정비·고장 자료가 구성안·시나리오에 없음). `equipment.grade`, `equipment_tag.location` 도 비어 있다.
-5. **한계값**: RFCC 81개 태그는 통계 경고값만 있다 (`delay_samples` 2). RHDS·VRDS 는 경고값이 자료 그대로이고, 알람·정지값은 CDU·HOU 의 같은 신호 간격을 적용해 넣었다 (규칙은 각 태그 `limit_basis`). 나머지 공장의 `delay_samples` 는 기본값 1.
+4. **비어 있는 테이블**: `equipment_alias` 는 다섯 공장 모두 0행이다 (별칭 자료가 구성안에 없음). `equipment.grade`, `equipment_tag.location` 도 비어 있다.
+5. **한계값**: 알람 판정은 Nelson 8종(태그별 고정 μ·σ)만 쓴다. 한계값 여섯 칸은 자료의 참고값으로만 남아 있고, RFCC 는 μ ± 3σ 다.
 6. **원시 값 크기**: 다섯 공장 합계 하루 약 1,846만 행 (행당 약 180 B → 하루 약 3.3 GB). 보관 기간이 1일이라 원시 값은 이 정도에서 고정되고, 집계가 계속 쌓인다.
 
 ## 6. PostgreSQL 이상 데이터 DB (결정)
@@ -506,33 +506,20 @@
 ### 6.1 구성
 
 - **DB 하나, 공장별 스키마 다섯 개**: 스키마 이름은 `config/plants.yaml` 의 `key` 그대로 → `rfcc`, `cdu`, `hou`, `rhds`, `vrds`. 공장 사이에 공유하는 테이블은 없다. 공장마다 `search_path` 를 그 스키마로 잡아 테이블 이름은 지금 그대로 쓴다.
-- **이상 판정** 두 가지:
-  1. **한계값 초과**: 10분 배치가 만드는 `alarm_detail` 그대로 (10분 최대값↔상한, 최소값↔하한, `delay_samples`).
-  2. **품질 이상**: 원시 값 품질이 `Bad` / `ScanOff` 인 구간. `Uncertain` 은 값이 있으므로 이상으로 보지 않는다.
+- **이상 판정**: Nelson 8종. 수집 서버가 받을 때마다 태그별로 판정해 `nelson_alarm` 에 묶음(묶음 = (태그, 규칙)의 연속 위반 구간)으로 쌓는다. 한계값 알람·품질 이상은 없다.
 - **저장 범위**: 이상 1건당 한 행 + 이상 구간 앞뒤 원시 값.
-- RFCC 의 한계값 초과는 통계 경고뿐이라 모두 Soft(Low) 다. RHDS·VRDS 는 알람·정지값이 생겨 Medium·High 도 나온다.
+- 심각도는 두지 않는다. 해석은 알람 요약 쪽이 한다.
 
 ### 6.2 스키마별 테이블
 
 | 구분 | 테이블 | 키 | 내용 | SQLite 에서 |
 | --- | --- | --- | --- | --- |
 | 마스터 | `schema_meta`, `plant`, `unit_group`, `unit`, `equipment_type`, `equipment`, `equipment_alias`, `tag_std`, `equipment_tag` | 2.1 과 같음 | 이상 행을 해석할 기준 (계층·한계값·단위) | 구성안에서 서버 시작 때 upsert (지금과 같은 경로) |
-| 이력 | `maintenance_history`, `failure_history` | 2.2 와 같음 | 정비·고장 이력 | 그대로 |
-| 이상 | `alarm_detail` | `alarm_id` | 한계값 초과 1건 = 1행 | 그대로 옮김. `alarm_id` 는 SQLite 값을 PK 로 써서 해제(`cleared_at`) 때 같은 행을 갱신 |
-| 이상 | `quality_event` **(신규)** | `(equip_id, tag_id, start_ts)` | 품질 이상 1건 = 1행 | SQLite 에도 같은 테이블을 두고 `alarm_detail` 처럼 열고 닫는다 |
+| 이상 | `nelson_alarm` | `alarm_id` | Nelson 묶음 1건 = 1행 (이상 = `nelson_alarm` + 앞뒤 원시값) | 그대로 옮김. `alarm_id` 는 SQLite 값을 PK 로 써서 닫힐 때(`cleared_at`) 같은 행을 갱신 |
+| 이상 | `anomaly_event` | `event_id` | 정답지 (선택) | 그대로 옮김. 평가에 쓸 때만 |
 | 이상 | `anomaly_raw` **(신규)** | `(equip_id, tag_id, ts)` | 이상 구간 앞뒤 원시 값 | `ts_raw` 에서 잘라 옮김 |
 
 **옮기지 않는 테이블**: `ts_raw`(전체), `tag_current`, `ts_10m`, `ts_1h`, `ingest_batch`, `job_state` — 수집 서버 작업용으로 SQLite 에만 둔다.
-
-`quality_event` 컬럼:
-
-| 컬럼 | 타입 | 설명 |
-| --- | --- | --- |
-| `equip_id`, `tag_id` | text | PK |
-| `start_ts` | timestamptz | PK, 첫 이상 샘플 시각 |
-| `end_ts` | timestamptz | 마지막 이상 샘플 시각. 진행 중이면 NULL |
-| `quality` | text | `Bad` / `ScanOff`. 도중에 바뀌면 다른 건으로 나눈다 |
-| `sample_count` | integer | 이상 샘플 수 |
 
 `anomaly_raw` 컬럼:
 
@@ -541,14 +528,14 @@
 | `equip_id`, `tag_id` | text | PK |
 | `ts` | timestamptz | PK, 측정 시각 |
 | `value` | double precision | 측정값 (NULL 가능) |
-| `quality` | text | Good / Uncertain / Bad / ScanOff |
+| `status` | text | Good / Bad |
 
 - 원시 값은 이상 건에 매달지 않고 측정점 단위로 둔다. 창이 겹쳐도 PK 로 한 번만 들어가고 (`ON CONFLICT DO NOTHING`), 이상 건과는 `equip_id` + 시각 범위로 잇는다. 이 조회용으로 `(equip_id, ts)` 인덱스를 둔다.
 - **창 기본안**: 같은 설비의 모든 태그, `발생 30분 전 ~ 해제 30분 후`. 1초 태그 6개 + 10초 태그 2개 설비면 1시간에 약 2.2만 행 (약 4 MB).
 
 ### 6.3 옮기는 시점
 
-- 10분 배치 끝에 새로 생기거나 해제된 `alarm_detail`·`quality_event` 를 PostgreSQL 에 upsert 한다.
+- 10분 배치 끝에 새로 생기거나 닫힌 `nelson_alarm` 을 PostgreSQL 에 upsert 한다.
 - 원시 값 창은 그때까지 모인 만큼 넣고 다음 배치에서 이어 넣는다 (PK 로 중복 무시). 진행 중인 이상도 10분마다 옮기므로 SQLite 원시 값 보관 1일 안에 빠짐없이 넘어간다.
 - 옮긴 위치는 SQLite `job_state` 에 이름 하나(`pg_export`)를 더해 기록한다.
 
@@ -556,12 +543,12 @@
 
 | 지금 (SQLite) | PostgreSQL | 해당 컬럼·위치 |
 | --- | --- | --- |
-| `TEXT` (UTC ISO 시각) | `timestamptz` | `ts`, `start_ts`, `end_ts`, `occurred_at`, `cleared_at` |
-| `REAL` | `double precision` | `value`, 한계값 여섯 칸, `limit_value`, `actual_value`, `exceed_pct` |
-| `INTEGER` | `integer` | `config_version`, `grade`, `delay_samples`, `interval_sec`, `decimals`, `sample_count`, `version` |
-| `TEXT` (그 밖) | `text` | ID·이름·설명·`quality` 등 |
-| `INTEGER PRIMARY KEY AUTOINCREMENT` | `bigint` (SQLite 값 그대로, IDENTITY 아님) | `alarm_detail.alarm_id` |
-| `INSERT OR REPLACE` | `INSERT … ON CONFLICT (PK) DO UPDATE` | 마스터 적재, `alarm_detail`·`quality_event` 갱신 |
+| `TEXT` (UTC ISO 시각) | `timestamptz` | `ts`, `start_ts`, `occurred_at`, `cleared_at`, `last_hit_at` |
+| `REAL` | `double precision` | `value`, 한계값 여섯 칸, `control_mean`, `control_sigma`, `value_at_occurrence` |
+| `INTEGER` | `integer` | `config_version`, `grade`, `interval_sec`, `decimals`, `rule`, `hit_count`, `version` |
+| `TEXT` (그 밖) | `text` | ID·이름·설명·`status` 등 |
+| `INTEGER PRIMARY KEY AUTOINCREMENT` | `bigint` (SQLite 값 그대로, IDENTITY 아님) | `nelson_alarm.alarm_id` |
+| `INSERT OR REPLACE` | `INSERT … ON CONFLICT (PK) DO UPDATE` | 마스터 적재, `nelson_alarm` 갱신 |
 
 ### 6.5 정할 것
 

@@ -2,6 +2,7 @@
 
 실행: python -m collector.app --plants config/plants.yaml --port 8000
 라우트는 한 번만 정의하고 경로 앞의 {plant_key} 로 공장 문맥(PlantContext)을 고른다. 루트 / 는 공장 목록, /health 는 전체 상태.
+통합 실행에서는 /{공장}/anomalies 로 이상 사건을 주입·멈추고 정답지를 낸다.
 """
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import argparse
 import asyncio
 import hmac
 import logging
+import math
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -19,14 +21,15 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
+from collector.anomaly_book import Busy
 from collector.ingest import RawBatch, schema_supported, validate_samples
 from collector.plant_context import PlantContext
 from collector.plants import PlantEntry, PlantsConfig, load_plants
 from collector.settings import Settings
 from common.config_models import ConfigError
-from common.timefmt import parse_iso, to_db
+from common.timefmt import from_db, parse_iso, to_db
 
 STATIC_DIR = Path(__file__).with_name("static")     # 디버깅 화면
 log = logging.getLogger("collector")
@@ -51,7 +54,7 @@ def require_ingest_token(request: Request) -> None:
         if not hmac.compare_digest(request.headers.get("X-Ingest-Token", ""), settings.ingest_token):
             raise HTTPException(403, "invalid or missing X-Ingest-Token")
     elif settings.with_simulators:
-        raise HTTPException(403, "external ingest is disabled: set INGEST_TOKEN to allow POST /ingest in embedded mode")
+        raise HTTPException(403, "external writes are disabled: set INGEST_TOKEN to allow POST /ingest and /anomalies in embedded mode")
 
 
 @router.post("/ingest")
@@ -68,6 +71,15 @@ async def post_ingest(request: Request, ctx: PlantContext = Depends(context)):
 
 
 # --- 조회 ---------------------------------------------------------------------
+def query_time(name: str, value: str) -> str:
+    """조회 파라미터 시각을 저장 형식으로. 못 읽으면 400 (URL 의 '+' 는 공백이 되므로 Z 나 %2B 로 쓰라고 알린다)."""
+    try:
+        return to_db(parse_iso(value))
+    except ValueError:
+        raise HTTPException(400, f"invalid {name} {value!r}: use ISO 8601 with Z (2026-11-12T00:00:00Z) "
+                                 "or an encoded offset (2026-11-12T09:00:00%2B09:00)")
+
+
 @router.get("/")
 async def plant_page(ctx: PlantContext = Depends(context)):
     # 디버깅 화면은 자주 바뀌므로 브라우저가 캐시하지 않게 한다
@@ -114,35 +126,108 @@ def timeseries(equip_id: str, tag_id: str, from_: str = Query(alias="from"), to:
     return ctx.storage.query_dicts(
         f"SELECT equip_id, tag_id, bucket_start AS ts, avg, min, max, sd, count, status FROM ts_{interval} "
         "WHERE equip_id = ? AND tag_id = ? AND bucket_start >= ? AND bucket_start < ? ORDER BY bucket_start",
-        (equip_id, tag_id, to_db(parse_iso(from_)), to_db(parse_iso(to))),
+        (equip_id, tag_id, query_time("from", from_), query_time("to", to)),
     )
 
 
 @router.get("/alarms")
-def alarms(equip_id: str | None = None, from_: str | None = Query(default=None, alias="from"), to: str | None = None,
-                 ctx: PlantContext = Depends(context)):
+def alarms(equip_id: str | None = None, rule: int | None = Query(default=None, ge=1, le=8),
+           from_: str | None = Query(default=None, alias="from"), to: str | None = None, open_: bool = Query(default=False, alias="open"),
+           ctx: PlantContext = Depends(context)):
+    """Nelson 알람 (nelson_alarm). from/to 는 구간과 겹치는 알람(열린 시각 < to, 아직 열렸거나 닫힌 시각 ≥ from), open=true 는 열린 것만."""
     where, params = ["1=1"], []
     if equip_id:
         where.append("equip_id = ?"); params.append(equip_id)
+    if rule is not None:
+        where.append("rule = ?"); params.append(rule)
     if from_:
-        where.append("occurred_at >= ?"); params.append(to_db(parse_iso(from_)))
+        where.append("(cleared_at IS NULL OR cleared_at >= ?)"); params.append(query_time("from", from_))
     if to:
-        where.append("occurred_at < ?"); params.append(to_db(parse_iso(to)))
-    return ctx.storage.query_dicts(f"SELECT * FROM alarm_detail WHERE {' AND '.join(where)} ORDER BY occurred_at DESC", params)
+        where.append("occurred_at < ?"); params.append(query_time("to", to))
+    if open_:
+        where.append("cleared_at IS NULL")
+    return ctx.storage.query_dicts(f"SELECT * FROM nelson_alarm WHERE {' AND '.join(where)} ORDER BY occurred_at DESC", params)
 
 
-@router.get("/maintenance")
-def maintenance(equip_id: str | None = None, ctx: PlantContext = Depends(context)):
-    """정비 이력 (개발용 시나리오에서 적재). 다른 파드는 DB 를 직접 읽지 못하므로 API 로 연다."""
-    where, params = ("WHERE equip_id = ?", [equip_id]) if equip_id else ("", [])
-    return ctx.storage.query_dicts(f"SELECT * FROM maintenance_history {where} ORDER BY start_ts", params)
+# --- 이상 사건: 주입·멈춤·정답지 (Nelson 이상 설계 §4.6) ----------------------------
+START_DELAY_SEC = 3     # 주입·멈춤은 시뮬레이터 시각 기준 이만큼 뒤부터. 장부가 이미 만든 구간 끝보다 앞서면 더 미룬다
 
 
-@router.get("/failures")
-def failures(equip_id: str | None = None, ctx: PlantContext = Depends(context)):
-    """고장 이력 (개발용 시나리오에서 적재)."""
-    where, params = ("WHERE equip_id = ?", [equip_id]) if equip_id else ("", [])
-    return ctx.storage.query_dicts(f"SELECT * FROM failure_history {where} ORDER BY start_ts", params)
+class InjectBody(BaseModel):
+    equip_id: str
+    rule: int = Field(ge=1, le=8)
+
+
+def require_live(request: Request, ctx: PlantContext) -> None:
+    """사건 쓰기(POST) 확인: 토큰 → 통합 실행(409) → 생성기 죽음(503) → 실시간(503). DB 는 읽지 않는다(이벤트 루프 위)."""
+    require_ingest_token(request)
+    if not request.app.state.settings.with_simulators:
+        raise HTTPException(409, "embedded only")
+    if ctx.simulator_error:
+        raise HTTPException(503, f"simulator stopped: {ctx.simulator_error}")
+    if not ctx.live:
+        raise HTTPException(503, "backfilling")
+
+
+def event_time(ctx: PlantContext) -> float:
+    """요청 시각(epoch 초) = ceil(시뮬레이터 현재 시각) + 3. 저장소를 읽으므로 워커 스레드에서 부른다. sim_now 를 모르면 503."""
+    sim_now = ctx.storage.sim_now()
+    if sim_now is None:
+        raise HTTPException(503, "backfilling")
+    return math.ceil(from_db(sim_now).timestamp()) + START_DELAY_SEC
+
+
+def _utc(epoch: float) -> str:
+    return to_db(datetime.fromtimestamp(epoch, timezone.utc))
+
+
+def _require_equipment(ctx: PlantContext, equip_id: str) -> None:
+    if equip_id not in ctx.plant.equipment_by_id():
+        raise HTTPException(404, f"unknown equipment {equip_id}")
+
+
+@router.post("/anomalies", status_code=201)
+async def inject_anomaly(request: Request, ctx: PlantContext = Depends(context)):
+    """설비 하나에 규칙 하나의 사건을 연다. 멈출 때까지 간다. 그 설비에 주입·지속 고장이 살아 있으면 409.
+    start_at 은 실제 시작 시각(ceil(sim_now)+3, 생성기가 이미 그 뒤까지 만들었으면 그 끝)."""
+    require_live(request, ctx)                    # 본문보다 먼저 (post_ingest 와 같은 이유)
+    try:
+        body = InjectBody.model_validate(await request.json())
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, f"invalid body: {str(e)[:300]}")
+    _require_equipment(ctx, body.equip_id)
+    try:
+        event = await asyncio.to_thread(lambda: ctx.book.inject(body.equip_id, body.rule, event_time(ctx)))
+    except Busy:
+        raise HTTPException(409, f"{body.equip_id} has a live injected or persistent fault: stop it first")
+    return {"event_id": event.event_id, "equip_id": event.equip_id, "rule": event.rule, "start_at": _utc(event.start)}
+
+
+@router.post("/anomalies/stop")
+async def stop_all_anomalies(request: Request, ctx: PlantContext = Depends(context)):
+    """그 공장의 살아 있는 사건을 모두 멈춘다. 예정된 자동 이상·지속 고장 일정은 그대로 이어진다.
+    stop_requested_at 은 실제 멈춤 시각(주입의 start_at 과 같은 규칙)."""
+    require_live(request, ctx)
+    at, stopped = await asyncio.to_thread(lambda: ctx.book.stop(None, event_time(ctx)))
+    return {"stopped": stopped, "stop_requested_at": _utc(at)}
+
+
+@router.post("/anomalies/{equip_id}/stop")
+async def stop_anomaly(equip_id: str, request: Request, ctx: PlantContext = Depends(context)):
+    """그 설비의 살아 있는 사건(주입·지속 고장·자동 이상)을 멈춘다. 모르는 설비이거나 멈출 사건이 없으면 404."""
+    require_live(request, ctx)
+    _require_equipment(ctx, equip_id)
+    at, stopped = await asyncio.to_thread(lambda: ctx.book.stop(equip_id, event_time(ctx)))
+    if not stopped:
+        raise HTTPException(404, f"no live anomaly on {equip_id}")
+    return {"stopped": stopped, "stop_requested_at": _utc(at)}
+
+
+@router.get("/anomalies")
+def answer_key(equip_id: str | None = None, from_: str | None = Query(default=None, alias="from"), to: str | None = None,
+               ctx: PlantContext = Depends(context)):
+    """정답지: 사건마다 출처·규칙·분류·반응 태그·시작·멈춤·끝(마지막 태그 회복 끝). from/to 는 구간과 겹치는 사건."""
+    return ctx.book.answer_key(equip_id, query_time("from", from_) if from_ else None, query_time("to", to) if to else None)
 
 
 @router.get("/stream")
@@ -156,11 +241,14 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.plants = {entry.key: PlantContext.open(entry) for entry in plants.plants}
+        app.state.plants = {entry.key: PlantContext.open(entry, settings.persistent_fault_interval_min,
+                                                settings.persistent_fault_max_open) for entry in plants.plants}
         app.state.started_at = to_db(datetime.now(timezone.utc))
         tasks: list[asyncio.Task] = []
+        switch_interval = sys.getswitchinterval()
         if settings.with_simulators:
-            from collector.embedded import EMBEDDED_CONCURRENCY, run_plant_simulator
+            from collector.embedded import EMBEDDED_CONCURRENCY, EMBEDDED_SWITCH_INTERVAL_SEC, run_plant_simulator
+            sys.setswitchinterval(EMBEDDED_SWITCH_INTERVAL_SEC)
             limiter = asyncio.Semaphore(EMBEDDED_CONCURRENCY)
             for entry in plants.plants:
                 ctx = app.state.plants[entry.key]
@@ -174,6 +262,7 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
             await asyncio.gather(*tasks, return_exceptions=True)   # 워커 스레드의 마지막 묶음이 끝날 때까지 기다린 뒤 닫는다
         for ctx in app.state.plants.values():
             ctx.close()
+        sys.setswitchinterval(switch_interval)
 
     app = FastAPI(title="Skadi 앞단 수집 서버", lifespan=lifespan, root_path=settings.root_path)
     app.state.plants = {}
@@ -222,11 +311,9 @@ def check_plants(plants: PlantsConfig) -> None:
             raise ConfigError(f"plant {entry.key}: {e}") from None
 
 
-def create_single_app(plant_path, runtime_path, db_path, scenario_path=None, key: str = "plant",
-                      settings: Settings | None = None) -> FastAPI:
+def create_single_app(plant_path, runtime_path, db_path, key: str = "plant", settings: Settings | None = None) -> FastAPI:
     """공장 하나짜리 서버 (테스트·호환용). 경로는 /{key}/... 다."""
-    entry = PlantEntry(key=key, plant=str(plant_path), runtime=str(runtime_path), db=str(db_path),
-                       scenario=str(scenario_path) if scenario_path else None)
+    entry = PlantEntry(key=key, plant=str(plant_path), runtime=str(runtime_path), db=str(db_path))
     return create_app(PlantsConfig(plants=[entry]), settings)
 
 
@@ -263,9 +350,9 @@ def main(argv=None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args = _parse_args(argv)
     plants = load_plants(args.plants)
-    settings = Settings.from_env(with_simulators=args.with_simulators or None, time_mode=args.time_mode,
-                                 backfill_days=args.backfill_days)
     try:
+        settings = Settings.from_env(with_simulators=args.with_simulators or None, time_mode=args.time_mode,
+                                     backfill_days=args.backfill_days)
         check_plants(plants)
     except ConfigError as e:
         sys.exit(f"error: {e}")

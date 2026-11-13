@@ -1,4 +1,4 @@
-# RFCC 구성안 실행 설정 (설계 §4.4). 설정 파일 경로(plant / scenario / db)는 명령행 인자로 준다.
+# RFCC 구성안 실행 설정 (설계 §4.4). 설정 파일 경로(plant / db)는 명령행 인자로 준다.
 units: [all]                 # 이 프로세스가 맡을 Unit. [UNIT-RFCC-01] 처럼 주면 그 Unit만 돌린다
 source_id: SIM-RFCC          # 메시지의 source_id
 sample_interval_sec: 1       # 값 생성 주기. 온도 태그는 구성안의 interval_sec(10)을 따른다
@@ -9,3 +9,5 @@ backfill_days: 1             # 백필 기간. 원시값을 하루까지 되돌�
 seed: 61109                  # 샘플 자료 생성기의 시드
 collector_url: http://localhost:8000/rfcc   # 수집 서버의 공장 접두어까지
 raw_retention_days: 1        # 원시 값 보관 기간. 10분마다 이보다 오래된 행을 지운다
+persistent_fault_interval_min: 15   # 지속 고장을 여는 간격(분). 0 이면 끈다
+persistent_fault_max_open: 3   # 동시에 열려 있는 지속 고장 상한(공장당)

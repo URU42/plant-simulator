@@ -1,17 +1,19 @@
 """배포 설정 (k8s 설계 §4.2): ROOT_PATH, CORS_ORIGINS, INGEST_TOKEN."""
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from collector.app import create_single_app
 from collector.settings import Settings
+from common.config_models import ConfigError
 from common.message import IngestBatch, Sample
 
 T0 = datetime(2026, 11, 9, 1, 0, tzinfo=timezone.utc)
 
 
 def _batch():
-    s = [Sample(equip_id="C-1101", tag_id="VI-C1101", ts=T0 + timedelta(seconds=10 * i), value=2.0, quality="Good") for i in range(3)]
+    s = [Sample(equip_id="P-3101", tag_id="VI-A-P3101", ts=T0 + timedelta(seconds=10 * i), value=2.0, status="Good") for i in range(3)]
     return IngestBatch(source_id="T", batch_id="b-tok", sent_at=T0, samples=s).model_dump_json()
 
 
@@ -23,7 +25,7 @@ def test_ingest_token_blocks_http_but_not_local(plant_path, runtime_path):
         assert c.post("/plant/ingest", content=_batch(), headers=h | {"X-Ingest-Token": "nope"}).status_code == 403
         assert c.post("/plant/ingest", content=_batch(), headers=h | {"X-Ingest-Token": "s3cret"}).json()["stored"] == 3
         ctx = c.app.state.plants["plant"]
-        assert ctx.receive_local("b-local", "L", [Sample(equip_id="C-1101", tag_id="VI-C1101", ts=T0 + timedelta(minutes=1), value=2.0, quality="Good")]).stored == 1
+        assert ctx.receive_local("b-local", "L", [Sample(equip_id="P-3101", tag_id="VI-A-P3101", ts=T0 + timedelta(minutes=1), value=2.0, status="Good")]).stored == 1
 
 
 def test_root_path_prefixes_links_and_redirect(plant_path, runtime_path):
@@ -50,13 +52,34 @@ def test_embedded_mode_without_token_closes_http_ingest(rfcc_plant_path, rfcc_ru
     """통합 실행인데 토큰이 없으면 외부 /ingest 는 닫힌다 (fail-closed). 생성기는 LocalSender 로 들어가므로 영향 없다."""
     settings = Settings(with_simulators=True, time_mode="live")
     with TestClient(create_single_app(rfcc_plant_path, rfcc_runtime_path, ":memory:", settings=settings)) as c:
-        s = [Sample(equip_id="P-1101A", tag_id="VI-P-1101A", ts=T0, value=1.45, quality="Good")]
+        s = [Sample(equip_id="P-1101A", tag_id="VI-P-1101A", ts=T0, value=1.45, status="Good")]
         body = IngestBatch(source_id="T", batch_id="b-ext", sent_at=T0, samples=s).model_dump_json()
         r = c.post("/plant/ingest", content=body, headers={"content-type": "application/json"})
-        assert r.status_code == 403 and "INGEST_TOKEN" in r.json()["detail"]
+        assert r.status_code == 403 and "INGEST_TOKEN" in r.json()["detail"] and "/anomalies" in r.json()["detail"]
+        assert c.post("/plant/anomalies", json={"equip_id": "P-1101A", "rule": 1}).status_code == 403
 
 
 def test_token_is_checked_before_body_is_parsed(plant_path, runtime_path):
     with TestClient(create_single_app(plant_path, runtime_path, ":memory:", settings=Settings(ingest_token="s3cret"))) as c:
         r = c.post("/plant/ingest", content="not json", headers={"content-type": "application/json"})
         assert r.status_code == 403                                  # 422 (스키마 상세) 가 아니라 403
+
+
+@pytest.mark.parametrize("raw", ["abc", "-1", "nan"])
+def test_invalid_persistent_fault_interval_names_the_variable(monkeypatch, raw):
+    monkeypatch.setenv("PERSISTENT_FAULT_INTERVAL_MIN", raw)
+    with pytest.raises(ConfigError, match="PERSISTENT_FAULT_INTERVAL_MIN"):
+        Settings.from_env()
+
+
+def test_persistent_max_open_env(monkeypatch):
+    monkeypatch.setenv("PERSISTENT_FAULT_MAX_OPEN", "2")
+    assert Settings.from_env().persistent_fault_max_open == 2
+    monkeypatch.setenv("PERSISTENT_FAULT_MAX_OPEN", "")
+    assert Settings.from_env().persistent_fault_max_open is None
+
+@pytest.mark.parametrize("raw", ["abc", "0", "-1", "1.5"])
+def test_invalid_persistent_max_open_names_the_variable(monkeypatch, raw):
+    monkeypatch.setenv("PERSISTENT_FAULT_MAX_OPEN", raw)
+    with pytest.raises(ConfigError, match="PERSISTENT_FAULT_MAX_OPEN"):
+        Settings.from_env()

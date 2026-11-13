@@ -9,3 +9,5 @@ backfill_days: 1             # 원시값을 하루까지 되돌아본다
 seed: 20261101               # 샘플 생성기 generate_cdu_data.py 의 시드
 collector_url: http://localhost:8000/cdu   # 수집 서버의 공장 접두어까지
 raw_retention_days: 1        # 10분마다 이보다 오래된 원시값을 지운다
+persistent_fault_interval_min: 15   # 지속 고장을 여는 간격(분). 0 이면 끈다
+persistent_fault_max_open: 3   # 동시에 열려 있는 지속 고장 상한(공장당)

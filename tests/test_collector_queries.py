@@ -17,41 +17,39 @@ def client(plant_path, runtime_path):
 
 
 def _send(client, tag_id, equip_id, start, minutes, value):
-    samples = [Sample(equip_id=equip_id, tag_id=tag_id, ts=start + timedelta(seconds=s), value=value, quality="Good")
+    samples = [Sample(equip_id=equip_id, tag_id=tag_id, ts=start + timedelta(seconds=s), value=value, status="Good")
                for s in range(0, minutes * 60, 10)]
     batch = IngestBatch(source_id="SIM", batch_id=f"b-{tag_id}-{start.isoformat()}", sent_at=start, samples=samples)
     assert client.post("/plant/ingest", json=batch.model_dump(mode="json")).status_code == 200
 
 
-def test_timeseries_and_alarms_after_ingest(client):
-    _send(client, "PI-C1101", "C-1101", T0, 10, 56.0)        # warn 55, delay 1 → Soft/Low
-    _send(client, "PI-C1101", "C-1101", T0 + timedelta(minutes=10), 60, 48.0)
-    ts = client.get("/plant/timeseries", params={"equip_id": "C-1101", "tag_id": "PI-C1101", "from": T0.isoformat(), "to": (T0 + timedelta(hours=2)).isoformat(),
-                                           "interval": "10m"}).json()
-    assert len(ts) == 6 and ts[0]["max"] == 56.0   # 60~70분 구간은 아직 미완료 and ts[1]["avg"] == 48.0
-    hourly = client.get("/plant/timeseries", params={"equip_id": "C-1101", "tag_id": "PI-C1101", "from": T0.isoformat(), "to": (T0 + timedelta(hours=2)).isoformat()}).json()
+def test_timeseries_after_ingest_and_no_limit_alarms(client):
+    _send(client, "PI-D-P3101", "P-3101", T0, 10, 56.0)
+    _send(client, "PI-D-P3101", "P-3101", T0 + timedelta(minutes=10), 60, 48.0)
+    params = {"equip_id": "P-3101", "tag_id": "PI-D-P3101", "from": T0.isoformat(), "to": (T0 + timedelta(hours=2)).isoformat()}
+    ts = client.get("/plant/timeseries", params=params | {"interval": "10m"}).json()
+    assert len(ts) == 6 and ts[0]["max"] == 56.0 and ts[1]["avg"] == 48.0   # 60~70분 구간은 아직 미완료
+    hourly = client.get("/plant/timeseries", params=params).json()
     assert len(hourly) == 1 and hourly[0]["count"] == 360
-    alarms = client.get("/plant/alarms", params={"equip_id": "C-1101"}).json()
-    assert len(alarms) == 1 and alarms[0]["severity"] == "Low" and alarms[0]["cleared_at"] is not None
-    assert client.get("/plant/alarms", params={"equip_id": "P-5101"}).json() == []
-    assert client.get("/plant/timeseries", params={"equip_id": "C-1101", "tag_id": "PI-C1101", "from": "x", "to": "y", "interval": "5m"}).status_code == 400
+    assert all("limit_type" not in a for a in client.get("/plant/alarms").json())   # 한계값 알람은 만들지 않는다 (Nelson 알람만)
+    assert client.get("/plant/timeseries", params=params | {"from": "x", "to": "y", "interval": "5m"}).status_code == 400
 
 
 def test_current_becomes_nodata_after_three_send_intervals(client):
-    _send(client, "VI-C1101", "C-1101", T0, 1, 2.0)
-    _send(client, "VI-C2101", "C-2101", T0 + timedelta(minutes=5), 1, 2.0)   # 시뮬레이터 시계가 5분 앞으로
-    assert client.get("/plant/equipment/C-2101/tags/VI-C2101/current").json()["status"] == "Good"
-    assert client.get("/plant/equipment/C-1101/tags/VI-C1101/current").json()["status"] == "NoData"
-    assert client.get("/plant/equipment/C-1101/tags/TI-C1101/current").json()["status"] == "NoData"
+    _send(client, "VI-A-P3101", "P-3101", T0, 1, 2.0)
+    _send(client, "VI-A-C3102", "C-3102", T0 + timedelta(minutes=5), 1, 2.0)   # 시뮬레이터 시계가 5분 앞으로
+    assert client.get("/plant/equipment/C-3102/tags/VI-A-C3102/current").json()["status"] == "Good"
+    assert client.get("/plant/equipment/P-3101/tags/VI-A-P3101/current").json()["status"] == "NoData"
+    assert client.get("/plant/equipment/P-3101/tags/TI-B-P3101/current").json()["status"] == "NoData"
 
 
 def test_large_time_jump_is_caught_up_in_background(client):
     """시뮬레이터 시각이 크게 건너뛰어도 /ingest 는 바로 응답하고, 나머지 구간은 뒤에서 따라잡는다."""
     import time
 
-    _send(client, "VI-C1101", "C-1101", T0, 1, 2.0)
+    _send(client, "VI-A-P3101", "P-3101", T0, 1, 2.0)
     t = time.monotonic()
-    _send(client, "VI-C1101", "C-1101", T0 + timedelta(days=5), 1, 2.0)
+    _send(client, "VI-A-P3101", "P-3101", T0 + timedelta(days=5), 1, 2.0)
     assert time.monotonic() - t < 3.0
     st = client.app.state.plants["plant"].storage
     for _ in range(200):
@@ -62,11 +60,7 @@ def test_large_time_jump_is_caught_up_in_background(client):
     assert client.get("/plant/health").json()["catching_up"] is False
 
 
-def test_history_endpoints(plant_path, runtime_path, scenario_path):
-    """정비·고장 이력 조회 (k8s 설계 §4.2a): DB 를 직접 못 읽는 다른 파드를 위해."""
-    with TestClient(create_single_app(plant_path, runtime_path, ":memory:", scenario_path=scenario_path)) as c:
-        m = c.get("/plant/maintenance").json()
-        assert len(m) == 3 and m[0]["work_order_id"] and "start_ts" in m[0]
-        assert [x["equip_id"] for x in c.get("/plant/maintenance", params={"equip_id": "C-1101"}).json()] == ["C-1101"]
-        f = c.get("/plant/failures", params={"equip_id": "P-4101"}).json()
-        assert f and f[0]["failure_id"] == "FL-DEV-005"
+def test_history_endpoints_are_gone(client):
+    """정비·고장 이력(시나리오에서 적재하던 것)은 지웠다."""
+    assert client.get("/plant/maintenance").status_code == 404
+    assert client.get("/plant/failures").status_code == 404

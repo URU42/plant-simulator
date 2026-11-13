@@ -9,6 +9,7 @@ from typing import Any, Callable, Protocol
 
 import httpx
 
+from common.config_models import TagKey
 from common.message import IngestBatch, Sample
 from common.timefmt import from_db
 
@@ -26,6 +27,10 @@ class Sender(Protocol):
 
     async def collector_time(self) -> datetime | None:
         """수집 서버가 가진 마지막 측정 시각. 백필을 이어서 할 때 쓴다. 모르면 None."""
+        ...
+
+    async def recent_values(self, count: int) -> dict[TagKey, list[float]]:
+        """수집 서버가 가진 태그별 최근 count 개 값(오래된 것부터). 재개 때 생성기를 되살린다. 모르면 빈 dict."""
         ...
 
     async def close(self) -> None: ...
@@ -75,6 +80,9 @@ class HttpSender:
             return None
         return from_db(sim_now) if sim_now else None
 
+    async def recent_values(self, count: int) -> dict[TagKey, list[float]]:
+        return {}                   # HTTP 로는 묻지 않는다. 생성기는 처음 상태에서 이어 간다
+
     async def close(self) -> None:
         await self._client.aclose()
 
@@ -83,10 +91,12 @@ class LocalSender:
     """같은 프로세스의 수집 함수를 바로 부른다 (통합 실행). JSON 직렬화·재검증 없이 Sample 을 그대로 넘긴다."""
 
     def __init__(self, receive: Callable[[str, str, list[Sample]], Any], sim_now: Callable[[], str | None],
-                 limiter: asyncio.Semaphore | None = None) -> None:
+                 limiter: asyncio.Semaphore | None = None,
+                 recent_values: Callable[[int], dict[TagKey, list[float]]] | None = None) -> None:
         self._receive = receive
         self._sim_now = sim_now
         self._limiter = limiter          # 여러 공장이 동시에 백필할 때 한꺼번에 저장하는 수를 제한한다 (메모리 피크·GIL 경합)
+        self._recent_values = recent_values     # 저장소의 태그별 최근 값 조회 (Storage.recent_values)
 
     async def send(self, batch: IngestBatch) -> dict[str, Any]:
         # 저장·배치 전진은 워커 스레드에서. 백필처럼 기다림 없는 구간에서도 이벤트 루프(조회 API·프로브)가 비어 있다
@@ -100,6 +110,11 @@ class LocalSender:
     async def collector_time(self) -> datetime | None:
         sim_now = self._sim_now()
         return from_db(sim_now) if sim_now else None
+
+    async def recent_values(self, count: int) -> dict[TagKey, list[float]]:
+        if self._recent_values is None:
+            return {}
+        return await asyncio.to_thread(self._recent_values, count)
 
     async def close(self) -> None:
         return None
@@ -117,6 +132,9 @@ class MemorySender:
 
     async def collector_time(self) -> datetime | None:
         return None
+
+    async def recent_values(self, count: int) -> dict[TagKey, list[float]]:
+        return {}
 
     async def close(self) -> None:
         return None

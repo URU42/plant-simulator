@@ -1,14 +1,13 @@
 # 구성안: HOU (수첨분해) (PL-HOU) — 다중 공장 설계 docs/superpowers/specs/2026-11-09-multi-plant-design.md
 # - 출처: hou-plant-sample/data/HOU_*.xlsx 의 `설비 설명`(계층)·`설비 태그`(태그명·설명·단위·정상 기준·경고/알람/정지 상·하한·근거) 시트. 마스터 값은 그대로.
 # - 태그명은 같은 설비 안에서만 고유하다 (복합키 (equip_id, tag_id)). 한계값·정상 기준·근거는 자료 그대로이며 빈 칸은 적지 않았다.
-# - normal.base 는 데이터 첫 6시간 Good·Uncertain 평균, noise_sd 는 첫 1시간을 추세 제거한 표준편차의 0.9배, decimals 는 데이터의 소수 자릿수.
-# - 온도 10초, 나머지 1초. 신호 모델은 rfcc. seed_key 는 공장 접두어를 붙여 다른 공장과 겹치지 않는다.
+# - decimals 는 데이터의 소수 자릿수.
+# - 온도 10초, 나머지 1초. seed_key 는 공장 접두어를 붙여 다른 공장과 겹치지 않는다.
 
 plant:
   plant_id: PL-HOU
   name: "HOU (수첨분해)"
-  config_version: 1
-  signal_model: rfcc
+  config_version: 2
   unit_groups:
     - id: UG-HOU-01
       name: "원료 공급"
@@ -33,7 +32,7 @@ plant:
         - { id: UNIT-HOU-06, name: "분별탑 환류" }
         - { id: UNIT-HOU-07, name: "미전환유 순환" }
 
-# 설비 유형 매핑. kind 는 신호 모델이 보는 기계 종류
+# 설비 유형 매핑. kind 는 기계 종류 (참고)
 equipment_types:
   - { type: PM, name: 펌프, prefix: P, kind: pump }
   - { type: CC, name: 압축기, prefix: C, kind: compressor }
@@ -63,7 +62,6 @@ equipment:
     name: "고압 원료 공급 펌프 (High Pressure Feed Pump)"
     type: PM
     unit_id: UNIT-HOU-01
-    seed_key: hou-e01
     tags:
       - { tag_id: VI-2101A,
           signal: vibration,
@@ -75,7 +73,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r001,
-          normal: { base: 2.1434, noise_sd: 0.074277 } }
+          control: { mean: 2.132, sigma: 0.10589142125775654 } }
       - { tag_id: VI-2101B,
           signal: vibration,
           unit: "mm/s RMS",
@@ -86,7 +84,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r002,
-          normal: { base: 1.7428, noise_sd: 0.073337 } }
+          control: { mean: 1.739, sigma: 0.08023931197239917 } }
       - { tag_id: TI-2101A,
           signal: bearing_temp,
           unit: "DEG C",
@@ -97,7 +95,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r003,
-          normal: { base: 67.381, noise_sd: 0.117118 } }
+          control: { mean: 67.685, sigma: 0.6015978203916633 } }
       - { tag_id: TI-2101B,
           signal: bearing_temp,
           unit: "DEG C",
@@ -108,7 +106,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r004,
-          normal: { base: 62.306, noise_sd: 0.122373 } }
+          control: { mean: 62.12, sigma: 0.43055568750743833 } }
       - { tag_id: PI-2101A,
           signal: suction_pressure,
           unit: "kg/cm2(g)",
@@ -119,7 +117,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r005,
-          normal: { base: 6.5749, noise_sd: 0.062861 } }
+          control: { mean: 6.717, sigma: 0.15806315316415284 } }
       - { tag_id: PI-2101B,
           signal: discharge_pressure,
           unit: "kg/cm2(g)",
@@ -130,7 +128,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r006,
-          normal: { base: 184.895, noise_sd: 0.308442 } }
+          control: { mean: 185.02, sigma: 0.7774128342032636 } }
       - { tag_id: FI-2101,
           signal: flow,
           unit: "m3/h",
@@ -141,7 +139,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r007,
-          normal: { base: 182.459, noise_sd: 0.941228 } }
+          control: { mean: 185.41, sigma: 1.934831324815192 } }
       - { tag_id: II-2101,
           signal: current,
           unit: "A",
@@ -152,13 +150,12 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r008,
-          normal: { base: 168.841, noise_sd: 0.710774 } }
+          control: { mean: 171.73, sigma: 2.037002831231327 } }
   # ---------------- UNIT-HOU-02 보충 수소 압축 ----------------
   - equip_id: C-2201
     name: "보충 수소 압축기 (Make-up Hydrogen Compressor)"
     type: CC
     unit_id: UNIT-HOU-02
-    seed_key: hou-e02
     tags:
       - { tag_id: VI-2201A,
           signal: vibration,
@@ -170,7 +167,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r009,
-          normal: { base: 4.2418, noise_sd: 0.147429 } }
+          control: { mean: 4.267, sigma: 0.16381110130513887 } }
       - { tag_id: VI-2201B,
           signal: vibration,
           unit: "mm/s RMS",
@@ -181,7 +178,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r010,
-          normal: { base: 5.6861, noise_sd: 0.192093 } }
+          control: { mean: 5.778, sigma: 0.213844809923936 } }
       - { tag_id: TI-2201A,
           signal: bearing_temp,
           unit: "DEG C",
@@ -192,7 +189,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r011,
-          normal: { base: 70.87, noise_sd: 0.067496 } }
+          control: { mean: 70.92, sigma: 0.17443551817218841 } }
       - { tag_id: TI-2201B,
           signal: suction_temp,
           unit: "DEG C",
@@ -203,7 +200,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r012,
-          normal: { base: 36.532, noise_sd: 0.175884 } }
+          control: { mean: 36.42, sigma: 0.27316049187426 } }
       - { tag_id: TI-2201C,
           signal: discharge_temp,
           unit: "DEG C",
@@ -214,7 +211,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r013,
-          normal: { base: 116.435, noise_sd: 0.159594 } }
+          control: { mean: 116.17, sigma: 0.22711108223254864 } }
       - { tag_id: PI-2201A,
           signal: suction_pressure,
           unit: "kg/cm2(g)",
@@ -225,7 +222,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r014,
-          normal: { base: 23.9476, noise_sd: 0.126499 } }
+          control: { mean: 23.564, sigma: 0.1426478557689473 } }
       - { tag_id: PI-2201B,
           signal: discharge_pressure,
           unit: "kg/cm2(g)",
@@ -236,7 +233,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r015,
-          normal: { base: 164.749, noise_sd: 0.382931 } }
+          control: { mean: 164.24, sigma: 0.4456458316689953 } }
       - { tag_id: FI-2201,
           signal: flow,
           unit: "Nm3/h",
@@ -247,7 +244,7 @@ equipment:
           interval_sec: 1,
           decimals: 0,
           seed_key: hou-r016,
-          normal: { base: 37981.839, noise_sd: 179.657183 } }
+          control: { mean: 37752.0, sigma: 203.93475813111633 } }
       - { tag_id: SI-2201,
           signal: speed,
           unit: "rpm",
@@ -256,15 +253,14 @@ equipment:
           normal_ref: "330",
           limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
           interval_sec: 1,
-          decimals: 1,
+          decimals: 2,
           seed_key: hou-r017,
-          normal: { base: 330.336, noise_sd: 0.432264 } }
+          control: { mean: 330.4, sigma: 0.5092344403884889 } }
   # ---------------- UNIT-HOU-03 수소 순환 ----------------
   - equip_id: C-2301
     name: "수소 순환 압축기 (Recycle Gas Compressor)"
     type: CC
     unit_id: UNIT-HOU-03
-    seed_key: hou-e03
     tags:
       - { tag_id: VI-2301A,
           signal: shaft_vibration,
@@ -276,7 +272,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r018,
-          normal: { base: 13.781, noise_sd: 0.491248 } }
+          control: { mean: 13.25, sigma: 0.5553098709459986 } }
       - { tag_id: VI-2301B,
           signal: shaft_vibration,
           unit: "um pk-pk",
@@ -287,7 +283,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r019,
-          normal: { base: 13.396, noise_sd: 0.467369 } }
+          control: { mean: 13.57, sigma: 0.5245762734205603 } }
       - { tag_id: VI-2301C,
           signal: shaft_vibration,
           unit: "um pk-pk",
@@ -298,7 +294,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r020,
-          normal: { base: 11.664, noise_sd: 0.464449 } }
+          control: { mean: 11.76, sigma: 0.5582460705439651 } }
       - { tag_id: VI-2301D,
           signal: shaft_vibration,
           unit: "um pk-pk",
@@ -309,7 +305,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r021,
-          normal: { base: 12.075, noise_sd: 0.492825 } }
+          control: { mean: 11.72, sigma: 0.6359004623014886 } }
       - { tag_id: TI-2301A,
           signal: bearing_temp,
           unit: "DEG C",
@@ -320,7 +316,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r022,
-          normal: { base: 81.033, noise_sd: 0.105882 } }
+          control: { mean: 80.99000000000001, sigma: 0.4468352362952833 } }
       - { tag_id: TI-2301B,
           signal: bearing_temp,
           unit: "DEG C",
@@ -331,7 +327,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r023,
-          normal: { base: 77.932, noise_sd: 0.164345 } }
+          control: { mean: 77.96000000000001, sigma: 0.6393514726310994 } }
       - { tag_id: ZI-2301,
           signal: axial_position,
           unit: "mm",
@@ -340,9 +336,9 @@ equipment:
           normal_ref: "0.06",
           limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
           interval_sec: 1,
-          decimals: 3,
+          decimals: 4,
           seed_key: hou-r024,
-          normal: { base: 0.0558, noise_sd: 0.004221 } }
+          control: { mean: 0.055, sigma: 0.005804373723407863 } }
       - { tag_id: PI-2301A,
           signal: suction_pressure,
           unit: "kg/cm2(g)",
@@ -353,7 +349,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r025,
-          normal: { base: 128.041, noise_sd: 0.126732 } }
+          control: { mean: 127.82, sigma: 0.2074701361634764 } }
       - { tag_id: PI-2301B,
           signal: discharge_pressure,
           unit: "kg/cm2(g)",
@@ -364,7 +360,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r026,
-          normal: { base: 141.867, noise_sd: 0.238085 } }
+          control: { mean: 141.68, sigma: 0.5325517115098763 } }
       - { tag_id: TI-2301C,
           signal: suction_temp,
           unit: "DEG C",
@@ -375,7 +371,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r027,
-          normal: { base: 53.813, noise_sd: 0.213549 } }
+          control: { mean: 53.93, sigma: 0.27403929167823515 } }
       - { tag_id: TI-2301D,
           signal: discharge_temp,
           unit: "DEG C",
@@ -386,7 +382,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r028,
-          normal: { base: 76.678, noise_sd: 0.132925 } }
+          control: { mean: 76.945, sigma: 0.21339486778918879 } }
       - { tag_id: FI-2301,
           signal: flow,
           unit: "Nm3/h",
@@ -397,7 +393,7 @@ equipment:
           interval_sec: 1,
           decimals: 0,
           seed_key: hou-r029,
-          normal: { base: 284272.633, noise_sd: 1304.342017 } }
+          control: { mean: 280378.0, sigma: 3576.521969385803 } }
       - { tag_id: SI-2301,
           signal: speed,
           unit: "rpm",
@@ -408,13 +404,12 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: hou-r030,
-          normal: { base: 5290.014, noise_sd: 5.121095 } }
+          control: { mean: 5285.1, sigma: 8.813536615154364 } }
   # ---------------- UNIT-HOU-04 반응기 가열 ----------------
   - equip_id: FN-2401
     name: "반응기 가열로 연소공기·배기 팬 (FD/ID Fan)"
     type: FN
     unit_id: UNIT-HOU-04
-    seed_key: hou-e04
     tags:
       - { tag_id: VI-2401A,
           signal: vibration,
@@ -426,7 +421,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r031,
-          normal: { base: 2.4373, noise_sd: 0.10352 } }
+          control: { mean: 2.348, sigma: 0.11550157813542934 } }
       - { tag_id: VI-2401B,
           signal: vibration,
           unit: "mm/s RMS",
@@ -437,7 +432,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r032,
-          normal: { base: 1.8922, noise_sd: 0.100862 } }
+          control: { mean: 1.901, sigma: 0.11504917812079606 } }
       - { tag_id: TI-2401A,
           signal: bearing_temp,
           unit: "DEG C",
@@ -448,7 +443,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r033,
-          normal: { base: 55.45, noise_sd: 0.08998 } }
+          control: { mean: 55.24, sigma: 0.13766969046540162 } }
       - { tag_id: TI-2401B,
           signal: bearing_temp,
           unit: "DEG C",
@@ -459,7 +454,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r034,
-          normal: { base: 53.336, noise_sd: 0.091759 } }
+          control: { mean: 53.315, sigma: 0.1807150385394669 } }
       - { tag_id: II-2401,
           signal: current,
           unit: "A",
@@ -470,7 +465,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r035,
-          normal: { base: 80.68, noise_sd: 0.712782 } }
+          control: { mean: 81.43, sigma: 1.2065350549740248 } }
       - { tag_id: SI-2401,
           signal: speed,
           unit: "rpm",
@@ -481,7 +476,7 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: hou-r036,
-          normal: { base: 1776.185, noise_sd: 1.617467 } }
+          control: { mean: 1775.0, sigma: 2.0746537720850213 } }
       - { tag_id: FI-2401,
           signal: flow,
           unit: "Nm3/h",
@@ -492,7 +487,7 @@ equipment:
           interval_sec: 1,
           decimals: 0,
           seed_key: hou-r037,
-          normal: { base: 60865.092, noise_sd: 579.955949 } }
+          control: { mean: 61047.0, sigma: 654.3539972388563 } }
       - { tag_id: PDI-2401,
           signal: differential_pressure,
           unit: "mmH2O",
@@ -503,13 +498,12 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: hou-r038,
-          normal: { base: 182.862, noise_sd: 1.503328 } }
+          control: { mean: 181.2, sigma: 1.7776927062978827 } }
   # ---------------- UNIT-HOU-05 압축기 지원 ----------------
   - equip_id: P-2501
     name: "압축기 윤활유 펌프 (Lube Oil Pump)"
     type: PM
     unit_id: UNIT-HOU-05
-    seed_key: hou-e05
     tags:
       - { tag_id: VI-2501,
           signal: vibration,
@@ -521,7 +515,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r039,
-          normal: { base: 1.3874, noise_sd: 0.055996 } }
+          control: { mean: 1.359, sigma: 0.06223640321474261 } }
       - { tag_id: TI-2501A,
           signal: bearing_temp,
           unit: "DEG C",
@@ -532,7 +526,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r040,
-          normal: { base: 52.69, noise_sd: 0.065147 } }
+          control: { mean: 52.63, sigma: 0.11443675473087005 } }
       - { tag_id: PI-2501,
           signal: oil_pressure,
           unit: "kg/cm2(g)",
@@ -543,7 +537,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r041,
-          normal: { base: 8.1831, noise_sd: 0.032668 } }
+          control: { mean: 8.191, sigma: 0.047393174548135096 } }
       - { tag_id: TI-2501B,
           signal: oil_temp,
           unit: "DEG C",
@@ -554,7 +548,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r042,
-          normal: { base: 46.171, noise_sd: 0.198806 } }
+          control: { mean: 46.03, sigma: 0.2229031910084027 } }
       - { tag_id: FI-2501,
           signal: flow,
           unit: "m3/h",
@@ -565,7 +559,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r043,
-          normal: { base: 41.952, noise_sd: 0.170831 } }
+          control: { mean: 41.67, sigma: 0.21284529784643028 } }
       - { tag_id: II-2501,
           signal: current,
           unit: "A",
@@ -576,13 +570,12 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r044,
-          normal: { base: 24.052, noise_sd: 0.128704 } }
+          control: { mean: 23.89, sigma: 0.17373054878243754 } }
   # ---------------- UNIT-HOU-06 분별탑 환류 ----------------
   - equip_id: P-2601
     name: "분별탑 환류 펌프 (Reflux Pump)"
     type: PM
     unit_id: UNIT-HOU-06
-    seed_key: hou-e06
     tags:
       - { tag_id: VI-2601A,
           signal: vibration,
@@ -594,7 +587,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r045,
-          normal: { base: 1.8534, noise_sd: 0.068449 } }
+          control: { mean: 1.761, sigma: 0.08020960976906417 } }
       - { tag_id: VI-2601B,
           signal: vibration,
           unit: "mm/s RMS",
@@ -605,7 +598,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r046,
-          normal: { base: 1.5606, noise_sd: 0.059538 } }
+          control: { mean: 1.518, sigma: 0.066732692822619 } }
       - { tag_id: TI-2601A,
           signal: bearing_temp,
           unit: "DEG C",
@@ -616,7 +609,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r047,
-          normal: { base: 61.186, noise_sd: 0.058715 } }
+          control: { mean: 60.02, sigma: 0.26468894946547333 } }
       - { tag_id: TI-2601B,
           signal: bearing_temp,
           unit: "DEG C",
@@ -625,9 +618,9 @@ equipment:
           normal_ref: "58",
           limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
           interval_sec: 10,
-          decimals: 2,
+          decimals: 3,
           seed_key: hou-r048,
-          normal: { base: 56.969, noise_sd: 0.070368 } }
+          control: { mean: 55.9, sigma: 0.08407150377454638 } }
       - { tag_id: PI-2601A,
           signal: suction_pressure,
           unit: "kg/cm2(g)",
@@ -638,7 +631,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r049,
-          normal: { base: 4.2702, noise_sd: 0.033449 } }
+          control: { mean: 4.234, sigma: 0.03722378848694726 } }
       - { tag_id: PI-2601B,
           signal: discharge_pressure,
           unit: "kg/cm2(g)",
@@ -649,7 +642,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r050,
-          normal: { base: 9.9578, noise_sd: 0.065574 } }
+          control: { mean: 9.811, sigma: 0.08680752551730331 } }
       - { tag_id: FI-2601,
           signal: flow,
           unit: "m3/h",
@@ -660,7 +653,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r051,
-          normal: { base: 98.083, noise_sd: 0.473541 } }
+          control: { mean: 96.11, sigma: 0.9344448736787229 } }
       - { tag_id: II-2601,
           signal: current,
           unit: "A",
@@ -671,13 +664,12 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r052,
-          normal: { base: 44.313, noise_sd: 0.312411 } }
+          control: { mean: 43.63, sigma: 0.3483417461326814 } }
   # ---------------- UNIT-HOU-07 미전환유 순환 ----------------
   - equip_id: P-2701
     name: "미전환유 순환 펌프 (Unconverted Oil Recycle Pump)"
     type: PM
     unit_id: UNIT-HOU-07
-    seed_key: hou-e07
     tags:
       - { tag_id: VI-2701A,
           signal: vibration,
@@ -689,7 +681,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r053,
-          normal: { base: 2.2877, noise_sd: 0.077874 } }
+          control: { mean: 2.155, sigma: 0.08852200542445525 } }
       - { tag_id: VI-2701B,
           signal: vibration,
           unit: "mm/s RMS",
@@ -700,7 +692,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r054,
-          normal: { base: 1.8243, noise_sd: 0.072264 } }
+          control: { mean: 1.769, sigma: 0.08034291365764624 } }
       - { tag_id: TI-2701A,
           signal: bearing_temp,
           unit: "DEG C",
@@ -711,7 +703,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r055,
-          normal: { base: 72.389, noise_sd: 0.151064 } }
+          control: { mean: 70.96, sigma: 0.21206253263345085 } }
       - { tag_id: TI-2701B,
           signal: bearing_temp,
           unit: "DEG C",
@@ -722,7 +714,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: hou-r056,
-          normal: { base: 68.558, noise_sd: 0.106466 } }
+          control: { mean: 67.16, sigma: 0.11913239600452005 } }
       - { tag_id: TI-2701C,
           signal: process_temp,
           unit: "DEG C",
@@ -731,9 +723,9 @@ equipment:
           normal_ref: "305",
           limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
           interval_sec: 10,
-          decimals: 1,
+          decimals: 2,
           seed_key: hou-r057,
-          normal: { base: 303.167, noise_sd: 0.363352 } }
+          control: { mean: 301.8, sigma: 0.5477038912305949 } }
       - { tag_id: PI-2701A,
           signal: suction_pressure,
           unit: "kg/cm2(g)",
@@ -744,7 +736,7 @@ equipment:
           interval_sec: 1,
           decimals: 3,
           seed_key: hou-r058,
-          normal: { base: 3.7716, noise_sd: 0.034246 } }
+          control: { mean: 3.689, sigma: 0.045061075767291174 } }
       - { tag_id: PI-2701B,
           signal: discharge_pressure,
           unit: "kg/cm2(g)",
@@ -755,7 +747,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r059,
-          normal: { base: 31.817, noise_sd: 0.137571 } }
+          control: { mean: 31.46, sigma: 0.15287292703741778 } }
       - { tag_id: FI-2701,
           signal: flow,
           unit: "m3/h",
@@ -766,7 +758,7 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r060,
-          normal: { base: 137.485, noise_sd: 0.872468 } }
+          control: { mean: 133.64, sigma: 1.0682788568728985 } }
       - { tag_id: II-2701,
           signal: current,
           unit: "A",
@@ -777,4 +769,4 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r061,
-          normal: { base: 94.913, noise_sd: 0.519318 } }
+          control: { mean: 92.55, sigma: 0.5797430037003518 } }

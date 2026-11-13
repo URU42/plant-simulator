@@ -1,4 +1,4 @@
-"""RFCC 구성안으로 뜬 수집 서버: 통계 경고 한계와 20분 지연, 10초 태그의 NoData 기준, 수신 묶음 정리, 조회 API."""
+"""RFCC 구성안으로 뜬 수집 서버: 10초 태그의 NoData 기준, 집계, 수신 묶음 정리, 조회 API."""
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -19,7 +19,7 @@ def client(rfcc_plant_path, rfcc_runtime_path, tmp_path):
 
 
 def _send(client, tag_id, equip_id, start, count, step_sec, value):
-    samples = [Sample(equip_id=equip_id, tag_id=tag_id, ts=start + timedelta(seconds=i * step_sec), value=value, quality="Good")
+    samples = [Sample(equip_id=equip_id, tag_id=tag_id, ts=start + timedelta(seconds=i * step_sec), value=value, status="Good")
                for i in range(count)]
     batch = IngestBatch(source_id="T", batch_id=f"b-{tag_id}-{start.timestamp()}", sent_at=start, samples=samples)
     assert client.post("/plant/ingest", content=batch.model_dump_json(), headers={"content-type": "application/json"}).status_code == 200
@@ -33,15 +33,14 @@ def test_ten_second_tag_is_good_until_three_of_its_intervals(client):
     assert client.get("/plant/equipment/P-1101A/tags/TI-P-1101A/current").json()["status"] == "NoData"
 
 
-def test_soft_alarm_needs_two_consecutive_windows_and_aggregates_exist(client):
-    _send(client, "VI-P-1101A", "P-1101A", T0, 600, 1, 9.9)                 # 경고 상한 1.6451 초과, 한 구간만으로는 아니다
+def test_aggregates_exist_and_alarms_are_nelson_only(client):
+    _send(client, "VI-P-1101A", "P-1101A", T0, 600, 1, 9.9)                 # 경고 상한 1.5703 위, 한계값 알람은 만들지 않는다 (Nelson 판정만)
     _send(client, "VI-P-1101A", "P-1101A", T0 + timedelta(minutes=10), 1, 1, 9.9)
-    assert client.get("/plant/alarms").json() == []
     st = client.app.state.plants["plant"].storage
     assert st.query("SELECT COUNT(*) FROM ts_10m WHERE tag_id = 'VI-P-1101A' AND count > 0")[0][0] == 1
     _send(client, "VI-P-1101A", "P-1101A", T0 + timedelta(minutes=20), 1, 1, 9.9)
-    alarms = client.get("/plant/alarms").json()
-    assert [(a["tag_id"], a["limit_type"], a["direction"]) for a in alarms] == [("VI-P-1101A", "Soft", "hi")]
+    rule1 = [(a["direction"], a["hit_count"], a["cleared_at"]) for a in client.get("/plant/alarms", params={"rule": 1}).json()]
+    assert rule1 == [("hi", 602, None)]                                      # 표본마다 |z|>3: 열린 한 건으로 묶인다
 
 
 def test_old_ingest_batches_are_deleted(client):

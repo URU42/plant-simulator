@@ -3,12 +3,12 @@ import httpx
 import pytest
 
 from common.message import IngestBatch, Sample
-from simulator.sender import HttpSender, MemorySender, SendError
+from simulator.sender import HttpSender, LocalSender, MemorySender, SendError
 
 
 def _batch():
     return IngestBatch(source_id="SIM-ALL", batch_id="b-1", sent_at="2026-11-08T17:24:00+09:00",
-                       samples=[Sample(equip_id="C-1101", tag_id="VI-C1101", ts="2026-11-08T17:23:10+09:00", value=2.3, quality="Good")])
+                       samples=[Sample(equip_id="C-1101", tag_id="VI-C1101", ts="2026-11-08T17:23:10+09:00", value=2.3, status="Good")])
 
 
 async def test_http_sender_posts_batch_to_ingest():
@@ -22,7 +22,7 @@ async def test_http_sender_posts_batch_to_ingest():
     sender = HttpSender("http://collector:8000", transport=httpx.MockTransport(handler))
     result = await sender.send(_batch())
     assert seen["url"] == "http://collector:8000/ingest"
-    assert b'"schema_version":"1.0"' in seen["json"]
+    assert b'"schema_version":"2.0"' in seen["json"]
     assert result["stored"] == 1
 
 
@@ -79,3 +79,17 @@ async def test_collector_time_is_none_when_empty_or_unreachable():
     assert await sender.collector_time() is None
     down = HttpSender("http://c", transport=httpx.MockTransport(lambda r: httpx.Response(500)))
     assert await down.collector_time() is None
+
+
+async def test_recent_values_empty_for_http_and_memory():
+    """HTTP 로 보내는 시뮬레이터는 수집 서버의 최근 값을 모른다 → 빈 dict (생성기는 처음 상태에서 시작)."""
+    assert await HttpSender("http://c", transport=httpx.MockTransport(lambda r: httpx.Response(500))).recent_values(14) == {}
+    assert await MemorySender().recent_values(14) == {}
+
+
+async def test_local_sender_reads_recent_values_from_callable():
+    seen = []
+    values = {("P-3101", "VI-A-P3101"): [1.6, 1.7]}
+    sender = LocalSender(lambda *a: None, lambda: None, recent_values=lambda n: (seen.append(n), values)[1])
+    assert await sender.recent_values(14) == values and seen == [14]
+    assert await LocalSender(lambda *a: None, lambda: None).recent_values(14) == {}     # 콜러블이 없으면 빈 dict
