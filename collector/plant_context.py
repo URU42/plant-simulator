@@ -49,8 +49,9 @@ class PlantContext:
     loop: asyncio.AbstractEventLoop | None = field(default=None)    # SSE 발행을 루프 스레드로 넘기기 위해
 
     @classmethod
-    def open(cls, entry: PlantEntry, persistent_fault_interval_min: float | None = None) -> "PlantContext":
-        """persistent_fault_interval_min 이 있으면 runtime 의 지속 고장 간격을 덮어쓴다."""
+    def open(cls, entry: PlantEntry, persistent_fault_interval_min: float | None = None,
+             persistent_fault_max_open: int | None = None) -> "PlantContext":
+        """persistent_fault_interval_min·persistent_fault_max_open 이 있으면 runtime 의 지속 고장 간격·동시 상한을 덮어쓴다."""
         plant = load_plant(entry.plant)
         runtime = load_runtime(entry.runtime)
         Path(entry.db).parent.mkdir(parents=True, exist_ok=True) if entry.db != ":memory:" else None
@@ -64,7 +65,9 @@ class PlantContext:
                    broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime), tag_keys=storage.tag_keys(),
                    alarms=AlarmTracker(storage, plant), loop=loop,
                    book=AnomalyBook(storage, plant, runtime.seed, runtime.persistent_fault_interval_min
-                                    if persistent_fault_interval_min is None else persistent_fault_interval_min))
+                                    if persistent_fault_interval_min is None else persistent_fault_interval_min,
+                                    runtime.persistent_fault_max_open
+                                    if persistent_fault_max_open is None else persistent_fault_max_open))
 
     def set_live(self, at: float) -> None:
         """생성기가 실시간으로 넘어가 시계를 따라잡았다(at = 따라잡은 첫 구간 시작, epoch 초). 이때부터 주입을 받고 지속 고장을 연다."""

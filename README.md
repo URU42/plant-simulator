@@ -109,6 +109,7 @@ curl -N localhost:8000/rfcc/stream
 | 수집 서버 | | `CORS_ORIGINS` | 쉼표 구분. 있으면 GET 에 CORS 헤더 |
 | 수집 서버 | | `INGEST_TOKEN` | 있으면 외부 `POST /ingest` 와 `POST /anomalies…`(주입·멈춤)는 헤더 `X-Ingest-Token` 필수. 통합 실행인데 없으면 둘 다 닫힌다(403). 통합 실행의 생성기는 거치지 않는다. 시뮬레이터 `HttpSender` 도 같은 변수를 읽어 헤더를 붙인다 |
 | 수집 서버 | | `PERSISTENT_FAULT_INTERVAL_MIN` | 있으면 모든 공장의 지속 고장 간격(분)을 덮어쓴다. 0 이면 끈다. 0 이상의 수가 아니면 시작하지 않는다 |
+| 수집 서버 | | `PERSISTENT_FAULT_MAX_OPEN` | 있으면 모든 공장의 동시 지속 고장 상한(기본 3)을 덮어쓴다. 1 이상의 정수가 아니면 시작하지 않는다 |
 | 시뮬레이터 | `--plant` | `PLANT_CONFIG` | `config/plant_rhds.yaml` |
 | 시뮬레이터 | `--runtime` | `RUNTIME_CONFIG` | `config/runtime_rhds.yaml` |
 | 시뮬레이터 | `--time-mode` | | `runtime.yaml` 의 `time_mode` |
@@ -122,7 +123,7 @@ curl -N localhost:8000/rfcc/stream
 | --- | --- |
 | `config/plants.yaml` | 수집 서버가 여는 공장 목록: `key`(URL 접두어), 구성안·실행 파일, DB 파일. `plants.k8s.yaml` 은 DB 경로가 `/app/data/` 인 k8s 용 |
 | `config/plant_{rfcc,cdu,hou,rhds,vrds}.yaml` | 구성안: 계층, 설비 유형(`kind`), 표준 태그, 설비, 태그(설명·단위·주기·자릿수·한계값(참고)·`normal_ref`·`limit_basis`·`seed_key`·`control` 의 μ·σ) |
-| `config/runtime*.yaml` | 실행 설정: Unit 목록, `source_id`, 주기, 시간 모드, 가속 배율, 백필 기간, 시드, 수집 서버 주소(공장 접두어 포함), 원시 값 보관 기간, `persistent_fault_interval_min`(지속 고장 간격, 분) |
+| `config/runtime*.yaml` | 실행 설정: Unit 목록, `source_id`, 주기, 시간 모드, 가속 배율, 백필 기간, 시드, 수집 서버 주소(공장 접두어 포함), 원시 값 보관 기간, `persistent_fault_interval_min`(지속 고장 간격, 분), `persistent_fault_max_open`(동시 지속 고장 상한) |
 
 ### 태그를 가리키는 법
 
@@ -168,8 +169,8 @@ RFCC 는 `limits` 를 μ ± 3σ 로 다시 계산해 두었다(`limit_basis`). `
 모르는 설비 404, 그 설비에 주입·지속 고장이 살아 있어 주입이 겹치면 409, 규칙이 1~8 이 아니면 422. 같은 설비에 자동 이상이 진행 중이면 주입이 그 사건을 끝내고 대신한다.
 정답(원인·분류·조치)은 `/alarms` 에 싣지 않는다. 심각도도 없다. 시작 시각에 바로 멈춘 사건(길이 0)은 정답지에 없다.
 
-지속 고장은 멈출 때까지 쌓인다. `persistent_fault_interval_min` 마다 놀고 있는 설비에 하나씩 열리므로 설비가 N 개인 공장은 N×간격 뒤 모든 설비가 고장 상태가 되고,
-그때부터 주입은 409 이며 자동 이상도 나오지 않는다. 시험 사례마다 먼저 `POST /{공장}/anomalies/stop` 으로 공장을 비운 뒤 주입한다.
+지속 고장은 멈출 때까지 쌓이되 공장당 최대 N개(`persistent_fault_max_open`, 기본 3)다. 상한이면 그 회차는 건너뛰고 다음 회차는 간격 뒤에 다시 본다(주입 사건은 세지 않는다).
+멈추면 다음 회차에 자리가 난다. 시험 사례마다 먼저 `POST /{공장}/anomalies/stop` 으로 공장을 비운 뒤 주입한다.
 
 ## 신호 생성
 

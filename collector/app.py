@@ -241,7 +241,8 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.plants = {entry.key: PlantContext.open(entry, settings.persistent_fault_interval_min) for entry in plants.plants}
+        app.state.plants = {entry.key: PlantContext.open(entry, settings.persistent_fault_interval_min,
+                                                settings.persistent_fault_max_open) for entry in plants.plants}
         app.state.started_at = to_db(datetime.now(timezone.utc))
         tasks: list[asyncio.Task] = []
         switch_interval = sys.getswitchinterval()

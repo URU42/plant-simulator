@@ -5,6 +5,7 @@ CORS_ORIGINS       쉼표 구분 origin 목록. 있으면 GET 에 CORS 헤더를
 INGEST_TOKEN       있으면 POST /{공장}/ingest·/{공장}/anomalies 는 헤더 X-Ingest-Token 이 같아야 한다. 같은 프로세스의 생성기는 거치지 않는다
 WITH_SIMULATORS    1/true 면 공장 목록의 생성기를 같은 프로세스에서 돌린다
 PERSISTENT_FAULT_INTERVAL_MIN  있으면 모든 공장 runtime 의 지속 고장 간격(분)을 덮어쓴다. 0 이면 끈다
+PERSISTENT_FAULT_MAX_OPEN      있으면 모든 공장 runtime 의 동시 지속 고장 상한(1 이상의 정수)을 덮어쓴다
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ class Settings:
     time_mode: str | None = None          # 통합 실행에서 각 공장 runtime 의 time_mode 를 덮어쓴다
     backfill_days: int | None = None      # 통합 실행에서 각 공장 runtime 의 backfill_days 를 덮어쓴다
     persistent_fault_interval_min: float | None = None   # 각 공장 runtime 의 지속 고장 간격(분)을 덮어쓴다
+    persistent_fault_max_open: int | None = None         # 각 공장 runtime 의 동시 지속 고장 상한을 덮어쓴다
 
     @classmethod
     def from_env(cls, **overrides) -> "Settings":
@@ -37,6 +39,7 @@ class Settings:
             ingest_token=env.get("INGEST_TOKEN") or None,
             with_simulators=env.get("WITH_SIMULATORS", "").strip().lower() in TRUE_VALUES,
             persistent_fault_interval_min=_interval_min(env.get("PERSISTENT_FAULT_INTERVAL_MIN")),
+            persistent_fault_max_open=_max_open(env.get("PERSISTENT_FAULT_MAX_OPEN")),
         )
         for name, value in overrides.items():
             if value is not None:
@@ -54,4 +57,17 @@ def _interval_min(raw: str | None) -> float | None:
         value = math.nan
     if not math.isfinite(value) or value < 0:
         raise ConfigError(f"PERSISTENT_FAULT_INTERVAL_MIN must be a number of minutes ≥ 0 (0 turns it off), got {raw!r}")
+    return value
+
+
+def _max_open(raw: str | None) -> int | None:
+    """PERSISTENT_FAULT_MAX_OPEN 값. 비었으면 None. 1 이상의 정수가 아니면 변수 이름을 담은 ConfigError."""
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise ConfigError(f"PERSISTENT_FAULT_MAX_OPEN must be an integer ≥ 1, got {raw!r}")
     return value

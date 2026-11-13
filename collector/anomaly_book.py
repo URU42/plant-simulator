@@ -35,12 +35,13 @@ def _epoch(s: str | None) -> float | None:
 
 
 class AnomalyBook:
-    def __init__(self, storage: Storage, plant: PlantConfig, seed: int, interval_min: float) -> None:
+    def __init__(self, storage: Storage, plant: PlantConfig, seed: int, interval_min: float, max_open: int = 3) -> None:
         self.storage = storage
         self.plant = plant
         self.plant_id = plant.plant.plant_id
         self.seed = seed
         self.interval = interval_min * 60                   # 지속 고장 간격(초). 0 이면 열지 않는다
+        self.max_open = max_open                            # 동시에 열려 있는 지속 고장 상한. 넘으면 그 회차는 건너뛴다
         self.equip_ids = [e.equip_id for e in plant.equipment]     # 구성안 순서 (지속 고장 후보의 순서)
         self._lock = threading.RLock()
         self._events: dict[str, AnomalyEvent] = {}         # 장부의 모든 사건 (자동 이상은 end = 예정된 끝)
@@ -152,7 +153,10 @@ class AnomalyBook:
                 self._set_stop(e.event_id, at)
 
     def _open_fault(self, at: float) -> None:
-        """at 에 지속 고장을 연다. 고장 없는 설비가 없으면 이 회차는 건너뛴다."""
+        """at 에 지속 고장을 연다. 열려 있는 지속 고장이 상한이면, 또는 고장 없는 설비가 없으면 이 회차는 건너뛴다."""
+        open_now = sum(e.origin == "persistent" and self._stops.get(e.event_id, math.inf) > at for e in self._events.values())
+        if open_now >= self.max_open:
+            return
         free = [x for x in self.equip_ids if not self._faulty(x, at)]
         if not free:
             return

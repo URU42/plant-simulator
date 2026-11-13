@@ -39,3 +39,8 @@ def test_control_matches_baselines(config_dir):
             for t in e.tags:
                 b = base[(key.upper(), e.equip_id, t.tag_id)]
                 assert (t.control.mean, t.control.sigma) == (b["mean"], b["sigma"])
+
+
+@pytest.mark.parametrize("key", PLANTS)
+def test_runtime_persistent_max_open_default(config_dir, key):
+    assert load_runtime(config_dir / f"runtime_{key}.yaml").persistent_fault_max_open == 3

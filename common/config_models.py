@@ -226,6 +226,7 @@ class RuntimeConfig(StrictModel):
     collector_url: str = "http://localhost:8000"
     raw_retention_days: int = Field(default=7, ge=1)
     persistent_fault_interval_min: float = Field(default=15, ge=0)   # 지속 고장을 여는 간격(분). 0 이면 끈다
+    persistent_fault_max_open: int = Field(default=3, ge=1)          # 동시에 열려 있는 지속 고장 상한(공장당)
 
     @model_validator(mode="after")
     def _intervals(self) -> "RuntimeConfig":

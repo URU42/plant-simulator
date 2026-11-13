@@ -93,3 +93,29 @@ def test_answer_key_skips_zero_length_event(book):
     b.stop("C-3101", at=50.0)
     assert b.answer_key(None, None, None) == []
     assert e.event_id in b.stops()
+
+
+def _capped(config_dir, tmp_path, cap):
+    plant = load_plant(config_dir / "plant_rhds.yaml")
+    st = Storage(tmp_path / "cap.db"); seed_master(st, plant)
+    return AnomalyBook(st, plant, seed=1, interval_min=15, max_open=cap)
+
+def _persistent(events):
+    return [e for e in events if e.origin == "persistent"]
+
+def test_persistent_cap_skips_slots_when_full(config_dir, tmp_path):
+    b = _capped(config_dir, tmp_path, 2)
+    L = 1_000_000.0
+    b.set_live(L)
+    opened = _persistent(b.external(L, L + 3 * 900 + 1))
+    assert sorted(e.start for e in opened) == [L + 900, L + 1800]       # L+2700 회차는 건너뛴다
+    b.stop(opened[0].equip_id, at=L + 3000)
+    later = _persistent(b.external(L + 3 * 900 + 1, L + 4 * 900 + 1))
+    assert [e.start for e in later if e.start > L + 2700] == [L + 3600]                       # 하나 멈추면 다음 회차가 열린다
+
+def test_injected_events_do_not_count_toward_cap(config_dir, tmp_path):
+    b = _capped(config_dir, tmp_path, 1)
+    L = 1_000_000.0
+    b.set_live(L)
+    b.inject("C-3101", 1, at=L)
+    assert len(_persistent(b.external(L, L + 901))) == 1

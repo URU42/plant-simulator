@@ -70,3 +70,16 @@ def test_invalid_persistent_fault_interval_names_the_variable(monkeypatch, raw):
     monkeypatch.setenv("PERSISTENT_FAULT_INTERVAL_MIN", raw)
     with pytest.raises(ConfigError, match="PERSISTENT_FAULT_INTERVAL_MIN"):
         Settings.from_env()
+
+
+def test_persistent_max_open_env(monkeypatch):
+    monkeypatch.setenv("PERSISTENT_FAULT_MAX_OPEN", "2")
+    assert Settings.from_env().persistent_fault_max_open == 2
+    monkeypatch.setenv("PERSISTENT_FAULT_MAX_OPEN", "")
+    assert Settings.from_env().persistent_fault_max_open is None
+
+@pytest.mark.parametrize("raw", ["abc", "0", "-1", "1.5"])
+def test_invalid_persistent_max_open_names_the_variable(monkeypatch, raw):
+    monkeypatch.setenv("PERSISTENT_FAULT_MAX_OPEN", raw)
+    with pytest.raises(ConfigError, match="PERSISTENT_FAULT_MAX_OPEN"):
+        Settings.from_env()

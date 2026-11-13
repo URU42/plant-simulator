@@ -15,6 +15,7 @@ services:
     environment:
       ROOT_PATH: ${ROOT_PATH:-}
       INGEST_TOKEN: ${INGEST_TOKEN:-}                                   # 주입·멈춤(/anomalies)·외부 /ingest 에 필요. 없으면 403
+      PERSISTENT_FAULT_MAX_OPEN: ${PERSISTENT_FAULT_MAX_OPEN:-}   # 비우면 runtime yaml 값(3). 공장당 동시 지속 고장 상한
       PERSISTENT_FAULT_INTERVAL_MIN: ${PERSISTENT_FAULT_INTERVAL_MIN:-}   # 비우면 runtime yaml 값, 0 이면 지속 고장 끔
     volumes:
       - plant-data:/app/data
