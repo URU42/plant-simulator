@@ -37,7 +37,7 @@
 - 해결: 지속 고장 개수 상한. 공장당 동시 최대 3개(`persistent_fault_max_open`, 환경 변수 `PERSISTENT_FAULT_MAX_OPEN`), 상한이면 그 회차는 건너뛴다.
 - 해결: `equipment-tags.md` 를 Nelson 판정·태그별 μ/σ·RFCC μ±3σ 참고값으로 다시 만들었다(사용자의 머리말 수정 포함).
 - 해결: 기획서 1~4·8~9장을 지금 설계에 맞춰 다시 썼다(안내 문구 삭제).
-- k8s 자원(CPU 500m) 에서 백필 시간 재측정(README 의 "약 15분" 은 옛 생성기 기준).
+- 해결: k8s 배포 한도(500m/1Gi)에서 다섯 공장 하루 백필 → live 약 38분, 710Mi(2026-11-13 실측, README). 같은 날 배포에서 pull Secret 이 `harbor-cred`(다른 레지스트리)로 덮여 ImagePullBackOff 가 났고 `uru42-harbor-pull` 로 바로잡았다.
 - 테스트 보강 여지: 지속 고장 상한이 재시작 뒤에도 지켜지는지.
 - 자동 이상이 고장이 열린 같은 창 안에서 막 시작한 경우 정답지에 잘린 끝이 반영되지 않음(드묾).
 - 설계 §4.6 표의 멈춤 응답 설명에 `stop_requested_at` 이 빠짐.
