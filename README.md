@@ -59,7 +59,7 @@ uv run python -m collector.app --plants config/plants.yaml
 예를 들어 CDU 는
 
 ```bash
-# 백필: 지난 하루를 1시간 묶음으로 보낸 뒤 실시간으로 이어진다 (공장당 약 1~2분).
+# 백필: 지난 하루를 1시간 묶음으로 보낸 뒤 실시간으로 이어진다.
 # 재시작하면 수집 서버의 마지막 측정 시각부터 이어서 보내므로 다시 채우지 않는다.
 uv run python -m simulator.main --plant config/plant_cdu.yaml --runtime config/runtime_cdu.yaml \
     --time-mode backfill
@@ -87,8 +87,8 @@ INGEST_TOKEN=<긴 문자열> PERSISTENT_FAULT_INTERVAL_MIN=0 docker compose up -
 확인:
 
 ```bash
-curl localhost:8000/health                                   # 다섯 공장의 sim_now · catching_up
-curl localhost:8000/rhds/equipment                           # 계층 순서의 설비·태그·한계값
+curl localhost:8000/health                                   # 다섯 공장의 sim_now · catching_up · live
+curl localhost:8000/rhds/equipment                           # 계층 순서의 설비·태그·한계값(참고)·μ/σ
 curl localhost:8000/rhds/current
 curl localhost:8000/rhds/equipment/P-3101/tags/TI-B-P3101/current
 curl "localhost:8000/cdu/timeseries?equip_id=P-8101A&tag_id=PI-8101A&from=2026-11-08T00:00:00%2B09:00&to=2026-11-09T00:00:00%2B09:00&interval=10m"
@@ -96,6 +96,25 @@ curl "localhost:8000/hou/alarms?equip_id=P-2601&open=true"          # 열려 있
 curl localhost:8000/rhds/anomalies                           # 정답지(원인·분류·조치·반응 태그)
 curl -N localhost:8000/rfcc/stream
 ```
+
+### 알람 요약 모델 시험 흐름
+
+토큰을 주고 통합 실행으로 띄운 뒤, 공장을 비우고 → 이상을 넣고 → `/alarms` 를 주기적으로 가져가 모델에 넣고 → 정답지와 대조한다.
+
+```bash
+INGEST_TOKEN=t uv run python -m collector.app --plants config/plants.yaml --with-simulators --time-mode backfill
+H='X-Ingest-Token: t'
+
+curl localhost:8000/rhds/health                               # "live": true 가 될 때까지 기다린다 (그 전엔 POST 가 503)
+curl -XPOST -H "$H" localhost:8000/rhds/anomalies/stop        # 열린 사건을 모두 끝내 공장을 비운다
+curl -XPOST -H "$H" -H 'content-type: application/json' \
+     localhost:8000/rhds/anomalies -d '{"equip_id":"C-3101","rule":6}'   # → event_id, start_at
+curl "localhost:8000/rhds/alarms?from=2026-11-13T00:00:00Z&to=2026-11-13T00:05:00Z"   # 5분마다, 구간과 겹치는 알람 → 모델 입력
+curl -XPOST -H "$H" localhost:8000/rhds/anomalies/C-3101/stop # 그 설비만 정상으로 (회복 시간 뒤 Good)
+curl "localhost:8000/rhds/anomalies?from=2026-11-13T00:00:00Z" # 정답지 → 채점에만 쓰고 모델에는 주지 않는다
+```
+
+`/alarms` 에는 자동 이상(설비당 약 10%)과 지속 고장(15분마다, 공장당 최대 3개)도 함께 나온다. 넣은 이상만 보고 싶으면 `PERSISTENT_FAULT_INTERVAL_MIN=0` 으로 지속 고장을 끄고, 정답지의 `origin`(`injected` / `spontaneous` / `persistent`)으로 가른다.
 
 ## 명령행 인자
 
@@ -128,8 +147,7 @@ curl -N localhost:8000/rfcc/stream
 ### 태그를 가리키는 법
 
 태그는 **(설비 ID, 태그명)** 복합키다. 다섯 공장의 태그명은 공장 안에서 고유하다(RHDS·VRDS 는 자료에서 겹치던 `TI-B-3101` 등에 설비 종류 문자를 넣어 `TI-B-P3101`·`TI-B-C3101`·`TI-B-F3101` 로 바꿨다).
-설정 파일에서 태그를 가리키는 문자열(`driven_by` 짝 등)은 `EQUIP/TAG`(예: `P-3101/TI-B-P3101`)이거나,
-공장 안에서 유일한 태그명이면 그냥 `TAG` 다. 겹치는 태그명을 그냥 적으면 어느 설비들에 있는지 알려 주며 멈춘다.
+API 는 늘 두 값을 함께 받는다(`equip_id=P-3101&tag_id=TI-B-P3101`, `/equipment/P-3101/tags/TI-B-P3101/current`). 설비끼리의 관계는 `driven_by`(구동기 설비 ID) 하나뿐이다.
 
 ### 한계값과 Nelson 기준
 
@@ -214,7 +232,7 @@ RFCC 는 `limits` 를 μ ± 3σ 로 다시 계산해 두었다(`limit_basis`). `
 | `GET /{공장}/` | 디버깅 화면. 설비별 표에 태그의 값·상태·측정 시각이 SSE 로 1초마다 갱신된다 |
 | `POST /{공장}/ingest` | 시뮬레이터 묶음 수신 |
 | `GET /{공장}/health` | 그 공장의 상태 |
-| `GET /{공장}/equipment` | 계층 순서의 설비 목록과 태그(설명·단위·주기·자릿수·한계값·`normal_ref`·`limit_basis`) |
+| `GET /{공장}/equipment` | 계층 순서의 설비 목록과 태그(설명·단위·주기·자릿수·한계값(참고)·`normal_ref`·`limit_basis`·`control` μ/σ) |
 | `GET /{공장}/current` | 모든 태그의 현재값과 `status` |
 | `GET /{공장}/equipment/{equip_id}/tags/{tag_id}/current` | 태그 현재값. `status` 는 `Good` / `Bad`, 전송 주기와 태그 주기 중 긴 쪽의 3배 동안 안 들어오면 `NoData` |
 | `GET /{공장}/timeseries?equip_id=&tag_id=&from=&to=&interval=1h` | 집계 시계열 (`10m` / `1h`) |
@@ -243,7 +261,7 @@ RFCC 는 `limits` 를 μ ± 3σ 로 다시 계산해 두었다(`limit_basis`). `
 
 - **예전 DB 파일(v1·v2)은 열 수 없다.** 수집 서버가 파일 경로와 함께 옮기거나 지우라고 알리고 멈춘다. `data/old/` 로 옮긴 뒤 백필을 다시 돌린다. 배포(k8s)에서는 DB v3 이므로 PVC 의 기존 DB 파일을 지우고 다시 띄운다.
 - 보관: 10분 배치가 끝날 때마다 `raw_retention_days` 보다 오래된 `ts_raw` 행(측정 시각 기준)과 `ingest_batch` 행(받은 시각 기준)을 지운다. 집계는 남긴다.
-- 용량(하루 백필 뒤 실측, 행당 약 180 B): rfcc 1.1 GB · hou 0.7 GB · cdu 0.6 GB · rhds 0.5 GB · vrds 0.5 GB. 다섯 1초 공장을 하루 보관하면 합계 약 3.5 GB 에서 머문다. SQLite 파일은 지워도 줄지 않고 최고점에서 고정된다. 
+- 용량(하루 백필 뒤 실측, 행당 약 180 B): rfcc 1.1 GB · hou 0.7 GB · cdu 0.6 GB · rhds 0.5 GB · vrds 0.5 GB. 다섯 1초 공장을 하루 보관하면 합계 약 3.5 GB 에서 머문다. SQLite 파일은 지워도 줄지 않고 최고점에서 고정된다.
 - 수집 서버는 프로세스 하나다. 통합 실행에서는 동시에 저장하는 공장을 둘로 제한하고(나머지는 기다린다) 값 계산·저장을 워커 스레드에서 돌린다. 분리 실행으로 다섯 공장이 동시에 첫 백필을 하면 SQLite 쓰기가 직렬화돼 하루 백필이 함께 끝나기까지 약 2~5분 걸렸고, 먼저 실시간에 들어간 공장의 1초 전송은 재시도로 버틴다.
 
 ## k8s 배포 (`deploy/k8s`)
@@ -275,27 +293,29 @@ curl https://u4-2.skala-us.com/plant-sim/health
 
 - 이미지는 Harbor 비공개 프로젝트에 있으므로 Deployment 에 `imagePullSecrets: harbor-cred` 를 적어 둔다(네임스페이스에 그 Secret 이 있어야 한다: `kubectl -n u4-2 get secret harbor-cred`).
 - **DB v3 — 이전 버전에서 올릴 때는 PVC 의 기존 DB 파일(`/app/data/*.db*`)을 지우고 다시 띄운다.** 이전 파일은 열리지 않는다(수집 서버가 알리고 멈춘다).
-- 지속 고장 간격은 Deployment 환경 변수 `PERSISTENT_FAULT_INTERVAL_MIN`(0 이면 끔)으로 조절한다.
+- 지속 고장은 Deployment 에 환경 변수 `PERSISTENT_FAULT_INTERVAL_MIN`(간격 분, 0 이면 끔)·`PERSISTENT_FAULT_MAX_OPEN`(공장당 동시 상한)을 더해 조절한다. 없으면 runtime yaml 값(15분·3개).
 - 첫 기동은 다섯 공장 하루치 백필이다. CPU 500m 에서 수 분~십수 분 걸리며 그동안 `/health` 의 `sim_now` 가 전진한다.
 - 백필 기간을 늘리려면(`--backfill-days`) PVC 의 DB 파일을 지우고 다시 채워야 한다. 재개는 마지막 시각부터만 이어 간다.
 - 다른 파드는 DB 파일을 직접 읽을 수 없다(RWO). HTTP API(`/current`, `/timeseries`, `/alarms`, `/anomalies`, `/stream`)를 쓴다.
 - 실측 (다섯 공장 통합 실행, 하루 백필):
 
-  | 조건 | 백필 중 `/health` 응답 | 하루 백필 | 메모리 |
-  | --- | --- | --- | --- |
-  | 로컬 Mac, 제한 없음 | 0.1초 이하 | 약 7분 | Python RSS 약 250 MB |
-  | `docker run --cpus 0.5 --memory 1g` (배포 한도) | 0.1~3.7초, 대개 2~3초 (CPU 쿼터를 백필과 나눠 쓴다) | 약 15분 | cgroup 기준 785~812 MiB (SQLite 파일 캐시 포함, 회수 가능) |
+  | 조건 | 생성기 | 백필 중 `/health` 응답 | 하루 백필 → 실시간 | 메모리 |
+  | --- | --- | --- | --- | --- |
+  | 로컬 Mac, 제한 없음 | Nelson (지금) | — | 약 7.3분 | Python RSS 약 243 MB |
+  | 로컬 Mac, 제한 없음 | 이전 신호 모델 | 0.1초 이하 | 약 7분 | Python RSS 약 250 MB |
+  | `docker run --cpus 0.5 --memory 1g` (배포 한도) | 이전 신호 모델 | 0.1~3.7초, 대개 2~3초 (CPU 쿼터를 백필과 나눠 쓴다) | 약 15분 | cgroup 기준 785~812 MiB (SQLite 파일 캐시 포함, 회수 가능) |
 
-  그래서 readiness·liveness 의 timeout 은 10초, startupProbe 는 30분이다. 백필이 끝나면 응답은 수 ms 로 돌아온다. 더 빨리 띄우려면 limits cpu 를 1 로 올린다.
+  Nelson 생성기는 배포 한도에서 아직 다시 재지 않았다(1시간 생성: 공장당 1.4~2.4초, Mac). 순수 파이썬 생성기가 `/health` 를 막지 않도록 통합 실행 중에는 GIL 전환 간격을 1ms 로 줄인다.
+  readiness·liveness 의 timeout 은 10초, startupProbe 는 30분이다. 백필이 끝나면 응답은 수 ms 로 돌아온다. 더 빨리 띄우려면 limits cpu 를 1 로 올린다.
 
 ## 폴더
 
 ```text
 config/      plants.yaml · plant_*.yaml · runtime_*.yaml
-common/      config_models(복합키·TagRef·한계값·control) · message(v2) · nelson(8종 판정) · sim_clock · timefmt
+common/      config_models(복합키·한계값·control) · message(v2) · nelson(8종 판정) · sim_clock · timefmt
 simulator/   nelson_model(정상 신호 + 사건 덧씌우기) · anomaly(모양·반응 태그·분류) · schedule(자동 이상 일정) · sender · main
 collector/   app(라우트) · plants(공장 목록) · plant_context(공장별 문맥·수신 핵심) · embedded(통합 실행) · settings · ingest · alarms(Nelson 판정·nelson_alarm) · anomaly_book(사건 장부) · storage · schema.sql · jobs · seed_master · stream · static/index.html
 deploy/k8s/  kustomization · plant-sim-{deployment,service,pvc,ingress}.yaml · plant-sim-secret.example.yaml (being-gitops k8s/plant-sim 으로 복사)
-docs/        superpowers/specs (RFCC · 다중 공장 설계) · superpowers/plans (구현 계획)
-tests/       기획서 9.2 단계별 완료 기준 + 설계 §5 테스트
+docs/        superpowers/specs (RFCC · 다중 공장 · k8s · Nelson 이상 설계) · superpowers/plans (구현 계획 · Nelson 작업 기록)
+tests/       판정기·사건·일정·생성기·수집·알람·이상 API·설정·배포 매니페스트 테스트
 ```
