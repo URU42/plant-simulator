@@ -291,10 +291,10 @@ kubectl -n u4-2 rollout status deploy/plant-sim
 curl https://u4-2.skala-us.com/plant-sim/health
 ```
 
-- 이미지는 Harbor 비공개 프로젝트에 있으므로 Deployment 에 `imagePullSecrets: harbor-cred` 를 적어 둔다(네임스페이스에 그 Secret 이 있어야 한다: `kubectl -n u4-2 get secret harbor-cred`).
+- 이미지는 Harbor 비공개 프로젝트(`harbor.uru42.space`)에 있으므로 Deployment 에 `imagePullSecrets: uru42-harbor-pull` 을 적어 둔다(네임스페이스에 그 Secret 이 있어야 한다: `kubectl -n u4-2 get secret uru42-harbor-pull`). 같은 네임스페이스의 `harbor-cred` 는 `harbor.skala-us.com` 인증이라 이 이미지를 받지 못한다(ImagePullBackOff "no basic auth credentials").
 - **DB v3 — 이전 버전에서 올릴 때는 PVC 의 기존 DB 파일(`/app/data/*.db*`)을 지우고 다시 띄운다.** 이전 파일은 열리지 않는다(수집 서버가 알리고 멈춘다).
 - 지속 고장은 Deployment 에 환경 변수 `PERSISTENT_FAULT_INTERVAL_MIN`(간격 분, 0 이면 끔)·`PERSISTENT_FAULT_MAX_OPEN`(공장당 동시 상한)을 더해 조절한다. 없으면 runtime yaml 값(15분·3개).
-- 첫 기동은 다섯 공장 하루치 백필이다. CPU 500m 에서 수 분~십수 분 걸리며 그동안 `/health` 의 `sim_now` 가 전진한다.
+- 첫 기동은 다섯 공장 하루치 백필이다. CPU 500m 에서 약 40분 걸리며(아래 실측) 그동안 `/health` 의 `sim_now` 가 전진하고 `live` 는 false 다. 파드는 `/health` 가 응답하면 Ready 가 되므로 백필 중에도 조회 API 는 쓸 수 있다.
 - 백필 기간을 늘리려면(`--backfill-days`) PVC 의 DB 파일을 지우고 다시 채워야 한다. 재개는 마지막 시각부터만 이어 간다.
 - 다른 파드는 DB 파일을 직접 읽을 수 없다(RWO). HTTP API(`/current`, `/timeseries`, `/alarms`, `/anomalies`, `/stream`)를 쓴다.
 - 실측 (다섯 공장 통합 실행, 하루 백필):
@@ -302,11 +302,13 @@ curl https://u4-2.skala-us.com/plant-sim/health
   | 조건 | 생성기 | 백필 중 `/health` 응답 | 하루 백필 → 실시간 | 메모리 |
   | --- | --- | --- | --- | --- |
   | 로컬 Mac, 제한 없음 | Nelson (지금) | — | 약 7.3분 | Python RSS 약 243 MB |
+  | k8s `u4-2` 배포 한도(500m/1Gi), 새 PVC | Nelson (지금) | 200 (readiness 통과) | 약 38분 (RHDS·VRDS·CDU·HOU 37~38분, RFCC 38~39분) | `kubectl top` 710Mi (SQLite 파일 캐시 포함), 실시간 CPU 약 60m |
   | 로컬 Mac, 제한 없음 | 이전 신호 모델 | 0.1초 이하 | 약 7분 | Python RSS 약 250 MB |
   | `docker run --cpus 0.5 --memory 1g` (배포 한도) | 이전 신호 모델 | 0.1~3.7초, 대개 2~3초 (CPU 쿼터를 백필과 나눠 쓴다) | 약 15분 | cgroup 기준 785~812 MiB (SQLite 파일 캐시 포함, 회수 가능) |
 
-  Nelson 생성기는 배포 한도에서 아직 다시 재지 않았다(1시간 생성: 공장당 1.4~2.4초, Mac). 순수 파이썬 생성기가 `/health` 를 막지 않도록 통합 실행 중에는 GIL 전환 간격을 1ms 로 줄인다.
-  readiness·liveness 의 timeout 은 10초, startupProbe 는 30분이다. 백필이 끝나면 응답은 수 ms 로 돌아온다. 더 빨리 띄우려면 limits cpu 를 1 로 올린다.
+  k8s 수치는 2026-11-13 배포(이미지 `test-8-254597bb`)에서 1분 간격으로 `/health` 를 보고 잰 것이라 ±1분이다(`live` = 백필 뒤 밀린 구간까지 따라잡은 시각). 1시간 생성은 Mac 에서 공장당 1.4~2.4초다.
+  순수 파이썬 생성기가 `/health` 를 막지 않도록 통합 실행 중에는 GIL 전환 간격을 1ms 로 줄인다.
+  readiness·liveness 의 timeout 은 10초, startupProbe 는 30분이다(백필 중에도 `/health` 가 응답하므로 백필이 30분을 넘어도 파드는 먼저 Ready 가 된다). 백필이 끝나면 응답은 수 ms 로 돌아온다. 더 빨리 띄우려면 limits cpu 를 1 로 올린다.
 
 ## 폴더
 

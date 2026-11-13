@@ -15,7 +15,7 @@ spec:
       labels: { app: plant-sim }
     spec:
       imagePullSecrets:
-        - name: harbor-cred          # Harbor 비공개 프로젝트. 기본 ServiceAccount 에 안 붙어 있을 수 있으므로 직접 적는다
+        - name: uru42-harbor-pull    # harbor.uru42.space 인증 (harbor-cred 는 harbor.skala-us.com 용). 기본 ServiceAccount 에 안 붙어 있을 수 있으므로 직접 적는다
       containers:
         - name: plant-sim
           image: harbor.uru42.space/uru42/plant-simulator:latest   # 태그는 kustomization.yaml 의 images 로 바꾼다
