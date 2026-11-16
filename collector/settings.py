@@ -6,6 +6,7 @@ INGEST_TOKEN       있으면 POST /{공장}/ingest·/{공장}/anomalies 는 헤�
 WITH_SIMULATORS    1/true 면 공장 목록의 생성기를 같은 프로세스에서 돌린다
 PERSISTENT_FAULT_INTERVAL_MIN  있으면 모든 공장 runtime 의 지속 고장 간격(분)을 덮어쓴다. 0 이면 끈다
 PERSISTENT_FAULT_MAX_OPEN      있으면 모든 공장 runtime 의 동시 지속 고장 상한(1 이상의 정수)을 덮어쓴다
+REDIS_URL          있으면 실시간 구간의 Nelson 알람 열림·닫힘을 이 Redis 의 Stream 으로 발행한다 (collector.alarm_stream)
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ class Settings:
     backfill_days: int | None = None      # 통합 실행에서 각 공장 runtime 의 backfill_days 를 덮어쓴다
     persistent_fault_interval_min: float | None = None   # 각 공장 runtime 의 지속 고장 간격(분)을 덮어쓴다
     persistent_fault_max_open: int | None = None         # 각 공장 runtime 의 동시 지속 고장 상한을 덮어쓴다
+    redis_url: str | None = None                         # 알람 이벤트를 발행할 Redis (없으면 발행하지 않는다)
 
     @classmethod
     def from_env(cls, **overrides) -> "Settings":
@@ -40,6 +42,7 @@ class Settings:
             with_simulators=env.get("WITH_SIMULATORS", "").strip().lower() in TRUE_VALUES,
             persistent_fault_interval_min=_interval_min(env.get("PERSISTENT_FAULT_INTERVAL_MIN")),
             persistent_fault_max_open=_max_open(env.get("PERSISTENT_FAULT_MAX_OPEN")),
+            redis_url=env.get("REDIS_URL") or None,
         )
         for name, value in overrides.items():
             if value is not None:

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from collector.alarm_stream import AlarmStream
 from collector.alarms import AlarmTracker
 from collector.anomaly_book import AnomalyBook
 from collector.ingest import IngestResult, Rejection
@@ -44,14 +45,16 @@ class PlantContext:
     live: bool = False                        # 생성기가 실시간(또는 가속)으로 시계를 따라잡았는가. 백필·밀린 구간 재생 중이면 False
     catch_up_task: asyncio.Task | None = field(default=None)
     simulator_error: str | None = field(default=None)               # 통합 실행의 생성기 태스크가 예외로 끝났을 때
+    alarm_stream: AlarmStream | None = field(default=None)          # 있으면 실시간 구간의 알람 열림·닫힘을 Redis 로 발행
     # 저장·배치 전진은 워커 스레드에서도 돌 수 있다(통합 실행). 한 공장의 SQLite 트랜잭션이 겹치지 않도록 락으로 직렬화한다.
     lock: threading.Lock = field(default_factory=threading.Lock)
     loop: asyncio.AbstractEventLoop | None = field(default=None)    # SSE 발행을 루프 스레드로 넘기기 위해
 
     @classmethod
     def open(cls, entry: PlantEntry, persistent_fault_interval_min: float | None = None,
-             persistent_fault_max_open: int | None = None) -> "PlantContext":
-        """persistent_fault_interval_min·persistent_fault_max_open 이 있으면 runtime 의 지속 고장 간격·동시 상한을 덮어쓴다."""
+             persistent_fault_max_open: int | None = None, alarm_stream: AlarmStream | None = None) -> "PlantContext":
+        """persistent_fault_interval_min·persistent_fault_max_open 이 있으면 runtime 의 지속 고장 간격·동시 상한을 덮어쓴다.
+        alarm_stream 은 공장들이 함께 쓰는 Redis 발행기다."""
         plant = load_plant(entry.plant)
         runtime = load_runtime(entry.runtime)
         Path(entry.db).parent.mkdir(parents=True, exist_ok=True) if entry.db != ":memory:" else None
@@ -63,7 +66,7 @@ class PlantContext:
             loop = None
         return cls(key=entry.key, plant=plant, runtime=runtime, storage=storage, jobs=JobRunner(storage, plant, runtime),
                    broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime), tag_keys=storage.tag_keys(),
-                   alarms=AlarmTracker(storage, plant), loop=loop,
+                   alarms=AlarmTracker(storage, plant), loop=loop, alarm_stream=alarm_stream,
                    book=AnomalyBook(storage, plant, runtime.seed, runtime.persistent_fault_interval_min
                                     if persistent_fault_interval_min is None else persistent_fault_interval_min,
                                     runtime.persistent_fault_max_open
@@ -82,7 +85,8 @@ class PlantContext:
     # --- 수신 핵심 (HTTP 라우트와 LocalSender 가 함께 쓴다) -------------------------
     def receive(self, batch_id: str, source_id: str, samples: list[Sample], received_at: str,
                 rejections: list[Rejection] = ()) -> IngestResult:
-        """검증을 마친 샘플을 저장하고 Nelson 판정을 반영한 뒤 배치를 전진시킨다. 같은 batch_id 는 저장하지 않고, 보관 기간 밖 행은 거절한다."""
+        """검증을 마친 샘플을 저장하고 Nelson 판정을 반영한 뒤 배치를 전진시킨다. 같은 batch_id 는 저장하지 않고, 보관 기간 밖 행은 거절한다.
+        실시간 구간이면 알람 열림·닫힘을 락 밖에서 Redis 로 발행한다 (백필·밀린 구간 재생의 알람은 /alarms 로만 본다)."""
         reasons = list(rejections)
         oldest = self.oldest_allowed()
         accepted: list[Sample] = []
@@ -97,10 +101,12 @@ class PlantContext:
                 return IngestResult(batch_id=batch_id, duplicate=True, accepted=len(accepted), stored=0,
                                     rejected=len(reasons), reasons=reasons)
             stored = self.storage.store_batch(batch_id, source_id, received_at, rows)
-            mismatched = self.alarms.observe(rows)
+            mismatched, events = self.alarms.observe(rows)
             behind = self.jobs.advance(self.storage.sim_now()) >= MAX_WINDOWS_PER_ADVANCE if accepted else False
         if mismatched:      # /alarms 는 수집 서버 판정을 따른다
             log.warning("plant %s: status mismatch on %d samples", self.key, mismatched)
+        if events and self.live and self.alarm_stream is not None:
+            self.alarm_stream.publish(self.key, events)
         if behind:
             self.start_catch_up()
         if accepted and self.broadcaster.has_subscribers():   # 구독자가 없으면 직렬화도 하지 않는다

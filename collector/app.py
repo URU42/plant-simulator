@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 
+from collector.alarm_stream import AlarmStream
 from collector.anomaly_book import Busy
 from collector.ingest import RawBatch, schema_supported, validate_samples
 from collector.plant_context import PlantContext
@@ -241,8 +242,9 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        stream = AlarmStream.from_url(settings.redis_url) if settings.redis_url else None
         app.state.plants = {entry.key: PlantContext.open(entry, settings.persistent_fault_interval_min,
-                                                settings.persistent_fault_max_open) for entry in plants.plants}
+                                                settings.persistent_fault_max_open, stream) for entry in plants.plants}
         app.state.started_at = to_db(datetime.now(timezone.utc))
         tasks: list[asyncio.Task] = []
         switch_interval = sys.getswitchinterval()
@@ -262,6 +264,8 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
             await asyncio.gather(*tasks, return_exceptions=True)   # 워커 스레드의 마지막 묶음이 끝날 때까지 기다린 뒤 닫는다
         for ctx in app.state.plants.values():
             ctx.close()
+        if stream is not None:
+            stream.close()
         sys.setswitchinterval(switch_interval)
 
     app = FastAPI(title="Skadi 앞단 수집 서버", lifespan=lifespan, root_path=settings.root_path)
