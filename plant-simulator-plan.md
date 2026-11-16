@@ -283,6 +283,8 @@ equipment:
 | `POST` · `GET /{공장}/anomalies…` | 이상 주입·멈춤·정답지 (5.4) |
 | `GET /{공장}/stream` | SSE로 새 값 실시간 전달 |
 
+**알람 이벤트**: 환경 변수 `REDIS_URL` 이 있으면 실시간 구간에서 `nelson_alarm` 행이 열리고 닫힐 때 Redis Stream `plant-sim:alarms` 에 `opened`·`cleared` 이벤트(공장 키 + 행 전체)를 `MAXLEN ~ 10000` 으로 넣는다. Alarm Worker 가 읽어 PostgreSQL 에 적는다. 백필 구간의 알람은 발행하지 않고 `/alarms` 로만 본다. Redis 오류는 수신을 멈추지 않는다.
+
 정비·고장 이력 API(`/maintenance`, `/failures`)는 없앴다. 이력은 이 서버가 아니라 다른 서버가 판단한다.
 
 ## 7. 수집 서버의 DB 쓰기와 시간 모드

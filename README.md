@@ -129,6 +129,7 @@ curl "localhost:8000/rhds/anomalies?from=2026-11-13T00:00:00Z" # 정답지 → �
 | 수집 서버 | | `INGEST_TOKEN` | 있으면 외부 `POST /ingest` 와 `POST /anomalies…`(주입·멈춤)는 헤더 `X-Ingest-Token` 필수. 통합 실행인데 없으면 둘 다 닫힌다(403). 통합 실행의 생성기는 거치지 않는다. 시뮬레이터 `HttpSender` 도 같은 변수를 읽어 헤더를 붙인다 |
 | 수집 서버 | | `PERSISTENT_FAULT_INTERVAL_MIN` | 있으면 모든 공장의 지속 고장 간격(분)을 덮어쓴다. 0 이면 끈다. 0 이상의 수가 아니면 시작하지 않는다 |
 | 수집 서버 | | `PERSISTENT_FAULT_MAX_OPEN` | 있으면 모든 공장의 동시 지속 고장 상한(기본 3)을 덮어쓴다. 1 이상의 정수가 아니면 시작하지 않는다 |
+| 수집 서버 | | `REDIS_URL` | 있으면 실시간 구간의 알람 열림·닫힘을 Redis Stream `plant-sim:alarms` 로 발행한다([알람 이벤트](#알람-이벤트-redis-streams)). 없으면 발행하지 않는다 |
 | 시뮬레이터 | `--plant` | `PLANT_CONFIG` | `config/plant_rhds.yaml` |
 | 시뮬레이터 | `--runtime` | `RUNTIME_CONFIG` | `config/runtime_rhds.yaml` |
 | 시뮬레이터 | `--time-mode` | | `runtime.yaml` 의 `time_mode` |
@@ -245,6 +246,21 @@ RFCC 는 `limits` 를 μ ± 3σ 로 다시 계산해 두었다(`limit_basis`). `
 
 `from`/`to` 는 ISO 8601 이다. 쿼리 문자열의 `+` 는 공백이 되므로 `Z`(UTC) 를 쓰거나 오프셋을 `%2B09:00` 으로 인코딩한다. 읽지 못하면 400.
 
+### 알람 이벤트 (Redis Streams)
+
+`REDIS_URL` 이 있으면 Nelson 알람 행이 열릴 때와 닫힐 때 한 건씩 Stream `plant-sim:alarms` 에 `XADD … MAXLEN ~ 10000` 으로 넣는다. 공장 다섯 곳이 한 Stream 을 함께 쓴다.
+
+| 필드 | 값 |
+| --- | --- |
+| `event` | `opened` / `cleared` |
+| `plant` | 공장 키 (`rhds` …) |
+| `alarm_id` … `value_at_occurrence` | 그 `nelson_alarm` 행의 컬럼 전부 (`/alarms` 와 같다). 값은 문자열, NULL 은 빈 문자열 |
+
+- 실시간 구간(`/health` 의 `live` = true)의 알람만 발행한다. 백필·재시작 뒤 밀린 구간의 알람은 `/alarms` 로만 보이므로, 소비 측은 시작할 때 `/alarms?open=true`(또는 `from`)로 한 번 채운다. 백필 중 열려 실시간에 닫힌 알람은 `cleared` 만 온다 — 행 전체가 들어 있으니 `(plant, alarm_id)` 로 upsert 한다.
+- 같은 묶음에서 열리고 닫힌 알람은 `opened`·`cleared` 가 연달아 오고, 두 이벤트 모두 닫힌 뒤의 행 값을 싣는다. 한 묶음의 이벤트는 시각 순이다.
+- 열린 동안의 `hit_count`·`last_hit_at` 갱신은 발행하지 않는다.
+- Redis 가 응답하지 않으면(1초 제한) 경고 로그만 남기고 그 이벤트는 버린다. 수신·판정은 멈추지 않는다.
+
 ## DB (`data/{공장}.db`)
 
 스키마 v3. 시각 컬럼은 모두 UTC ISO 문자열이고 태그는 `(equip_id, tag_id)` 복합키다. 배치는 컴퓨터 시계가 아니라 수신한 측정 시각의 최대값(`sim_now`)을 보고
@@ -293,6 +309,7 @@ curl https://u4-2.skala-us.com/plant-sim/health
 
 - 이미지는 Harbor 비공개 프로젝트(`harbor.uru42.space`)에 있으므로 Deployment 에 `imagePullSecrets: uru42-harbor-pull` 을 적어 둔다(네임스페이스에 그 Secret 이 있어야 한다: `kubectl -n u4-2 get secret uru42-harbor-pull`). 같은 네임스페이스의 `harbor-cred` 는 `harbor.skala-us.com` 인증이라 이 이미지를 받지 못한다(ImagePullBackOff "no basic auth credentials").
 - **DB v3 — 이전 버전에서 올릴 때는 PVC 의 기존 DB 파일(`/app/data/*.db*`)을 지우고 다시 띄운다.** 이전 파일은 열리지 않는다(수집 서버가 알리고 멈춘다).
+- 알람 이벤트는 Deployment 의 `REDIS_URL`(`redis://clx-redis:6379`, 같은 네임스페이스의 `clx-redis` Service) 로 발행한다. Redis 가 없어도 파드는 뜨고 경고 로그만 남긴다.
 - 지속 고장은 Deployment 에 환경 변수 `PERSISTENT_FAULT_INTERVAL_MIN`(간격 분, 0 이면 끔)·`PERSISTENT_FAULT_MAX_OPEN`(공장당 동시 상한)을 더해 조절한다. 없으면 runtime yaml 값(15분·3개).
 - 첫 기동은 다섯 공장 하루치 백필이다. CPU 500m 에서 약 40분 걸리며(아래 실측) 그동안 `/health` 의 `sim_now` 가 전진하고 `live` 는 false 다. 파드는 `/health` 가 응답하면 Ready 가 되므로 백필 중에도 조회 API 는 쓸 수 있다.
 - 백필 기간을 늘리려면(`--backfill-days`) PVC 의 DB 파일을 지우고 다시 채워야 한다. 재개는 마지막 시각부터만 이어 간다.
