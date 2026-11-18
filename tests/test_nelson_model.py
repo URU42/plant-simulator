@@ -43,7 +43,9 @@ def test_stop_returns_equipment_to_normal(rhds):
     t = T0.timestamp() + 60
     g = NelsonGenerator(plant, rt, Fixed([AnomalyEvent("I1", "injected", "C-3101", 6, t, t + 120)]), spontaneous=False)
     s = g.generate(T0, T0 + timedelta(minutes=10))
-    assert not [x for x in s if x.equip_id == "C-3101" and x.status == "Bad" and x.ts.timestamp() >= t + 120 + 60 + 150]
+    # SI-C3101 은 구동 전동기 M-3101 의 회전속도를 따르므로 전동기의 우연한 잡음 위반도 함께 나온다 (사건과 무관)
+    assert not [x for x in s if x.equip_id == "C-3101" and x.tag_id != "SI-C3101" and x.status == "Bad"
+                and x.ts.timestamp() >= t + 120 + 60 + 150]
 
 def test_spontaneous_union_ratio_near_ten_percent(rhds):
     plant, rt = rhds
@@ -81,6 +83,19 @@ def test_rfcc_driven_speed_equal(config_dir):
     s = NelsonGenerator(plant, rt, spontaneous=False).generate(T0, T0 + timedelta(minutes=2))
     speed = lambda eq: [x.value for x in s if x.equip_id == eq and plant.tag_by_key()[(eq, x.tag_id)].signal == "speed"]
     assert speed("B-1201") == speed("E-1202") and speed("C-1401") == speed("T-1401")
+
+@pytest.mark.parametrize("key", ["rhds", "vrds"])
+def test_compressor_speed_follows_motor(config_dir, key):
+    """직결 전동기는 압축기와 같은 값, M-3101 → GB-3101 → C-3101 연쇄는 기어비 10 만큼 정확히 10배다."""
+    plant, rt = load_plant(config_dir / f"plant_{key}.yaml"), load_runtime(config_dir / f"runtime_{key}.yaml")
+    s = NelsonGenerator(plant, rt, spontaneous=False).generate(T0, T0 + timedelta(minutes=2))
+    speed = lambda eq: [x.value for x in s if x.equip_id == eq and plant.tag_by_key()[(eq, x.tag_id)].signal == "speed"]
+    if key == "vrds":
+        assert speed("M-4102") == speed("C-4102")
+        return
+    assert speed("M-3102") == speed("C-3102") and speed("GB-3101") == speed("C-3101")
+    assert [round(v * 10, 1) for v in speed("M-3101")] == speed("C-3101")
+    assert not [x for x in s if x.tag_id.startswith("SI-") and x.status == "Bad"]   # 연쇄로 따라가도 정상 구간은 깨끗하다
 
 class Overlapping(Fixed):
     """요청한 [start, end) 와 겹치는 사건만 돌려주는 소스 (계약의 최소 구현)."""

@@ -8,8 +8,8 @@
 
 plant:
   plant_id: PL-RFCC
-  name: 가상 정유단지 RFCC
-  config_version: 3
+  name: "RFCC(중질유 유동상 촉매 분해)"
+  config_version: 4
   unit_groups:
     - id: UG-RFCC-01
       name: 원료 공급

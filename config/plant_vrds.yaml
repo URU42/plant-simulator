@@ -4,11 +4,12 @@
 # - 알람·정지값은 자료에 없어 CDU·HOU 의 같은 신호 경고→알람→정지 간격을 경고값에 적용했다 (규칙은 limit_basis). 유효숫자 3자리.
 # - decimals 는 데이터의 소수 자릿수.
 # - 온도 10초, 나머지 1초. seed_key 는 공장 접두어를 붙여 다른 공장과 겹치지 않는다.
+# - 합성 추가 (2026-11-18): 시나리오의 전동기·기어박스 구성을 위해 자료에 없는 M-4102 를 넣었다. 한계값은 없고 μ·σ 는 합성값이다. 피구동 압축기의 회전속도 μ·σ 와 비율을 맞춰 driven_by 로 속도를 공유한다.
 
 plant:
   plant_id: PL-VRDS
   name: "VRDS (감압 잔사유 수첨탈황)"
-  config_version: 4
+  config_version: 5
   unit_groups:
     - id: UG-VRDS-01
       name: "원료 공급"
@@ -40,6 +41,7 @@ equipment_types:
   - { type: PM, name: 펌프, prefix: P, kind: pump }
   - { type: CC, name: 압축기, prefix: C, kind: compressor }
   - { type: FN, name: 팬, prefix: F, kind: fan }
+  - { type: MT, name: 전동기, prefix: M, kind: motor }
 
 # 표준 태그 (신호 종류 · 대표 접두어 · 대표 단위). 태그별 실제 단위는 각 태그에 적는다
 signals:
@@ -127,10 +129,49 @@ equipment:
           seed_key: vrds-r006,
           control: { mean: 165.3, sigma: 0.7011922628681617 } }
   # ---------------- UNIT-VRDS-02 보충 수소 압축 ----------------
+  # 합성 추가 (2026-11-18): 자료에 없는 구동 전동기(C-4102 직결). 한계값 없음, μ·σ 는 합성값. 회전속도는 C-4102 와 같다
+  - equip_id: M-4102
+    name: "보충 수소 압축기 구동 전동기 (Make-up Hydrogen Compressor Motor)"
+    type: MT
+    unit_id: UNIT-VRDS-02
+    tags:
+      - { tag_id: VI-A-M4102,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "구동측 케이싱 진동",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: vrds-r044,
+          control: { mean: 1.5, sigma: 0.04 } }
+      - { tag_id: TI-B-M4102,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "구동측 베어링 온도",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: vrds-r045,
+          control: { mean: 65.0, sigma: 0.18 } }
+      - { tag_id: II-M4102,
+          signal: current,
+          unit: "A",
+          description: "전동기 전류",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: vrds-r046,
+          control: { mean: 210.0, sigma: 0.6 } }
+      - { tag_id: SI-M4102,
+          signal: speed,
+          unit: "rpm",
+          description: "전동기 회전속도",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: vrds-r047,
+          control: { mean: 590.0, sigma: 0.2499543152702556 } }
   - equip_id: C-4102
     name: "보충 수소 압축기 (Make-up Hydrogen Compressor)"
     type: CC
     unit_id: UNIT-VRDS-02
+    driven_by: M-4102
     tags:
       - { tag_id: VI-A-C4102,
           signal: vibration,
