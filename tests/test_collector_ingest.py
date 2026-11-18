@@ -31,10 +31,10 @@ def _post(client, batch: IngestBatch, **overrides):
 
 def test_master_is_seeded_from_plant_config(client):
     storage = client.app.state.plants["plant"].storage
-    assert storage.count("equipment") == 6
-    assert storage.count("equipment_tag") == 43
+    assert storage.count("equipment") == 9
+    assert storage.count("equipment_tag") == 57
     assert storage.count("unit") == 6
-    assert storage.count("equipment_type") == 3
+    assert storage.count("equipment_type") == 5
     assert storage.count("tag_std") == 15
     row = storage.query_dicts("SELECT * FROM equipment_tag WHERE equip_id = 'P-3101' AND tag_id = 'VI-A-P3101'")[0]
     assert (row["control_mean"], row["control_sigma"]) == (1.65, 0.04614035877985053)

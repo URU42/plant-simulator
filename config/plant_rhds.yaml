@@ -4,11 +4,12 @@
 # - 알람·정지값은 자료에 없어 CDU·HOU 의 같은 신호 경고→알람→정지 간격을 경고값에 적용했다 (규칙은 limit_basis). 유효숫자 3자리.
 # - decimals 는 데이터의 소수 자릿수.
 # - 온도 10초, 나머지 1초. seed_key 는 공장 접두어를 붙여 다른 공장과 겹치지 않는다.
+# - 합성 추가 (2026-11-18): 시나리오의 전동기·기어박스 구성을 위해 자료에 없는 M-3101·GB-3101·M-3102 를 넣었다. 한계값은 없고 μ·σ 는 합성값이다. 피구동 압축기의 회전속도 μ·σ 와 비율을 맞춰 driven_by 로 속도를 공유한다.
 
 plant:
   plant_id: PL-RHDS
   name: "RHDS (상압 잔사유 수첨탈황)"
-  config_version: 4
+  config_version: 5
   unit_groups:
     - id: UG-RHDS-01
       name: "원료 공급"
@@ -40,6 +41,8 @@ equipment_types:
   - { type: PM, name: 펌프, prefix: P, kind: pump }
   - { type: CC, name: 압축기, prefix: C, kind: compressor }
   - { type: FN, name: 팬, prefix: F, kind: fan }
+  - { type: MT, name: 전동기, prefix: M, kind: motor }
+  - { type: GB, name: 기어박스, prefix: GB, kind: gearbox }
 
 # 표준 태그 (신호 종류 · 대표 접두어 · 대표 단위). 태그별 실제 단위는 각 태그에 적는다
 signals:
@@ -127,10 +130,49 @@ equipment:
           seed_key: rhds-r006,
           control: { mean: 165.8, sigma: 0.603095025961503 } }
   # ---------------- UNIT-RHDS-02 보충 수소 압축 ----------------
+  # 합성 추가 (2026-11-18): 자료에 없는 구동 전동기(C-3102 직결). 한계값 없음, μ·σ 는 합성값. 회전속도는 C-3102 와 같다
+  - equip_id: M-3102
+    name: "보충 수소 압축기 구동 전동기 (Make-up Hydrogen Compressor Motor)"
+    type: MT
+    unit_id: UNIT-RHDS-02
+    tags:
+      - { tag_id: VI-A-M3102,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "구동측 케이싱 진동",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: rhds-r044,
+          control: { mean: 1.5, sigma: 0.04 } }
+      - { tag_id: TI-B-M3102,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "구동측 베어링 온도",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: rhds-r045,
+          control: { mean: 65.0, sigma: 0.18 } }
+      - { tag_id: II-M3102,
+          signal: current,
+          unit: "A",
+          description: "전동기 전류",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r046,
+          control: { mean: 210.0, sigma: 0.6 } }
+      - { tag_id: SI-M3102,
+          signal: speed,
+          unit: "rpm",
+          description: "전동기 회전속도",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r047,
+          control: { mean: 590.0, sigma: 0.25673012683495405 } }
   - equip_id: C-3102
     name: "보충 수소 압축기 (Make-up Hydrogen Compressor)"
     type: CC
     unit_id: UNIT-RHDS-02
+    driven_by: M-3102
     tags:
       - { tag_id: VI-A-C3102,
           signal: vibration,
@@ -213,10 +255,105 @@ equipment:
           seed_key: rhds-r014,
           control: { mean: 590.0, sigma: 0.25673012683495405 } }
   # ---------------- UNIT-RHDS-03 수소 순환 ----------------
+  # 합성 추가 (2026-11-18): 자료에 없는 가변속 전동기. 한계값 없음, μ·σ 는 합성값. 4극 1,790 rpm. 회전속도 μ·σ 는 C-3101 의 1/기어비(1790/9210.1)
+  - equip_id: M-3101
+    name: "순환가스 압축기 구동 가변속 전동기 (Recycle Gas Compressor VFD Motor)"
+    type: MT
+    unit_id: UNIT-RHDS-03
+    tags:
+      - { tag_id: VI-A-M3101,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "구동측 케이싱 진동",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: rhds-r048,
+          control: { mean: 1.2, sigma: 0.04 } }
+      - { tag_id: TI-B-M3101,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "구동측 베어링 온도",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: rhds-r049,
+          control: { mean: 68.0, sigma: 0.18 } }
+      - { tag_id: II-M3101,
+          signal: current,
+          unit: "A",
+          description: "전동기 전류",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r050,
+          control: { mean: 310.0, sigma: 0.8 } }
+      - { tag_id: SI-M3101,
+          signal: speed,
+          unit: "rpm",
+          description: "전동기 회전속도",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r051,
+          control: { mean: 1790.0, sigma: 1.4427497961334634 } }
+  # 합성 추가 (2026-11-18): 자료에 없는 증속 기어박스. 한계값 없음, μ·σ 는 합성값. 출력축 회전속도는 C-3101 과 같다
+  # 구동 연쇄 M-3101 → GB-3101 → C-3101: 피구동 speed 가 구동기 speed 를 따르려면 GB-3101 이 C-3101 보다 앞에 있어야 한다
+  - equip_id: GB-3101
+    name: "순환가스 압축기 증속 기어박스 (Recycle Gas Compressor Gearbox)"
+    type: GB
+    unit_id: UNIT-RHDS-03
+    driven_by: M-3101
+    tags:
+      - { tag_id: VI-O-GB3101,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "출력축(고속)측 케이싱 진동",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: rhds-r052,
+          control: { mean: 1.8, sigma: 0.05 } }
+      - { tag_id: VI-I-GB3101,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "입력축(저속)측 케이싱 진동",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: rhds-r053,
+          control: { mean: 1.4, sigma: 0.04 } }
+      - { tag_id: TI-B-GB3101,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "출력축 베어링 온도",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: rhds-r054,
+          control: { mean: 72.0, sigma: 0.18 } }
+      - { tag_id: TI-LO-GB3101,
+          signal: oil_temp,
+          unit: "DEG C",
+          description: "윤활유 공급 온도",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: rhds-r055,
+          control: { mean: 48.0, sigma: 0.18 } }
+      - { tag_id: PI-LO-GB3101,
+          signal: oil_pressure,
+          unit: "bar(g)",
+          description: "윤활유 공급 압력",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: rhds-r056,
+          control: { mean: 2.2, sigma: 0.004 } }
+      - { tag_id: SI-GB3101,
+          signal: speed,
+          unit: "rpm",
+          description: "출력축 회전속도",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r057,
+          control: { mean: 9210.1, sigma: 7.423391004116654 } }
   - equip_id: C-3101
     name: "순환가스 압축기 (Recycle Gas Compressor)"
     type: CC
     unit_id: UNIT-RHDS-03
+    driven_by: GB-3101
     tags:
       - { tag_id: XI-X-C3101,
           signal: shaft_vibration,

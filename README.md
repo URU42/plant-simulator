@@ -5,11 +5,11 @@ Skadi 앞단 데이터 생성기. 가상 공장 다섯 곳의 설비 센서 값�
 
 | 키(경로) | plant_id | 공장 | 설비 · 태그 | 주기 | 근거 |
 | --- | --- | --- | --- | --- | --- |
-| `/rfcc/` | PL-RFCC | RFCC 회전기계 | 12 · 81 | 온도 10초 · 나머지 1초 | [RFCC 설계](docs/superpowers/specs/2026-11-09-rfcc-simulator-design.md), 샘플 `rfcc-20261109/` |
+| `/rfcc/` | PL-RFCC | RFCC(중질유 유동상 촉매 분해) | 12 · 81 | 온도 10초 · 나머지 1초 | [RFCC 설계](docs/superpowers/specs/2026-11-09-rfcc-simulator-design.md), 샘플 `rfcc-20261109/` |
 | `/cdu/` | PL-CDU | 상압증류 | 7 · 46 | 온도 10초 · 나머지 1초 | [다중 공장 설계](docs/superpowers/specs/2026-11-09-multi-plant-design.md), 샘플 `cdu-sample/` |
 | `/hou/` | PL-HOU | 수첨분해 | 7 · 61 | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `hou-plant-sample/` |
-| `/rhds/` | PL-RHDS | 상압 잔사유 수첨탈황 | 6 · 43 | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `RHDS_VRDS_v3/` |
-| `/vrds/` | PL-VRDS | 감압 잔사유 수첨탈황 | 6 · 43 | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `RHDS_VRDS_v3/` |
+| `/rhds/` | PL-RHDS | 상압 잔사유 수첨탈황 | 9 · 57 | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `RHDS_VRDS_v3/` |
+| `/vrds/` | PL-VRDS | 감압 잔사유 수첨탈황 | 7 · 47 | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `RHDS_VRDS_v3/` |
 
 샘플 묶음 폴더는 git 밖이다. 거기서 옮긴 마스터 값(계층, 설비, 태그명, 설명, 단위, 정상 기준, 경고/알람/정지 상·하한(참고값), 근거)과 Nelson 기준 μ·σ(`baselines.json`)가 `config/plant_*.yaml` 에 있다. 설계와 계획은 [기획서](plant-simulator-plan.md), [Nelson 이상 설계](docs/superpowers/specs/2026-11-12-nelson-anomaly-design.md).
 

@@ -3,7 +3,7 @@ import pytest
 
 from common.config_models import load_plant, load_runtime
 
-EXPECTED = {"cdu": ("PL-CDU", 7, 46), "hou": ("PL-HOU", 7, 61), "rhds": ("PL-RHDS", 6, 43), "vrds": ("PL-VRDS", 6, 43)}
+EXPECTED = {"cdu": ("PL-CDU", 7, 46), "hou": ("PL-HOU", 7, 61), "rhds": ("PL-RHDS", 9, 57), "vrds": ("PL-VRDS", 7, 47)}
 
 
 @pytest.mark.parametrize("key", list(EXPECTED))
@@ -28,7 +28,8 @@ def test_master_values_match_excel_samples(config_dir):
     assert hou[("C-2301", "TI-2301A")].interval_sec == 10 and hou[("C-2301", "TI-2301A")].description == "구동측 저널 베어링 패드 온도"
     rhds = load_plant(config_dir / "plant_rhds.yaml")
     assert [k for k in rhds.tag_keys() if k[1].startswith("TI-B-") and k[1].endswith("3101")] == [
-        ("P-3101", "TI-B-P3101"), ("C-3101", "TI-B-C3101"), ("F-3101", "TI-B-F3101")]   # 자료의 TI-B-3101 셋
+        ("P-3101", "TI-B-P3101"), ("M-3101", "TI-B-M3101"), ("GB-3101", "TI-B-GB3101"), ("C-3101", "TI-B-C3101"),
+        ("F-3101", "TI-B-F3101")]   # 자료의 TI-B-3101 셋 + 합성 추가 전동기·기어박스
     s = rhds.tag_by_key()[("C-3101", "SI-C3101")]
     assert (s.limits.warn_lo, s.limits.warn_hi) == (8500, 10000) and s.signal == "speed"
     assert rhds.tag_by_key()[("F-3101", "PDI-F3101")].signal == "differential_pressure"
@@ -42,7 +43,8 @@ def test_master_values_match_excel_samples(config_dir):
 @pytest.mark.parametrize("key", ["rhds", "vrds"])
 def test_rhds_vrds_alarm_trip_follow_cdu_hou_gaps(key, config_dir):
     """경고는 자료 그대로, 알람·정지는 CDU·HOU 의 같은 신호 간격 (차압 하한·속도 하한만 정지 없음)."""
-    tags = load_plant(config_dir / f"plant_{key}.yaml").tag_by_key()
+    plant = load_plant(config_dir / f"plant_{key}.yaml")
+    tags = plant.tag_by_key()
     n = {"rhds": "3", "vrds": "4"}[key]                                                  # 설비 번호대
     vib = tags[(f"P-{n}101", f"VI-A-P{n}101")].limits
     assert (vib.warn_hi, vib.alarm_hi, vib.trip_hi) == (4.5, 7.1, 11)                    # ISO 20816 경계
@@ -50,7 +52,8 @@ def test_rhds_vrds_alarm_trip_follow_cdu_hou_gaps(key, config_dir):
     assert (tb.warn_hi, tb.alarm_hi, tb.trip_hi) == (85, 95, 105)
     ps = tags[(f"P-{n}101", f"PI-S-P{n}101")].limits
     assert (ps.warn_lo, ps.alarm_lo, ps.trip_lo) == (3.5, 2.8, 2.24)
-    assert all(t.limits.alarm_hi is not None or t.limits.alarm_lo is not None for t in tags.values())
+    assert all(t.limits.alarm_hi is not None or t.limits.alarm_lo is not None
+               for e in plant.equipment if e.type not in ("MT", "GB") for t in e.tags)   # 합성 추가 설비는 한계값 없음
 
 
 @pytest.mark.parametrize("key", ["rfcc", "cdu", "hou", "rhds", "vrds"])
