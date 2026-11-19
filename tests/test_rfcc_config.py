@@ -6,14 +6,17 @@ TEMPS = {"bearing_temp", "suction_temp", "discharge_temp", "oil_temp"}
 
 def test_rfcc_plant_matches_sample_package(rfcc_plant_path):
     plant = load_plant(rfcc_plant_path)
-    tags = plant.all_tags()
-    assert len(plant.equipment) == 12 and len(tags) == 81
+    tags = [t for t in plant.all_tags() if "(synthetic)" not in (t.description or "")]   # 합성 추가 STT-T-1401 제외
+    assert len(plant.equipment) == 12 and len(tags) == 81 and len(plant.all_tags()) == 82
     assert len(plant.unit_ids()) == 8 and len(plant.plant.unit_groups) == 5
     temps = [t for t in tags if t.signal in TEMPS]
     assert len(temps) == 16 and all(t.interval_sec == 10 for t in temps)
     assert all(t.interval_sec == 1 for t in tags if t.signal not in TEMPS)
-    assert all(t.limits.warn_lo < t.control.mean < t.limits.warn_hi for t in tags)   # 통계 경고만
-    assert all(t.limits.alarm_hi is None and t.limits.trip_hi is None for t in tags)
+    assert all(t.limits.warn_lo < t.control.mean < t.limits.warn_hi for t in tags)   # 통계 경고 μ±3σ
+    for t in plant.all_tags():          # 알람 μ±4.5σ·정지 μ±6σ 는 합성 (2026-11-19)
+        mu, sg = t.control.mean, t.control.sigma
+        assert (t.limits.alarm_hi, t.limits.trip_hi) == (round(mu + 4.5 * sg, 4), round(mu + 6 * sg, 4)), t.tag_id
+        assert (t.limits.alarm_lo, t.limits.trip_lo) == (round(mu - 4.5 * sg, 4), round(mu - 6 * sg, 4)), t.tag_id
     by_key = plant.tag_by_key()
     assert (by_key[("P-1101A", "VI-P-1101A")].control.mean, by_key[("P-1101A", "VI-P-1101A")].control.sigma) == (1.4575, 0.03761084502112299)
     assert by_key[("E-1202", "ZI-E-1202")].decimals == 5 and by_key[("B-1201", "FI-B-1201")].decimals == 4

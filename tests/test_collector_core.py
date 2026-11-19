@@ -13,13 +13,13 @@ T0 = datetime(2026, 11, 9, 1, 0, tzinfo=timezone.utc)
 
 @pytest.fixture
 def ctx(rfcc_plant_path, rfcc_runtime_path):
-    c = PlantContext.open(PlantEntry(key="rfcc", plant=str(rfcc_plant_path), runtime=str(rfcc_runtime_path), db=":memory:"))
+    c = PlantContext.open(PlantEntry(key="rfcc", plant=str(rfcc_plant_path), runtime=str(rfcc_runtime_path), db=":memory:"), modes={})
     yield c
     c.close()
 
 
 def _samples(start, n, value=1.45):
-    return [Sample(equip_id="P-1101A", tag_id="VI-P-1101A", ts=start + timedelta(seconds=i), value=value, status="Good") for i in range(n)]
+    return [Sample(equip_id="P-1101A", tag_id="VI-P-1101A", ts=start + timedelta(seconds=i), value=value) for i in range(n)]
 
 
 def test_receive_stores_dedupes_and_rejects_old_rows(ctx):
@@ -43,9 +43,8 @@ def test_receive_publishes_only_with_subscribers(ctx, monkeypatch):
 
 
 def test_storage_recent_values_are_last_n_per_tag_oldest_first(ctx):
-    ctx.receive("b-1", "T", _samples(T0, 5, 1.0) + [Sample(equip_id="P-1101A", tag_id="TI-P-1101A", ts=T0, value=65.0, status="Bad")],
+    ctx.receive("b-1", "T", _samples(T0, 5, 1.0) + [Sample(equip_id="P-1101A", tag_id="TI-P-1101A", ts=T0, value=65.0)],
                 to_db(T0))
-    ctx.receive("b-2", "T", [Sample(equip_id="P-1101A", tag_id="VI-P-1101A", ts=T0 + timedelta(seconds=5 + i), value=2.0 + i,
-                                    status="Good") for i in range(2)], to_db(T0))
+    ctx.receive("b-2", "T", [Sample(equip_id="P-1101A", tag_id="VI-P-1101A", ts=T0 + timedelta(seconds=5 + i), value=2.0 + i) for i in range(2)], to_db(T0))
     assert ctx.storage.recent_values(3) == {("P-1101A", "VI-P-1101A"): [1.0, 2.0, 3.0], ("P-1101A", "TI-P-1101A"): [65.0]}
     assert ctx.storage.recent_values(14)[("P-1101A", "VI-P-1101A")] == [1.0] * 5 + [2.0, 3.0]

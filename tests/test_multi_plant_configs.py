@@ -3,7 +3,7 @@ import pytest
 
 from common.config_models import load_plant, load_runtime
 
-EXPECTED = {"cdu": ("PL-CDU", 7, 46), "hou": ("PL-HOU", 7, 61), "rhds": ("PL-RHDS", 9, 57), "vrds": ("PL-VRDS", 7, 47)}
+EXPECTED = {"cdu": ("PL-CDU", 7, 46), "hou": ("PL-HOU", 7, 62), "rhds": ("PL-RHDS", 9, 58), "vrds": ("PL-VRDS", 7, 48)}
 
 
 @pytest.mark.parametrize("key", list(EXPECTED))
@@ -53,7 +53,8 @@ def test_rhds_vrds_alarm_trip_follow_cdu_hou_gaps(key, config_dir):
     ps = tags[(f"P-{n}101", f"PI-S-P{n}101")].limits
     assert (ps.warn_lo, ps.alarm_lo, ps.trip_lo) == (3.5, 2.8, 2.24)
     assert all(t.limits.alarm_hi is not None or t.limits.alarm_lo is not None
-               for e in plant.equipment if e.type not in ("MT", "GB") for t in e.tags)   # 합성 추가 설비는 한계값 없음
+               for e in plant.equipment if e.type not in ("MT", "GB") for t in e.tags
+               if "(synthetic)" not in (t.description or ""))   # 합성 추가 설비·태그는 한계값 없음
 
 
 @pytest.mark.parametrize("key", ["rfcc", "cdu", "hou", "rhds", "vrds"])

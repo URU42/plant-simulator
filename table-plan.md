@@ -1,5 +1,8 @@
 # 설비 DB 테이블 정리
 
+> **2026-11-19 변경 (시나리오 주입형 전환):** 수집 서버의 Nelson 판정·`nelson_alarm`·`/alarms`·Redis 알람 Stream 을 지웠고, `anomaly_event` 는 주입한 고장 모드만 담는 형식으로 바뀌었다(스키마 v4).
+> 아래 `nelson_alarm` 을 이상 저장의 기준으로 삼은 6절 이후 내용은 이전 기준이다. 현재 구조는 [README](README.md)·[전환 기록](docs/superpowers/plans/2026-11-19-scenario-driven.md).
+
 설비 데이터로 DB 테이블을 구성하기 전에, 지금 어떤 공장·설비·태그가 있고 그 값이 어느 테이블에 들어가는지 정리한다.
 
 - **기준**: 2026-11-12, Nelson 이상 생성·판정 반영(`feat/nelson-anomaly`). 배포 목록 `config/plants.yaml` 의 다섯 공장(RFCC·CDU·HOU·RHDS·VRDS). 수첨탈황(HDS)은 배포에서 빠져 있어 제외했다.

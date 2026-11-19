@@ -2,18 +2,20 @@
 
 실행: python -m collector.app --plants config/plants.yaml --port 8000
 라우트는 한 번만 정의하고 경로 앞의 {plant_key} 로 공장 문맥(PlantContext)을 고른다. 루트 / 는 공장 목록, /health 는 전체 상태.
-통합 실행에서는 /{공장}/anomalies 로 이상 사건을 주입·멈추고 정답지를 낸다.
+통합 실행에서는 /{공장}/anomalies 로 고장 모드(가상 시나리오)를 주입·멈추고 정답지를 낸다. 정상 운전에는 이상이 없다.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
 import hmac
+import json
 import logging
 import math
 import os
 import sys
 from contextlib import asynccontextmanager
+from typing import AsyncIterator, Literal
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -21,15 +23,16 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 
-from collector.alarm_stream import AlarmStream
-from collector.anomaly_book import Busy
+from collector.anomaly_book import Busy, NotApplicable
 from collector.ingest import RawBatch, schema_supported, validate_samples
 from collector.plant_context import PlantContext
 from collector.plants import PlantEntry, PlantsConfig, load_plants
 from collector.settings import Settings
+from collector.stream import QUEUE_SIZE
 from common.config_models import ConfigError
+from simulator.fault import load_fault_modes
 from common.timefmt import from_db, parse_iso, to_db
 
 STATIC_DIR = Path(__file__).with_name("static")     # 디버깅 화면
@@ -103,9 +106,9 @@ def equipment(ctx: PlantContext = Depends(context)):
 
 @router.get("/current")
 def current_all(ctx: PlantContext = Depends(context)):
-    """모든 태그의 현재값 + status. 순서는 /equipment 와 같다."""
+    """모든 태그의 현재값. 순서는 /equipment 와 같다."""
     rows = {(r["equip_id"], r["tag_id"]): r for r in ctx.storage.query_dicts("SELECT * FROM tag_current")}
-    return [ctx.with_status(rows.get((e["equip_id"], t["tag_id"])), (e["equip_id"], t["tag_id"]))
+    return [ctx.current_row(rows.get((e["equip_id"], t["tag_id"])), (e["equip_id"], t["tag_id"]))
             for e in ctx.listing for t in e["tags"]]
 
 
@@ -114,7 +117,7 @@ def tag_current(equip_id: str, tag_id: str, ctx: PlantContext = Depends(context)
     key = (equip_id, tag_id)
     if key not in ctx.tag_keys:
         raise HTTPException(404, f"unknown tag {equip_id}/{tag_id}")
-    return ctx.with_status(ctx.storage.current(key), key)
+    return ctx.current_row(ctx.storage.current(key), key)
 
 
 @router.get("/timeseries")
@@ -125,38 +128,20 @@ def timeseries(equip_id: str, tag_id: str, from_: str = Query(alias="from"), to:
     if interval not in ("10m", "1h"):
         raise HTTPException(400, "interval must be 10m or 1h")
     return ctx.storage.query_dicts(
-        f"SELECT equip_id, tag_id, bucket_start AS ts, avg, min, max, sd, count, status FROM ts_{interval} "
+        f"SELECT equip_id, tag_id, bucket_start AS ts, avg, min, max, sd, count FROM ts_{interval} "
         "WHERE equip_id = ? AND tag_id = ? AND bucket_start >= ? AND bucket_start < ? ORDER BY bucket_start",
         (equip_id, tag_id, query_time("from", from_), query_time("to", to)),
     )
 
 
-@router.get("/alarms")
-def alarms(equip_id: str | None = None, rule: int | None = Query(default=None, ge=1, le=8),
-           from_: str | None = Query(default=None, alias="from"), to: str | None = None, open_: bool = Query(default=False, alias="open"),
-           ctx: PlantContext = Depends(context)):
-    """Nelson 알람 (nelson_alarm). from/to 는 구간과 겹치는 알람(열린 시각 < to, 아직 열렸거나 닫힌 시각 ≥ from), open=true 는 열린 것만."""
-    where, params = ["1=1"], []
-    if equip_id:
-        where.append("equip_id = ?"); params.append(equip_id)
-    if rule is not None:
-        where.append("rule = ?"); params.append(rule)
-    if from_:
-        where.append("(cleared_at IS NULL OR cleared_at >= ?)"); params.append(query_time("from", from_))
-    if to:
-        where.append("occurred_at < ?"); params.append(query_time("to", to))
-    if open_:
-        where.append("cleared_at IS NULL")
-    return ctx.storage.query_dicts(f"SELECT * FROM nelson_alarm WHERE {' AND '.join(where)} ORDER BY occurred_at DESC", params)
-
-
-# --- 이상 사건: 주입·멈춤·정답지 (Nelson 이상 설계 §4.6) ----------------------------
+# --- 고장 모드 사건: 주입·멈춤·정답지 ------------------------------------------
 START_DELAY_SEC = 3     # 주입·멈춤은 시뮬레이터 시각 기준 이만큼 뒤부터. 장부가 이미 만든 구간 끝보다 앞서면 더 미룬다
 
 
 class InjectBody(BaseModel):
     equip_id: str
-    rule: int = Field(ge=1, le=8)
+    mode: str               # config/fault_modes.yaml 의 고장 모드 id
+    speed: Literal[1, 3, 5, 10] = 1     # 진행 속도 (simulator.fault.SPEEDS)
 
 
 def require_live(request: Request, ctx: PlantContext) -> None:
@@ -187,10 +172,23 @@ def _require_equipment(ctx: PlantContext, equip_id: str) -> None:
         raise HTTPException(404, f"unknown equipment {equip_id}")
 
 
+@router.get("/fault-modes")
+def fault_modes(ctx: PlantContext = Depends(context)):
+    """이 공장에서 걸 수 있는 고장 모드와 대상 설비. 정답 분류(label)·기대값은 싣지 않는다 (정답지는 /anomalies)."""
+    out = []
+    for mode in ctx.book.modes.values():
+        equip_ids = [e.equip_id for e in ctx.plant.equipment if mode in ctx.book.applicable(e.equip_id)]
+        if equip_ids:
+            out.append({"mode": mode.id, "name": mode.name, "equip_ids": equip_ids, "unobserved": mode.unobserved,
+                        "stages": [{"id": s.id, "name": s.name, "at_sec": s.at_sec} for s in mode.stages]})
+    return out
+
+
 @router.post("/anomalies", status_code=201)
 async def inject_anomaly(request: Request, ctx: PlantContext = Depends(context)):
-    """설비 하나에 규칙 하나의 사건을 연다. 멈출 때까지 간다. 그 설비에 주입·지속 고장이 살아 있으면 409.
-    start_at 은 실제 시작 시각(ceil(sim_now)+3, 생성기가 이미 그 뒤까지 만들었으면 그 끝)."""
+    """설비 하나에 고장 모드 하나를 건다. 멈출 때까지 간다. 그 설비에 안 멈춘 사건이 있으면 409,
+    모르는 고장 모드이거나 그 설비에 걸 수 없으면 422. start_at 은 실제 시작 시각(ceil(sim_now)+3,
+    생성기가 이미 그 뒤까지 만들었으면 그 끝)."""
     require_live(request, ctx)                    # 본문보다 먼저 (post_ingest 와 같은 이유)
     try:
         body = InjectBody.model_validate(await request.json())
@@ -198,16 +196,18 @@ async def inject_anomaly(request: Request, ctx: PlantContext = Depends(context))
         raise HTTPException(422, f"invalid body: {str(e)[:300]}")
     _require_equipment(ctx, body.equip_id)
     try:
-        event = await asyncio.to_thread(lambda: ctx.book.inject(body.equip_id, body.rule, event_time(ctx)))
+        event = await asyncio.to_thread(lambda: ctx.book.inject(body.equip_id, body.mode, event_time(ctx), body.speed))
     except Busy:
-        raise HTTPException(409, f"{body.equip_id} has a live injected or persistent fault: stop it first")
-    return {"event_id": event.event_id, "equip_id": event.equip_id, "rule": event.rule, "start_at": _utc(event.start)}
+        raise HTTPException(409, f"{body.equip_id} has a live fault: stop it first")
+    except NotApplicable as e:
+        raise HTTPException(422, str(e))
+    return {"event_id": event.event_id, "equip_id": event.equip_id, "mode": event.mode.id, "speed": event.speed,
+            "start_at": _utc(event.start)}
 
 
 @router.post("/anomalies/stop")
 async def stop_all_anomalies(request: Request, ctx: PlantContext = Depends(context)):
-    """그 공장의 살아 있는 사건을 모두 멈춘다. 예정된 자동 이상·지속 고장 일정은 그대로 이어진다.
-    stop_requested_at 은 실제 멈춤 시각(주입의 start_at 과 같은 규칙)."""
+    """그 공장의 안 멈춘 사건을 모두 멈춘다. stop_requested_at 은 실제 멈춤 시각(주입의 start_at 과 같은 규칙)."""
     require_live(request, ctx)
     at, stopped = await asyncio.to_thread(lambda: ctx.book.stop(None, event_time(ctx)))
     return {"stopped": stopped, "stop_requested_at": _utc(at)}
@@ -215,7 +215,7 @@ async def stop_all_anomalies(request: Request, ctx: PlantContext = Depends(conte
 
 @router.post("/anomalies/{equip_id}/stop")
 async def stop_anomaly(equip_id: str, request: Request, ctx: PlantContext = Depends(context)):
-    """그 설비의 살아 있는 사건(주입·지속 고장·자동 이상)을 멈춘다. 모르는 설비이거나 멈출 사건이 없으면 404."""
+    """그 설비의 안 멈춘 사건을 멈춘다. 모르는 설비이거나 멈출 사건이 없으면 404."""
     require_live(request, ctx)
     _require_equipment(ctx, equip_id)
     at, stopped = await asyncio.to_thread(lambda: ctx.book.stop(equip_id, event_time(ctx)))
@@ -224,10 +224,17 @@ async def stop_anomaly(equip_id: str, request: Request, ctx: PlantContext = Depe
     return {"stopped": stopped, "stop_requested_at": _utc(at)}
 
 
+@router.get("/anomalies/active")
+def active_anomalies(ctx: PlantContext = Depends(context)):
+    """안 멈춘 고장 모드 사건: event_id·설비·모드·시작. 정답 분류는 싣지 않는다 (화면의 적용/해제 상태용)."""
+    return [{"event_id": e.event_id, "equip_id": e.equip_id, "mode": e.mode.id, "speed": e.speed, "start_at": _utc(e.start)}
+            for e in ctx.book.active()]
+
+
 @router.get("/anomalies")
 def answer_key(equip_id: str | None = None, from_: str | None = Query(default=None, alias="from"), to: str | None = None,
                ctx: PlantContext = Depends(context)):
-    """정답지: 사건마다 출처·규칙·분류·반응 태그·시작·멈춤·끝(마지막 태그 회복 끝). from/to 는 구간과 겹치는 사건."""
+    """정답지: 사건마다 고장 모드·분류·기대값·단계와 태그별 효과 시작·시작·멈춤·끝(멈춤 + 회복). from/to 는 구간과 겹치는 사건."""
     return ctx.book.answer_key(equip_id, query_time("from", from_) if from_ else None, query_time("to", to) if to else None)
 
 
@@ -242,9 +249,8 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        stream = AlarmStream.from_url(settings.redis_url) if settings.redis_url else None
-        app.state.plants = {entry.key: PlantContext.open(entry, settings.persistent_fault_interval_min,
-                                                settings.persistent_fault_max_open, stream) for entry in plants.plants}
+        modes = load_fault_modes(plants.fault_modes)
+        app.state.plants = {entry.key: PlantContext.open(entry, modes, settings.redis_url) for entry in plants.plants}
         app.state.started_at = to_db(datetime.now(timezone.utc))
         tasks: list[asyncio.Task] = []
         switch_interval = sys.getswitchinterval()
@@ -264,8 +270,6 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
             await asyncio.gather(*tasks, return_exceptions=True)   # 워커 스레드의 마지막 묶음이 끝날 때까지 기다린 뒤 닫는다
         for ctx in app.state.plants.values():
             ctx.close()
-        if stream is not None:
-            stream.close()
         sys.setswitchinterval(switch_interval)
 
     app = FastAPI(title="Skadi 앞단 수집 서버", lifespan=lifespan, root_path=settings.root_path)
@@ -284,9 +288,16 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
             raise HTTPException(503, body | {"status": "degraded"})
         return body
 
+    @app.get("/stream")
+    async def root_stream(request: Request):
+        """모든 공장의 초 단위 메시지를 연결 하나로 (이벤트 이름 = 공장 키, 데이터 = Redis Stream 과 같은 {plant, plant_id, ts, samples}).
+        /{plant_key} 보다 먼저 등록해야 'stream' 이 공장 키로 잡히지 않는다."""
+        return StreamingResponse(merged_stream(request.app.state.plants), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache"})
+
     @app.get("/", response_class=HTMLResponse)
     async def root_index(request: Request):
-        return _plants_page(request.app.state.plants, request.scope.get("root_path", ""))
+        return _plants_page(request.app.state.plants, request.scope.get("root_path", ""), request.app.state.settings.with_simulators)
 
     @app.get("/{plant_key}")
     async def plant_root(plant_key: str, request: Request):
@@ -308,9 +319,13 @@ def _simulator_done(task: asyncio.Task, ctx: PlantContext) -> None:
 
 def check_plants(plants: PlantsConfig) -> None:
     """서버를 띄우기 전에 공장을 하나씩 열어 본다. 설정·DB 문제는 traceback 대신 "plant <key>: 이유" 한 줄로 알린다."""
+    try:
+        modes = load_fault_modes(plants.fault_modes)
+    except (OSError, ValueError) as e:       # 파일 없음·형식 오류 (pydantic 검증 오류도 ValueError)
+        raise ConfigError(f"fault modes {plants.fault_modes}: {e}") from None
     for entry in plants.plants:
         try:
-            PlantContext.open(entry).close()
+            PlantContext.open(entry, modes).close()
         except ConfigError as e:
             raise ConfigError(f"plant {entry.key}: {e}") from None
 
@@ -321,7 +336,26 @@ def create_single_app(plant_path, runtime_path, db_path, key: str = "plant", set
     return create_app(PlantsConfig(plants=[entry]), settings)
 
 
-def _plants_page(plants: dict[str, PlantContext], root: str = "") -> str:
+async def merged_stream(plants: dict[str, PlantContext]) -> AsyncIterator[str]:
+    """공장별 초 단위 메시지(data_broadcaster, 이벤트 이름 = 공장 키)를 한 줄기로 합친다. Redis Stream 으로 보내는 메시지와 같다.
+    공장마다 연결을 열면 HTTP/1.1 의 호스트당 연결 한도(6)를 거의 다 쓴다. 느린 구독자는 공장 브로드캐스터 쪽에서 오래된 이벤트부터 버린다."""
+    q: asyncio.Queue[str] = asyncio.Queue(maxsize=QUEUE_SIZE)
+
+    async def pump(key: str, ctx: PlantContext) -> None:
+        async for message in ctx.data_broadcaster.subscribe():
+            await q.put(message)
+
+    tasks = [asyncio.create_task(pump(k, c)) for k, c in plants.items()]
+    try:
+        while True:
+            yield await q.get()
+    finally:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)     # 공장별 구독이 풀린 뒤에 끝낸다
+
+
+def _plants_page(plants: dict[str, PlantContext], root: str = "", embedded: bool = False) -> str:
     rows = "".join(
         f"<tr><td><a href='{root}/{escape(k)}/'>/{escape(k)}/</a></td><td>{escape(c.plant.plant.plant_id)}</td>"
         f"<td>{escape(c.plant.plant.name)}</td><td class='num'>{len(c.plant.equipment)}</td>"
@@ -332,7 +366,21 @@ def _plants_page(plants: dict[str, PlantContext], root: str = "") -> str:
 th,td{{padding:4px 12px;border-bottom:1px solid #e3e3e3;text-align:left}}td.num{{text-align:right}}</style></head>
 <body><h1>plant-simulator · 공장 목록</h1>
 <table><thead><tr><th>경로</th><th>plant_id</th><th>이름</th><th>설비</th><th>태그</th><th></th></tr></thead><tbody>{rows}</tbody></table>
-<p><a href="{root}/health">전체 상태 (/health)</a></p></body></html>"""
+<p><a href="{root}/health">전체 상태 (/health)</a></p>{_fault_panel(plants, root, embedded)}{_snippet("stream_log.html", plants, root)}</body></html>"""
+
+
+def _fault_panel(plants: dict[str, PlantContext], root: str, embedded: bool) -> str:
+    """공장 목록 아래의 고장 설정 (설비 - 고장 유형 - 적용/해제). 주입은 통합 실행에서만 된다."""
+    if not embedded:
+        return "<h2>고장 설정</h2><p>통합 실행(WITH_SIMULATORS=1)에서만 고장 모드를 걸 수 있습니다.</p>"
+    return _snippet("fault_panel.html", plants, root)
+
+
+def _snippet(name: str, plants: dict[str, PlantContext], root: str) -> str:
+    """static/ 의 화면 조각에 공장 목록 데이터(__PAGE_DATA__)를 채운다."""
+    data = {"root": root, "plants": [{"key": k, "plant_id": c.plant.plant.plant_id, "name": c.plant.plant.name} for k, c in plants.items()]}
+    return (STATIC_DIR / name).read_text(encoding="utf-8").replace(
+        "__PAGE_DATA__", json.dumps(data, ensure_ascii=False).replace("</", "<\\/"))
 
 
 # --- 실행 진입점 -----------------------------------------------------------

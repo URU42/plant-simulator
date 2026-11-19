@@ -1,6 +1,7 @@
 """공장 목록 파일 (다중 공장 설계 §4.7). 수집 서버의 유일한 설정 입력.
 
 ```yaml
+fault_modes: config/fault_modes.yaml     # 공장들이 함께 쓰는 고장 모드 정의 (생략하면 이 경로)
 plants:
   - { key: cdu, plant: config/plant_cdu.yaml, runtime: config/runtime_cdu.yaml, db: data/cdu.db }
 ```
@@ -27,6 +28,7 @@ class PlantEntry(BaseModel):
 class PlantsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    fault_modes: str = "config/fault_modes.yaml"
     plants: list[PlantEntry]
 
     @model_validator(mode="after")

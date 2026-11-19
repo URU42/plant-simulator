@@ -4,10 +4,14 @@
 # - decimals 는 데이터의 소수 자릿수.
 # - 온도 10초, 나머지 1초. seed_key 는 공장 접두어를 붙여 다른 공장과 겹치지 않는다.
 
+# - 같은 설비 안 관계 (2026-11-19, synthetic): derive 가 있는 태그는 매 표본 그 시각 같은 설비 태그로 계산한다 — 펌프 전류 ∝ 유량 × 양정,
+#   팬 전류 ∝ 유량³·차압 ∝ 유량², 압축기 토출 온도(K) ∝ 흡입 온도(K) × 압축비^m (m 은 자료 μ 로 맞춤), 베어링 온도(K) ∝ 윤활유 온도(K).
+#   식이 정하는 변동을 그대로 쓴다(물리식 우선, 사용자 확정). μ 는 자료 그대로, σ 는 식만의 변동이 자료 σ 를 넘으면 정상 생성값으로 바꿨다
+#   (자체 잡음 = 자료 σ × 0.3). 자료 σ 이하면 자료 σ 에 맞게 자체 잡음으로 채웠다. RFCC 의 μ±3σ 경고 한계는 새 σ 로 다시 계산했다.
 plant:
   plant_id: PL-CDU
   name: "CDU (상압증류)"
-  config_version: 2
+  config_version: 3
   unit_groups:
     - id: UG-CDU-01
       name: "원유 전처리"
@@ -45,6 +49,13 @@ signals:
   - { signal: speed, prefix: SI, unit: "rpm", name: 회전속도 }
   - { signal: differential_pressure, prefix: PDI, unit: "mmH2O", name: 차압 }
   - { signal: process_temp, prefix: TI, unit: "DEG C", name: 공정 유체 온도 }
+
+# 정상 운전 공통 요인 (synthetic): 공정 그룹마다 평균 0 인 빠른 성분 하나를 아래 신호의 태그들이 나눠 갖는다.
+# 태그 분산 중 share 만큼이 공통 요인이고, 부호는 그 신호가 부하와 같이(1)·반대로(-1) 움직이는지다.
+# 평균은 μ 그대로라 Nelson 규칙과 충돌하지 않는다. 느린 부하·운전점 변화는 고장 모드(OP-LOAD-CHANGE)로만 넣는다.
+correlation:
+  share: 0.5
+  signs: { flow: 1, current: 1, speed: 1, discharge_pressure: 1, differential_pressure: 1, suction_pressure: -1 }
 
 equipment:
   # ---------------- UNIT-CDU-01 U-811 ----------------
@@ -129,7 +140,8 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r007,
-          control: { mean: 106.2212, sigma: 0.5057001208740918 } }
+          derive: { formula: power, terms: [{ tag: FI-8101A, exp: 1 }, { tag: PI-8101B, minus: PI-8101A, exp: 1 }], noise_sigma: 0.15171 },
+          control: { mean: 106.2212, sigma: 0.814372 } }
   # ---------------- UNIT-CDU-02 U-812 ----------------
   - equip_id: P-8102A
     name: "탈염 세정수 펌프 A (Desalter Wash Water Pump A)"
@@ -201,7 +213,8 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r013,
-          control: { mean: 150.23655, sigma: 0.6462206823905097 } }
+          derive: { formula: power, terms: [{ tag: FI-8102A, exp: 1 }, { tag: PI-8102B, exp: 1 }], noise_sigma: 0.193866 },
+          control: { mean: 150.23655, sigma: 1.11464 } }
   # ---------------- UNIT-CDU-03 U-821 ----------------
   - equip_id: F-8201
     name: "가열로 강제 통풍 팬 (Crude Heater FD Fan)"
@@ -262,7 +275,8 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r018,
-          control: { mean: 46.71445, sigma: 0.19493117049713204 } }
+          derive: { formula: power, terms: [{ tag: FI-8201A, exp: 3 }], noise_sigma: 0.0584794 },
+          control: { mean: 46.71445, sigma: 0.504933 } }
       - { tag_id: FI-8201A,
           signal: flow,
           unit: "Nm3/h",
@@ -284,7 +298,8 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r020,
-          control: { mean: 184.60604999999998, sigma: 1.2059470251751778 } }
+          derive: { formula: power, terms: [{ tag: FI-8201A, exp: 2 }], noise_sigma: 0.361784 },
+          control: { mean: 184.60604999999998, sigma: 1.3699 } }
   # ---------------- UNIT-CDU-04 U-831 ----------------
   - equip_id: P-8301A
     name: "중간 순환환류 펌프 A (Middle Pumparound Pump A)"
@@ -594,4 +609,5 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r046,
-          control: { mean: 40.18945, sigma: 0.19022584747141785 } }
+          derive: { formula: power, terms: [{ tag: FI-8401A, exp: 1 }, { tag: PI-8401B, exp: 1 }], noise_sigma: 0.0570678 },
+          control: { mean: 40.18945, sigma: 0.416573 } }

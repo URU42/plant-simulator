@@ -1,0 +1,349 @@
+# 고장 모드(가상 시나리오) 정의 — 모든 수치·지연·궤적은 synthetic 합성 가정이며 공정·설비 담당 검토 전이다.
+#
+# 정상 운전에는 이상이 없고, POST /{공장}/anomalies {equip_id, mode} 로 주입한 때부터 아래 효과가 정상 신호 위에 더해진다.
+# - 효과는 tag_id 가 아니라 signal 로 지정한다. 같은 태그에 겹친 효과는 z 를 더한다.
+# - 크기: z(관리 기준 σ 배수, 앞 효과에 더한다) 또는 to_limit(그 태그의 효과 합을 한계값까지, margin 만큼 더:
+#   목표 z = (한계 − μ)/σ × (1 + margin). 앞 단계 step·ramp 가 남긴 수준을 빼고 그만큼만 움직인다).
+#   to_limit 이 그 태그에 없으면(예: RFCC 는 경고 한계만 있다) z 를 쓰고, z 도 없으면 그 태그에는 걸지 않는다.
+# - shape: step(바로) / ramp(rise_sec 동안 0→z 뒤 유지) / spike(rise_sec 동안 0→z, decay_sec 동안 z→0) / wobble(진폭 z, 주기 period_sec)
+# - lag_sec 는 단계 시작(at_sec) 뒤 지연. 멈추면 모든 효과가 60초 동안 0 으로 가라앉는다.
+# - propagate.driven: 축으로 이어진 아래쪽 설비(driven_by 사슬)에 주는 효과. speed 는 생성기가 구동기 값을 그대로 넘긴다.
+# - nelson_quiet: 그 단계 동안 효과를 더한 값도 Nelson 규칙 1~3 을 어기지 않게 고른다 (ML 만 잡는 전조를 만드는 합성 장치).
+# - label 은 정답 분류, expect 는 평가용 기대값(자유 형식). 둘 다 정답지(GET /anomalies)에만 나간다.
+#   label.code 는 정답지 코드: 0 비정상(설비 고장, 기본), 1 정상(정상 운전 변화). 계측 이상은 2 (실행 설정 instrument_faults).
+#   expect.alarms 의 self 는 주입 설비, driven 은 아래쪽 설비.
+# - unobserved: 실제 고장이면 보일 신호지만 마스터에 태그가 없어 만들지 않는 것. 기록용이며 /fault-modes·정답지에 나간다.
+#   시나리오는 지금 있는 설비·태그만으로 표현한다. 태그를 더할지는 따로 정한다.
+
+fault_modes:
+  - id: ST-WATER-INDUCTION
+    name: 증기터빈 수분 유입
+    equip_types: [ST]
+    unobserved: [드레인 밸브 상태, 케이싱 상·하부 온도차]   # 증기 온도는 합성 태그(STT-T-1401)로 더했다
+    label:
+      kind: 기계 이상
+      cause: 증기 수분 유입에 따른 열충격·액체 충돌, 로터·블레이드 손상 후보
+      action: 증기 건도·드레인 계통 점검, 진동 추이 확인 후 정지 검토
+    stages:
+      - id: S0
+        name: 전조 — 규칙 1~3 에 걸리지 않는 분포 변화
+        at_sec: 0
+        nelson_quiet: true
+        effects:
+          - { signal: steam_pressure, shape: wobble, z: 1.2, period_sec: 8 }
+          - { signal: steam_temp, shape: ramp, z: -1.0, rise_sec: 300 }          # 과열도가 조금씩 준다 (수분 유입의 직접 증거)
+          - { signal: shaft_vibration, shape: ramp, z: 0.8, rise_sec: 300 }
+      - id: S2
+        name: 열충격·액체 충돌
+        at_sec: 900
+        effects:
+          - { signal: shaft_vibration, shape: spike, to_limit: warn_hi, margin: 0.5, rise_sec: 5, decay_sec: 60 }
+          - { signal: speed, shape: spike, z: -4, rise_sec: 3, decay_sec: 30 }     # 피구동 압축기 회전속도도 같이
+          - { signal: steam_temp, shape: ramp, z: -220, rise_sec: 120 }           # 약 −40 ℃, 젖은 증기로 포화 온도 쪽으로
+      - id: S3
+        name: 로터·블레이드 손상
+        at_sec: 1020
+        effects:
+          - { signal: shaft_vibration, shape: step, to_limit: warn_hi, margin: 0.2 }
+          - { signal: shaft_vibration, shape: ramp, z: 12, rise_sec: 1800 }
+          - { signal: bearing_temp, shape: ramp, z: 15, lag_sec: 60, rise_sec: 1200 }
+          - { signal: oil_temp, shape: ramp, z: 5, lag_sec: 300, rise_sec: 1200 }
+        propagate:
+          driven:
+            - { signal: shaft_vibration, shape: ramp, z: 4, lag_sec: 10, rise_sec: 600 }    # 커플링 전달
+            - { signal: flow, shape: ramp, z: -6, lag_sec: 30, rise_sec: 600 }
+    expect:
+      stages:
+        S0: { setpoint: none, nelson: [], ml_plant: high, top_signals: [steam_temp, steam_pressure, shaft_vibration] }
+        S2: { setpoint: trip, nelson: [1], nelson_maybe: [3], ml_plant: high }    # RFCC 정지 한계 μ±6σ (2026-11-19 합성)
+        S3: { setpoint: trip, nelson: [1, 2], ml_plant: high }
+      alarms:
+        - { equip: self, count: 1, opens_in: S0, opened_by: ml, upgrades_in: S2 }
+        - { equip: driven, count: 1, opens_in: S2, related_to: self }       # S2 회전속도 공유, S3 진동·유량
+
+  - id: CC-SURGE
+    name: 원심 압축기·송풍기 서지
+    equip_ids: [C-1401, C-2301, C-3101, C-4101, B-1201]   # 원심 압축기와 RFCC 주 공기 송풍기 (설비 유형 CC 는 왕복동과 구분하지 않는다)
+    unobserved: [안티서지 밸브 개도, 서지 한계선 대비 운전점(유량-양정)]
+    label:
+      kind: 공정·기계 이상
+      cause: 저유량 운전으로 서지 한계 도달, 압력·유량 진동, 스러스트 베어링 충격
+      action: 안티서지 밸브·제어기 점검, 운전점 복귀
+    stages:
+      - id: S1
+        name: 저유량 운전 → 서지 한계 접근
+        at_sec: 0
+        effects:
+          - { signal: flow, shape: ramp, z: -10, rise_sec: 120 }
+      - id: S2
+        name: 서지 발생 → 압력·유량 진동
+        at_sec: 120
+        effects:
+          - { signal: flow, shape: wobble, z: 15, period_sec: 4 }
+          - { signal: discharge_pressure, shape: wobble, z: 8, period_sec: 4 }
+          - { signal: discharge_temp, shape: ramp, z: 10, lag_sec: 30, rise_sec: 300 }
+      - id: S3
+        name: 스러스트 베어링·실 충격
+        at_sec: 150
+        effects:
+          - { signal: axial_position, shape: spike, z: 6, rise_sec: 2, decay_sec: 20 }
+          - { signal: shaft_vibration, shape: step, z: 10 }
+          - { signal: vibration, shape: step, z: 10 }
+    expect:
+      stages:
+        S1: { nelson: [1, 2], ml_plant: high }
+        S2: { nelson: [1], ml_plant: high }
+        S3: { nelson: [1], ml_plant: high }
+      alarms:
+        - { equip: self, count: 1, opens_in: S1 }
+
+  - id: PM-SUCTION-LOSS
+    name: 펌프 흡입 조건 악화 (캐비테이션 후보)
+    equip_types: [PM]
+    unobserved: [흡입 탱크 액위, 스트레이너 전후 차압, 유체 온도·증기압(NPSH 여유)]
+    label:
+      kind: 공정·기계 이상
+      cause: 흡입 측 제약(스트레이너 막힘·탱크 액위 저하 후보)으로 흡입 압력 저하, 캐비테이션 가능성
+      action: 흡입 계통(스트레이너·탱크 액위·밸브) 점검, 지속 시 예비기 전환 검토
+    stages:
+      - id: S1
+        name: 흡입 압력 저하
+        at_sec: 0
+        effects:
+          - { signal: suction_pressure, shape: ramp, to_limit: warn_lo, margin: 0.1, z: -6, rise_sec: 600 }
+      - id: S2
+        name: 펌프 관측 이상 — 진동 증가·유량 저하
+        at_sec: 300
+        effects:
+          - { signal: vibration, shape: ramp, to_limit: warn_hi, margin: 0.1, z: 6, rise_sec: 300 }
+          - { signal: flow, shape: ramp, to_limit: warn_lo, margin: 0.05, z: -6, rise_sec: 300 }
+          - { signal: discharge_pressure, shape: ramp, z: -8, rise_sec: 300 }
+      - id: S3
+        name: 이상 심화
+        at_sec: 900
+        effects:
+          - { signal: suction_pressure, shape: ramp, to_limit: alarm_lo, margin: 0.05, z: -6, rise_sec: 600 }
+          - { signal: vibration, shape: ramp, to_limit: alarm_hi, margin: 0.05, z: 6, rise_sec: 600 }
+          - { signal: flow, shape: ramp, to_limit: alarm_lo, margin: 0.05, z: -6, rise_sec: 600 }
+          - { signal: bearing_temp, shape: ramp, z: 10, lag_sec: 120, rise_sec: 900 }
+      - id: S4
+        name: 정지 한계 도달 — 심한 캐비테이션
+        at_sec: 1800
+        effects:                                    # 정지 한계가 있는 태그만 (없으면 건너뛴다)
+          - { signal: vibration, shape: ramp, to_limit: trip_hi, margin: 0.05, rise_sec: 300 }
+          - { signal: flow, shape: ramp, to_limit: trip_lo, margin: 0.05, rise_sec: 300 }
+    expect:
+      stages:
+        S1: { setpoint: warn_lo, nelson: [1, 2], ml_plant: high }
+        S2: { setpoint: warn, nelson: [1, 2], ml_plant: high }
+        S3: { setpoint: alarm, nelson: [1, 2], ml_plant: high }
+        S4: { setpoint: trip, nelson: [1, 2], ml_plant: high }
+      alarms:
+        - { equip: self, count: 1, opens_in: S1, upgrades_in: S3, trips_in: S4 }
+
+  - id: OP-LOAD-CHANGE
+    name: 운전 부하 감소 (정상 운전 변화)
+    equip_ids: [T-1401, M-3101, M-3102, M-4102]     # 회전속도를 바꾸는 구동기
+    unobserved: [운전 지시·속도 설정값(SP)]
+    label:
+      kind: 정상 운전 변화
+      code: 1                                       # 정답지 코드 1 = 정상
+      cause: 의도한 운전 부하 감소 (회전속도·유량 하향)
+      action: 기계 수리 아님. 운전 지시·부하 조건 확인
+    stages:
+      - id: S1
+        name: 회전속도·부하 하향
+        at_sec: 0
+        effects:
+          # 정상 운전 변화라 한계값(경고 μ±3σ)에는 거의 닿지 않고 Nelson 규칙 2(평균 이동)·ML 만 알아챌 크기 (2026-11-19 축소, 전 −15·−12σ)
+          - { signal: speed, shape: ramp, z: -1.5, rise_sec: 300 }
+          - { signal: current, shape: ramp, z: -1.5, lag_sec: 5, rise_sec: 300 }
+        propagate:
+          driven:
+            - { signal: flow, shape: ramp, z: -1.5, lag_sec: 10, rise_sec: 300 }
+            - { signal: discharge_pressure, shape: ramp, z: -1.0, lag_sec: 10, rise_sec: 300 }
+            - { signal: current, shape: ramp, z: -1.5, lag_sec: 5, rise_sec: 300 }
+    expect:
+      stages:
+        S1: { setpoint: none, nelson: [2], ml_plant: high }    # RFCC 는 경고(통계 ±3σ)를 가끔 넘는다(표본 약 1 %)
+      alarms:
+        - { equip: self, kind: 정상 운전 변화 }
+
+  - id: FN-IMPELLER-FOULING
+    name: 팬 임펠러 오염·불균형
+    equip_types: [FN]
+    unobserved: [진동 스펙트럼(1× 회전 성분), 흡입 필터·댐퍼 상태]
+    label:
+      kind: 기계 이상
+      cause: 임펠러 오염 퇴적으로 질량 불균형, 진동 증가와 풍량 저하
+      action: 임펠러 청소·밸런싱, 베어링 상태 점검
+    stages:
+      - id: S1
+        name: 오염 퇴적 진행
+        at_sec: 0
+        effects:
+          - { signal: vibration, shape: ramp, to_limit: warn_hi, margin: 0.1, z: 8, rise_sec: 1200 }
+          - { signal: flow, shape: ramp, z: -4, rise_sec: 1200 }
+      - id: S2
+        name: 불균형 심화
+        at_sec: 1200
+        effects:
+          - { signal: vibration, shape: ramp, to_limit: alarm_hi, margin: 0.05, z: 15, rise_sec: 900 }
+          - { signal: bearing_temp, shape: ramp, z: 10, lag_sec: 120, rise_sec: 900 }
+    expect:
+      stages:
+        S1: { setpoint: warn, nelson: [1, 2], ml_plant: high }
+        S2: { setpoint: alarm, nelson: [1, 2], ml_plant: high }
+      alarms:
+        - { equip: self, count: 1, opens_in: S1, upgrades_in: S2 }
+
+  - id: EX-CATALYST-EROSION
+    name: 팽창 터빈 촉매 미립자 부착·침식
+    equip_types: [EX]
+    unobserved: [배기가스 입구 온도, 배기가스 고형분(촉매 미립자) 농도, 블레이드 상태]
+    label:
+      kind: 기계 이상
+      cause: 배기가스의 촉매 미립자 부착·침식으로 로터 불균형과 효율 저하, 블레이드 손상 후보
+      action: 3단 분리기(사이클론) 성능 점검, 진동 추이 확인 후 세정·정비 검토
+    stages:
+      - id: S1
+        name: 미립자 부착·침식 시작
+        at_sec: 0
+        effects:
+          - { signal: shaft_vibration, shape: ramp, z: 6, rise_sec: 1800 }
+          - { signal: axial_position, shape: ramp, z: 4, rise_sec: 1800 }
+      - id: S2
+        name: 효율 저하 — 회수 동력 감소
+        at_sec: 1200
+        effects:
+          - { signal: speed, shape: ramp, z: -6, rise_sec: 600 }               # 피구동 송풍기 회전속도도 같이
+          - { signal: discharge_pressure, shape: ramp, z: 3, rise_sec: 600 }
+        propagate:
+          driven:
+            - { signal: flow, shape: ramp, z: -5, lag_sec: 10, rise_sec: 600 }
+            - { signal: discharge_pressure, shape: ramp, z: -4, lag_sec: 10, rise_sec: 600 }
+      - id: S3
+        name: 블레이드 손상 위험
+        at_sec: 2400
+        effects:
+          - { signal: shaft_vibration, shape: ramp, z: 10, rise_sec: 900 }
+          - { signal: bearing_temp, shape: ramp, z: 8, lag_sec: 60, rise_sec: 900 }
+        propagate:
+          driven:
+            - { signal: shaft_vibration, shape: ramp, z: 3, lag_sec: 10, rise_sec: 600 }
+    expect:
+      stages:
+        S1: { setpoint: trip, nelson: [1, 2], ml_plant: high }    # RFCC 정지 한계 μ±6σ (2026-11-19 합성)
+        S2: { setpoint: trip, nelson: [1, 2], ml_plant: high }
+        S3: { setpoint: trip, nelson: [1, 2], ml_plant: high }
+      alarms:
+        - { equip: self, count: 1, opens_in: S1 }
+        - { equip: driven, count: 1, opens_in: S2, related_to: self }
+
+  - id: RC-VALVE-LEAK
+    name: 왕복동 압축기 흡입·토출 밸브 누설
+    equip_ids: [C-2201, C-3102, C-4102]               # 왕복동 압축기 (보충 수소)
+    unobserved: [밸브 커버 온도(단·밸브별), 단간 온도, 실린더 PV 선도]   # 단간 압력은 합성 태그로 더했다
+    label:
+      kind: 기계 이상
+      cause: 밸브 누설로 뜨거운 가스가 되돌아와 재압축 손실, 효율 저하와 토출 온도 상승 (1단 밸브 가정 — 단간 압력 하강)
+      action: 밸브 커버 온도로 누설 밸브 특정 후 밸브 교체
+    stages:
+      - id: S1
+        name: 밸브 누설 시작
+        at_sec: 0
+        effects:
+          - { signal: discharge_temp, shape: ramp, to_limit: warn_hi, z: 8, rise_sec: 1200 }
+          - { signal: flow, shape: ramp, z: -5, rise_sec: 1200 }
+          - { signal: suction_temp, shape: ramp, z: 6, lag_sec: 60, rise_sec: 1200 }
+          - { signal: interstage_pressure, shape: ramp, z: -6, rise_sec: 1200 }   # 1단 처리량이 줄어 단간 압력이 내려간다
+      - id: S2
+        name: 재압축 손실 심화
+        at_sec: 1200
+        effects:
+          - { signal: discharge_temp, shape: ramp, to_limit: alarm_hi, margin: 0.05, z: 15, rise_sec: 1200 }
+          - { signal: flow, shape: ramp, to_limit: warn_lo, margin: 0.05, z: -10, rise_sec: 1200 }
+          - { signal: vibration, shape: ramp, z: 6, rise_sec: 1200 }
+          - { signal: interstage_pressure, shape: ramp, z: -10, rise_sec: 1200 }
+    expect:
+      stages:
+        S1: { setpoint: warn, nelson: [1, 2], ml_plant: high }
+        S2: { setpoint: alarm, nelson: [1, 2], ml_plant: high }
+      alarms:
+        - { equip: self, count: 1, opens_in: S1, upgrades_in: S2 }
+
+  - id: RC-LIQUID-INGRESS
+    name: 왕복동 압축기 액체 유입
+    equip_ids: [C-2201, C-3102, C-4102]
+    unobserved: [흡입 분리기(KO drum) 액위, 로드 낙하(rod drop), 피스톤 로드 하중]
+    label:
+      kind: 공정·기계 이상
+      cause: 흡입 가스에 액체 유입, 액체 충격으로 밸브·피스톤·로드 손상 후보
+      action: 흡입 분리기 액위·드레인 점검, 충격 지속 시 정지 후 밸브·로드 점검
+    stages:
+      - id: S1
+        name: 흡입 측 액체 유입
+        at_sec: 0
+        effects:
+          - { signal: suction_temp, shape: ramp, z: -6, rise_sec: 120 }
+          - { signal: discharge_temp, shape: ramp, z: -10, rise_sec: 300 }      # 액체 증발로 토출 온도가 내려간다
+      - id: S2
+        name: 액체 충격
+        at_sec: 120
+        effects:
+          - { signal: vibration, shape: spike, to_limit: alarm_hi, margin: 0.1, z: 15, rise_sec: 2, decay_sec: 20 }
+          - { signal: vibration, shape: step, to_limit: warn_hi, margin: 0.1, z: 8, lag_sec: 22 }
+          - { signal: discharge_pressure, shape: wobble, z: 6, period_sec: 10 }
+      - id: S3
+        name: 밸브·피스톤·로드 손상 후보
+        at_sec: 600
+        effects:
+          - { signal: vibration, shape: ramp, to_limit: alarm_hi, margin: 0.05, z: 15, rise_sec: 900 }
+          - { signal: bearing_temp, shape: ramp, z: 10, lag_sec: 120, rise_sec: 900 }
+          - { signal: flow, shape: ramp, z: -8, rise_sec: 900 }
+      - id: S4
+        name: 밸브·로드 파손 — 정지 한계 도달
+        at_sec: 1500
+        effects:                                    # 정지 한계가 있는 태그만 (없으면 건너뛴다)
+          - { signal: vibration, shape: ramp, to_limit: trip_hi, margin: 0.05, rise_sec: 300 }
+          - { signal: bearing_temp, shape: ramp, to_limit: trip_hi, margin: 0.02, rise_sec: 600 }
+    expect:
+      stages:
+        S1: { setpoint: none, nelson: [1, 2], ml_plant: high }
+        S2: { setpoint: alarm, nelson: [1], ml_plant: high }
+        S3: { setpoint: alarm, nelson: [1, 2], ml_plant: high }
+        S4: { setpoint: trip, nelson: [1, 2], ml_plant: high }
+      alarms:
+        - { equip: self, count: 1, opens_in: S1, upgrades_in: S2, trips_in: S4 }
+
+  - id: GB-LUBE-WEAR
+    name: 기어박스 윤활 불량·치면 마모
+    equip_types: [GB]
+    unobserved: [기어 맞물림 주파수 진동 스펙트럼, 윤활유 금속분·입자, 윤활유 필터 차압]
+    label:
+      kind: 기계 이상
+      cause: 윤활유 공급 압력 저하·온도 상승으로 윤활 불량, 기어 치면 마모와 베어링 온도 상승
+      action: 윤활 계통(펌프·필터·냉각기) 점검, 윤활유 분석, 치면 점검
+    stages:
+      - id: S1
+        name: 윤활 성능 저하
+        at_sec: 0
+        effects:
+          - { signal: oil_pressure, shape: ramp, z: -6, rise_sec: 900 }
+          - { signal: oil_temp, shape: ramp, z: 8, lag_sec: 60, rise_sec: 1200 }
+      - id: S2
+        name: 치면 마모
+        at_sec: 900
+        effects:
+          - { signal: vibration, shape: ramp, z: 10, rise_sec: 1200 }
+          - { signal: bearing_temp, shape: ramp, z: 12, lag_sec: 120, rise_sec: 1200 }
+        propagate:
+          driven:
+            - { signal: shaft_vibration, shape: ramp, z: 3, lag_sec: 10, rise_sec: 900 }   # 출력축 → 압축기
+    expect:
+      stages:
+        S1: { setpoint: none, nelson: [1, 2], ml_plant: high }               # 기어박스는 한계값이 없다 (합성 설비)
+        S2: { setpoint: none, nelson: [1, 2], ml_plant: high }
+      alarms:
+        - { equip: self, count: 1, opens_in: S1 }
+        - { equip: driven, count: 1, opens_in: S2, related_to: self }

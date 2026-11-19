@@ -24,7 +24,7 @@ def test_plant_loads_and_matches_master(plant_path: Path):
     assert plant.plant.plant_id == "PL-RHDS"
     assert len(plant.equipment) == 9
     assert plant.type_counts() == EXPECTED_TYPE_COUNTS
-    assert len(plant.all_tags()) == 57
+    assert len(plant.all_tags()) == 58
     assert len(plant.unit_ids()) == 6
 
 
@@ -41,7 +41,7 @@ def test_control_mean_is_inside_warning_limits(plant_path: Path):
         for tag in e.tags:
             lim = tag.limits
             if lim is None:
-                assert e.type in SYNTHETIC_TYPES, tag.tag_id
+                assert e.type in SYNTHETIC_TYPES or "(synthetic)" in (tag.description or ""), tag.tag_id
                 continue
             assert lim.warn_hi is None or tag.control.mean < lim.warn_hi, tag.tag_id
             assert lim.warn_lo is None or tag.control.mean > lim.warn_lo, tag.tag_id
@@ -183,3 +183,79 @@ def test_limits_allow_lower_bounds_and_check_order():
         Limits(warn_lo=5.0, warn_hi=4.0)         # lo 는 hi 보다 작다
     with pytest.raises(ValueError):
         Limits()
+
+
+# --- 운전점·공통 요인 -------------------------------------------------------------
+
+def _rfcc_raw(config_dir):
+    from common.config_models import load_yaml
+    return load_yaml(config_dir / "plant_rfcc.yaml")
+
+
+def _equip(raw, equip_id):
+    return next(e for e in raw["equipment"] if e["equip_id"] == equip_id)
+
+
+def test_operating_scales_driver_and_driven_means(config_dir):
+    """T-1401 을 설계의 r 배로 돌리면: 회전속도·유량 r, 진동 r², 토출 압력은 흡입 압력과의 차(양정)에 r², 온도는 그대로."""
+    raw = _rfcc_raw(config_dir)
+    design = next(t["control"]["mean"] for t in _equip(raw, "T-1401")["tags"] if t["signal"] == "speed")
+    _equip(raw, "T-1401")["operating"] = {"speed_rpm": design * 1.1}
+    plant = PlantConfig.model_validate(raw)
+    base, ctl = load_plant(config_dir / "plant_rfcc.yaml").control_by_key(), plant.control_by_key()
+    r = 1.1
+    assert ctl[("C-1401", "SI-C-1401")][0] == pytest.approx(design * r)
+    assert ctl[("C-1401", "FI-C-1401")][0] == pytest.approx(base[("C-1401", "FI-C-1401")][0] * r)
+    assert ctl[("T-1401", "VX-T-1401")][0] == pytest.approx(base[("T-1401", "VX-T-1401")][0] * r ** 2)
+    ps, pd = base[("C-1401", "PS-C-1401")][0], base[("C-1401", "PD-C-1401")][0]
+    assert ctl[("C-1401", "PD-C-1401")][0] == pytest.approx(ps + (pd - ps) * r ** 2)
+    assert ctl[("T-1401", "TI-T-1401")] == base[("T-1401", "TI-T-1401")]
+    assert all(ctl[k] == base[k] for k in base if k[0] not in ("T-1401", "C-1401"))     # 다른 설비는 그대로
+    assert all(ctl[k][1] == base[k][1] for k in base)                                    # σ 는 바꾸지 않는다
+
+
+@pytest.mark.parametrize("equip_id, msg", [("C-1401", "driver"), ("P-1101A", "speed tag")])
+def test_operating_only_on_driver_with_speed(config_dir, equip_id, msg):
+    raw = _rfcc_raw(config_dir)
+    _equip(raw, equip_id)["operating"] = {"speed_rpm": 1000}
+    with pytest.raises(ConfigError, match=msg):
+        PlantConfig.model_validate(raw)
+
+
+def test_correlation_signals_must_exist(config_dir):
+    raw = _rfcc_raw(config_dir)
+    raw["correlation"]["signs"]["differential_pressure"] = 1      # RFCC 에는 없는 신호
+    with pytest.raises(ConfigError, match="differential_pressure"):
+        PlantConfig.model_validate(raw)
+
+
+@pytest.mark.parametrize("change, msg", [
+    ({"inputs": ["NO-SUCH-TAG"]}, "NO-SUCH-TAG"),                 # 같은 설비에 없는 입력
+    ({"offset": 0}, "control.mean"),                               # 설계점 μ 와 계산식이 다르다
+])
+def test_derive_is_checked(config_dir, change, msg):
+    raw = _rfcc_raw(config_dir)
+    tag = next(t for t in _equip(raw, "T-1401")["tags"] if t["tag_id"] == "STT-T-1401")
+    tag["derive"] |= change
+    with pytest.raises(ConfigError, match=msg):
+        PlantConfig.model_validate(raw)
+
+
+def test_derived_mean_follows_operating_point(config_dir):
+    """운전점이 토출 압력 μ 를 옮기면 단간 압력(계산 태그) μ 도 다시 계산된다."""
+    raw = load_yaml(config_dir / "plant_rhds.yaml")
+    motor = _equip(raw, "M-3102")
+    motor["operating"] = {"speed_rpm": next(t["control"]["mean"] for t in motor["tags"] if t["signal"] == "speed") * 1.1}
+    ctl = PlantConfig.model_validate(raw).control_by_key()
+    ps, pd = ctl[("C-3102", "PI-S-C3102")][0], ctl[("C-3102", "PI-D-C3102")][0]
+    assert ctl[("C-3102", "PI-I-C3102")][0] == pytest.approx(((ps + 1.01325) * (pd + 1.01325)) ** 0.5 - 1.01325)
+
+
+def test_power_derive_agrees_with_affinity_law(config_dir):
+    """팬 F-3101 을 r 배로 돌리면 유량 r 을 따라 전류(유량³)는 r³, 차압(유량²)은 r² — 운전점의 상사 법칙과 같다."""
+    raw = load_yaml(config_dir / "plant_rhds.yaml")
+    fan = _equip(raw, "F-3101")
+    fan["operating"] = {"speed_rpm": next(t["control"]["mean"] for t in fan["tags"] if t["signal"] == "speed") * 1.1}
+    base, ctl = load_plant(config_dir / "plant_rhds.yaml").control_by_key(), PlantConfig.model_validate(raw).control_by_key()
+    assert ctl[("F-3101", "II-F3101")][0] == pytest.approx(base[("F-3101", "II-F3101")][0] * 1.1 ** 3)
+    assert ctl[("F-3101", "PDI-F3101")][0] == pytest.approx(base[("F-3101", "PDI-F3101")][0] * 1.1 ** 2)

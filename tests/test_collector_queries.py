@@ -1,4 +1,4 @@
-"""조회 API (기획서 6.4): /timeseries, /alarms, 현재값 NoData."""
+"""조회 API (기획서 6.4): /timeseries, 현재값 NoData."""
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -17,7 +17,7 @@ def client(plant_path, runtime_path):
 
 
 def _send(client, tag_id, equip_id, start, minutes, value):
-    samples = [Sample(equip_id=equip_id, tag_id=tag_id, ts=start + timedelta(seconds=s), value=value, status="Good")
+    samples = [Sample(equip_id=equip_id, tag_id=tag_id, ts=start + timedelta(seconds=s), value=value)
                for s in range(0, minutes * 60, 10)]
     batch = IngestBatch(source_id="SIM", batch_id=f"b-{tag_id}-{start.isoformat()}", sent_at=start, samples=samples)
     assert client.post("/plant/ingest", json=batch.model_dump(mode="json")).status_code == 200
@@ -31,16 +31,15 @@ def test_timeseries_after_ingest_and_no_limit_alarms(client):
     assert len(ts) == 6 and ts[0]["max"] == 56.0 and ts[1]["avg"] == 48.0   # 60~70분 구간은 아직 미완료
     hourly = client.get("/plant/timeseries", params=params).json()
     assert len(hourly) == 1 and hourly[0]["count"] == 360
-    assert all("limit_type" not in a for a in client.get("/plant/alarms").json())   # 한계값 알람은 만들지 않는다 (Nelson 알람만)
     assert client.get("/plant/timeseries", params=params | {"from": "x", "to": "y", "interval": "5m"}).status_code == 400
 
 
-def test_current_becomes_nodata_after_three_send_intervals(client):
+def test_current_keeps_last_value_and_null_for_never_seen(client):
     _send(client, "VI-A-P3101", "P-3101", T0, 1, 2.0)
     _send(client, "VI-A-C3102", "C-3102", T0 + timedelta(minutes=5), 1, 2.0)   # 시뮬레이터 시계가 5분 앞으로
-    assert client.get("/plant/equipment/C-3102/tags/VI-A-C3102/current").json()["status"] == "Good"
-    assert client.get("/plant/equipment/P-3101/tags/VI-A-P3101/current").json()["status"] == "NoData"
-    assert client.get("/plant/equipment/P-3101/tags/TI-B-P3101/current").json()["status"] == "NoData"
+    assert client.get("/plant/equipment/P-3101/tags/VI-A-P3101/current").json()["value"] == 2.0   # 오래된 값도 그대로
+    never = client.get("/plant/equipment/P-3101/tags/TI-B-P3101/current").json()
+    assert never["value"] is None and never["ts"] is None and "status" not in never
 
 
 def test_large_time_jump_is_caught_up_in_background(client):

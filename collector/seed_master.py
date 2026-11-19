@@ -26,12 +26,13 @@ def seed_master(storage: Storage, plant: PlantConfig) -> None:
             [(e.equip_id, e.name, e.type, e.grade, e.unit_id, e.driven_by) for e in plant.equipment])
         storage.executemany("INSERT OR REPLACE INTO equipment_alias VALUES (?, ?)",
                             [(a, e.equip_id) for e in plant.equipment for a in e.aliases])
+        control = plant.control_by_key()      # 운전점을 반영한 μ·σ
         storage.executemany(
             "INSERT OR REPLACE INTO equipment_tag (equip_id, tag_id, signal, unit, description, normal_ref, limit_basis, "
             "warn_lo, alarm_lo, trip_lo, warn_hi, alarm_hi, trip_hi, control_mean, control_sigma, interval_sec, decimals) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [(e.equip_id, t.tag_id, t.signal, t.unit, t.description, t.normal_ref, t.limit_basis,
-              *_limit_values(t.limits), t.control.mean, t.control.sigma, t.interval_sec, t.decimals)
+              *_limit_values(t.limits), *control[(e.equip_id, t.tag_id)], t.interval_sec, t.decimals)
              for e in plant.equipment for t in e.tags],
         )
 

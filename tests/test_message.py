@@ -8,19 +8,20 @@ from common.message import SCHEMA_VERSION, IngestBatch, Sample, make_batch_id
 
 
 def test_sample_roundtrip():
-    s = Sample(equip_id="C-1101", tag_id="VI-C1101", ts="2026-11-08T17:23:10+09:00", value=2.34, status="Good")
+    s = Sample(equip_id="C-1101", tag_id="VI-C1101", ts="2026-11-08T17:23:10+09:00", value=2.34)
     assert json.loads(s.model_dump_json())["value"] == 2.34
     assert s.ts.utcoffset().total_seconds() == 9 * 3600
 
 
-def test_unknown_status_rejected():
+def test_status_field_removed_in_v3():
+    """v3 에서 status 를 뺐다. 실어 보내면 모르는 칸으로 거절한다."""
     with pytest.raises(ValidationError):
-        Sample(equip_id="P-1101", tag_id="TI-P1101", ts="2026-11-08T17:23:10+09:00", value=1.0, status="Weird")
+        Sample(equip_id="P-1101", tag_id="TI-P1101", ts="2026-11-08T17:23:10+09:00", value=1.0, status="Good")
 
 
 def test_naive_timestamp_rejected():
     with pytest.raises(ValidationError):
-        Sample(equip_id="P-1101", tag_id="TI-P1101", ts="2026-11-08T17:23:10", value=1.0, status="Good")
+        Sample(equip_id="P-1101", tag_id="TI-P1101", ts="2026-11-08T17:23:10", value=1.0)
 
 
 def test_batch_serializes_spec_fields_only():
@@ -28,12 +29,12 @@ def test_batch_serializes_spec_fields_only():
         source_id="SIM-U1",
         batch_id="b-20261108-172400-SIM-U1-0001",
         sent_at="2026-11-08T17:24:00+09:00",
-        samples=[Sample(equip_id="C-1101", tag_id="VI-C1101", ts="2026-11-08T17:23:10+09:00", value=2.34, status="Good")],
+        samples=[Sample(equip_id="C-1101", tag_id="VI-C1101", ts="2026-11-08T17:23:10+09:00", value=2.34)],
     )
     payload = json.loads(batch.model_dump_json())
     assert set(payload) == {"schema_version", "source_id", "batch_id", "sent_at", "samples"}
-    assert payload["schema_version"] == SCHEMA_VERSION == "2.0"
-    assert set(payload["samples"][0]) == {"equip_id", "tag_id", "ts", "value", "status"}
+    assert payload["schema_version"] == SCHEMA_VERSION == "3.0"
+    assert set(payload["samples"][0]) == {"equip_id", "tag_id", "ts", "value"}
     assert payload["samples"][0]["ts"] == "2026-11-08T17:23:10+09:00"
 
 
@@ -44,11 +45,9 @@ def test_batch_id_format():
     assert make_batch_id(datetime(2026, 11, 8, 17, 24, tzinfo=kst), "SIM-U1", 1) == "b-20261108-172400-SIM-U1-0001"
 
 
-def test_sample_requires_value_and_status():
+def test_sample_requires_value():
     ts = "2026-11-08T17:23:10+09:00"
     with pytest.raises(ValidationError):
-        Sample(equip_id="P-3101", tag_id="VI-A-P3101", ts=ts, value=None, status="Good")
+        Sample(equip_id="P-3101", tag_id="VI-A-P3101", ts=ts, value=None)
     with pytest.raises(ValidationError):
         Sample(equip_id="P-3101", tag_id="VI-A-P3101", ts=ts, value=1.0, quality="Good")
-    with pytest.raises(ValidationError):
-        Sample(equip_id="P-3101", tag_id="VI-A-P3101", ts=ts, value=1.0, status="Uncertain")
