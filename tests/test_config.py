@@ -259,3 +259,14 @@ def test_power_derive_agrees_with_affinity_law(config_dir):
     base, ctl = load_plant(config_dir / "plant_rhds.yaml").control_by_key(), PlantConfig.model_validate(raw).control_by_key()
     assert ctl[("F-3101", "II-F3101")][0] == pytest.approx(base[("F-3101", "II-F3101")][0] * 1.1 ** 3)
     assert ctl[("F-3101", "PDI-F3101")][0] == pytest.approx(base[("F-3101", "PDI-F3101")][0] * 1.1 ** 2)
+
+
+def test_flow_rejects_unknown_node_and_equipment_clash(config_dir):
+    import yaml
+    from common.config_models import PlantConfig
+    raw = yaml.safe_load((config_dir / "plant_rhds.yaml").read_text(encoding="utf-8"))
+    bad = dict(raw, flow={"nodes": {}, "edges": [["P-3101", "NOPE", "", "process"]]})
+    with pytest.raises(ConfigError, match="unknown node NOPE"):
+        PlantConfig.model_validate(bad)
+    with pytest.raises(ConfigError, match="is equipment"):
+        PlantConfig.model_validate(dict(raw, flow={"nodes": {"P-3101": "x"}, "edges": []}))

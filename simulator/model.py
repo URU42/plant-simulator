@@ -25,7 +25,7 @@ import numpy as np
 from common.config_models import Derive, PlantConfig, RuntimeConfig, TagKey
 from common.message import Sample
 from common.nelson import NelsonState, zscore
-from simulator.fault import RECOVERY_SEC, FaultEvent, TagPlan, plan, tag_effect
+from simulator.fault import MAX_RECOVERY_SEC, FaultEvent, TagPlan, plan, tag_effect
 from simulator.instrument import InstrumentEvent, InstrumentSchedule
 
 RHO = 0.12                  # 개별 잡음 AR(1) 계수
@@ -214,7 +214,7 @@ class PlantGenerator:
         """이 창에 효과가 있을 수 있는 사건의 태그별 적용 목록 (이 프로세스가 맡은 태그만)."""
         out: dict[TagKey, list[tuple[FaultEvent, TagPlan]]] = {}
         mine = {t.key for t in self.tags}
-        for ev in self.source.external(s0 - RECOVERY_SEC, s1):
+        for ev in self.source.external(s0 - MAX_RECOVERY_SEC, s1):
             if ev.event_id not in self._plans:
                 self._plans[ev.event_id] = plan(self.plant, ev.mode, ev.equip_id, self.control)
             for key, tp in self._plans[ev.event_id].items():

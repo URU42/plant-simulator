@@ -8,7 +8,7 @@ import pytest
 from common.config_models import Operating, load_plant, load_runtime
 from common.nelson import NelsonState
 from common.sim_clock import KST
-from simulator.fault import RECOVERY_SEC, FaultEvent, load_fault_modes
+from simulator.fault import MAX_RECOVERY_SEC, RECOVERY_SEC, FaultEvent, load_fault_modes
 from simulator.model import PlantGenerator
 
 T0 = datetime(2026, 11, 12, 0, 0, tzinfo=KST)
@@ -19,7 +19,7 @@ class Fixed:
     def __init__(self, events):
         self.events = events
     def external(self, start, end):
-        return [e for e in self.events if e.start < end and (e.stop is None or e.stop + RECOVERY_SEC > start)]
+        return [e for e in self.events if e.start < end and (e.stop is None or e.stop + MAX_RECOVERY_SEC > start)]
 
 
 @pytest.fixture(scope="module")
@@ -78,7 +78,8 @@ def test_common_factor_correlates_within_unit_group_only(rfcc):
 
 
 def test_fault_moves_only_planned_tags_then_recovers(rhds, modes):
-    """C-3101 에 서지를 걸면 C-3101 태그만 바뀌고(다른 설비는 사건이 없을 때와 같은 값), 멈춘 뒤에는 정상으로 돌아온다."""
+    """C-3101 에 서지를 걸면 C-3101 과 공정 흐름 하류(P-3102·P-3103) 태그만 바뀌고(다른 설비는 사건이 없을 때와 같은 값),
+    멈춘 뒤에는 정상으로 돌아온다."""
     plant, rt = rhds
     t = T0.timestamp() + 60
     ev = FaultEvent("E1", "C-3101", modes["CC-SURGE"], t, t + 400)
@@ -87,8 +88,8 @@ def test_fault_moves_only_planned_tags_then_recovers(rhds, modes):
     hit_samples = PlantGenerator(plant, rt, Fixed([ev])).generate(T0, end)
     hit = by_tag(hit_samples)
     changed = {k for k in quiet if quiet[k] != hit[k]}
-    assert ("C-3101", "FI-C3101") in changed and {k[0] for k in changed} == {"C-3101"}
-    late = [x for x in hit_samples if x.ts.timestamp() >= t + 400 + RECOVERY_SEC + 90]   # 회복 + 규칙 창(8표본 × 10초) 뒤
+    assert ("C-3101", "FI-C3101") in changed and {k[0] for k in changed} == {"C-3101", "P-3102", "P-3103"}
+    late = [x for x in hit_samples if x.ts.timestamp() >= t + 400 + MAX_RECOVERY_SEC + 90]   # 하류 회복 + 규칙 창(8표본 × 10초) 뒤
     assert violations(plant, late) == {}
 
 

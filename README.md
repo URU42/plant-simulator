@@ -160,6 +160,22 @@ control: { mean: 2.31, sigma: 0.08 }                       # 설계 운전점의
 RFCC 는 `limits` 를 경고 μ ± 3σ 로 다시 계산해 두었고, 자료에 없는 알람 μ ± 4.5σ·정지 μ ± 6σ 를 합성으로 더했다(사용자 확정 2026-11-19, `limit_basis`).
 RFCC 한계는 통계 σ 기준이라 좁아서, σ 배수로 쓴 고장 효과는 금방 정지 한계에 닿는다(예: 서지 1분). 정상 운전 변화(`OP-LOAD-CHANGE`)는 −1.5σ 로 줄여 알람·정지에 닿지 않는다(RFCC 경고는 가끔). `normal_ref`·`limit_basis` 는 자료 원문 참고 문자열이다.
 
+### 공정 흐름 그래프 (`flow`)
+
+설비 간 고장 전파에 쓰는 프로젝트 가상 공장의 흐름 그래프(2026-11-20). 3D 뷰어 그래프(2026-11-19)에서 옮겼고, 이제 이 구성안이 정본이며 뷰어는 `GET /{공장}/flow` 로 읽는다.
+
+```yaml
+flow:
+  nodes: { MX: "원료·수소 혼합기", HX: "원료·반응 유출물 열교환기", ... }   # 설비가 아닌 공정 노드
+  edges:                                      # [from, to, label, stream]
+    - [P-3101, MX, "", process]
+    - [MX, HX, "저온측", process]              # 열교환기는 들어온 쪽과 같은 이름의 출구로만 나간다
+    - [C-3102, C-3101, 보충 수소, utility]      # 가상 공장 추가 (뷰어 원래 그래프에 없음)
+```
+
+- `stream`: `process`(원료·탄화수소 흐름) 또는 `utility`(수소·연소공기·윤활유·세정수 등 보조 계통). 뷰어의 계통 구분 규칙을 옮긴 값이다.
+- 축 연결은 `driven_by` 가 맡아 여기에 넣지 않는다. 노드 ID 는 설비 ID 와 겹치면 안 되고, 간선 끝은 설비나 공정 노드여야 한다.
+
 ### 운전점 (`operating`)
 
 ```yaml
@@ -198,11 +214,18 @@ RFCC 한계는 통계 σ 기준이라 좁아서, σ 배수로 쓴 고장 효과�
 | `to_limit`, `margin` | 그 태그의 효과 합을 한계값(`warn_hi`·`alarm_lo` …)까지, (한계 − μ)의 `margin` 만큼 더. 앞 단계 step·ramp 가 남긴 수준을 빼고 그만큼만 움직인다. 태그에 그 한계가 없으면 `z`, 둘 다 없으면 그 태그는 건너뛴다 |
 | `lag_sec` | 단계 시작 뒤 지연 |
 | `propagate.driven` | 축으로 이어진 아래쪽 설비(`driven_by` 사슬) 전부에 주는 효과. 피구동 설비 `speed` 는 늘 구동기 값을 그대로 쓴다 |
+| `propagate.process` | 공정 흐름 그래프(`flow`)로 닿은 하류 설비에 주는 효과(1단계 기준). `z` 만 쓰고(`to_limit` 불가) 모양은 `ramp`·`wobble` |
+| `propagate.utility` | 보조 계통 간선으로 바로 닿은 설비(윤활유 펌프 → 압축기, 보충 수소 → 순환 압축기)에 주는 효과. 그 설비에서 멈춘다 |
 | `nelson_quiet` | 그 단계 동안은 효과를 더한 값도 Nelson 규칙 1~3 을 어기지 않게 잡음을 고른다. Setpoint·Nelson 은 못 보고 ML 만 볼 수 있는 전조를 만드는 **합성 장치** |
 
-- 같은 설비에는 안 멈춘 사건이 하나뿐이다(겹치면 409). 사건은 멈출 때까지 가고, 멈추면 모든 효과가 60초 동안 0 으로 가라앉는다.
+- 같은 설비에는 안 멈춘 사건이 하나뿐이다(겹치면 409). 사건은 멈출 때까지 가고, 멈추면 효과가 60초(하류 k단계는 60초 × (k+1)) 동안 0 으로 가라앉는다.
+- 공정 흐름 하류 전파 (2026-11-20, 사용자 확정, 수치는 synthetic): 고장 설비와 그 축 사슬을 0단계로, 흐름 그래프를 따라 설비에 닿을 때마다 1단계씩
+  최대 2단계까지 퍼진다. **완만한 감쇠**: k단계 크기 = 1단계 × 0.7^(k−1), `lag`·`rise` × k(늦고 천천히 오른다), 회복 60초 × (k+1).
+  줄인 크기가 0.25σ 이하면 걸지 않는다. utility 간선은 출발 설비와 utility 로 닿은 공정 노드에서만 지나고(공정 흐름에 들어선 뒤 보조 계통으로
+  퍼지지 않는다), utility 로 닿은 설비에서는 멈춘다(정지(trip)는 모의하지 않는다). 전파하는 모드: `PM-SUCTION-LOSS`·`CC-SURGE`·
+  `FN-IMPELLER-FOULING`·`OP-LOAD-CHANGE`·`RC-VALVE-LEAK`. 근거·도달 표는 위키 raw 초안 `PSIM-LINK-20261120` v0.3.
 - 효과는 단계가 끝나도 남는다(예: S0 의 wobble 은 S2·S3 에도 계속된다). `nelson_quiet` 는 그 단계 동안만이다.
-- 정답지의 `end_at` 은 멈춤 + 60초다. 그 뒤 규칙 창(8표본, 10초 태그는 80초) 안의 위반은 사건 꼬리다.
+- 정답지의 `end_at` 은 멈춤 + 60초(멈추기 전에 시작한 하류 효과가 있으면 가장 먼 단계 k 의 60초 × (k+1))다. 그 뒤 규칙 창(8표본, 10초 태그는 80초) 안의 위반은 사건 꼬리다.
 - 시나리오는 **지금 있는 설비·태그만으로** 표현한다. 고장 모드가 가리킨 신호의 태그가 그 설비에 없으면 건너뛴다. 실제 고장이면 보일 신호지만 태그가 없어 만들지 않는 것은 모드의 `unobserved` 에 적고 `/fault-modes`·정답지에 싣는다(예: 드레인 밸브 상태, 밸브 커버 온도). 태그를 더할지는 따로 정한다.
 - 계산 태그 (구성안 `derive`, 2026-11-19, synthetic): 같은 설비 안 관계를 매 표본 지킨다. 값 = 그 시각 입력 태그 값의 계산식
   + 자체 잡음(`noise_sigma`) + 고장 효과. 입력이 움직이면 따라 움직이고(정답지에도 입력 효과의 단계·시작으로 실린다), 자기 효과는 관계를 깬다.
@@ -237,7 +260,7 @@ RFCC 한계는 통계 σ 기준이라 좁아서, σ 배수로 쓴 고장 효과�
 | `POST /{공장}/anomalies/{equip_id}/stop` | 그 설비의 안 멈춘 사건을 `ceil(sim_now)+3`초에 멈추고 회복. 200 + `{"stopped": [event_id…], "stop_requested_at"}`. 사건이 없으면 404 |
 | `POST /{공장}/anomalies/stop` | 공장의 안 멈춘 사건 전부를 같은 방식으로 멈춘다. 200 + `{"stopped": [event_id…], "stop_requested_at"}`(없으면 빈 목록) |
 | `GET /{공장}/anomalies/active` | 안 멈춘 고장 모드 사건 `[{event_id, equip_id, mode, start_at}]`. 정답 분류는 싣지 않는다 (화면의 적용/해제 상태용) |
-| `GET /{공장}/anomalies?equip_id=&from=&to=` | 정답지: `event_id`, `equip_id`, `mode`, `code`, `kind`, `cause`, `action`, `expect`, `stages`(단계별 시작), `response_tags`(태그·단계별 효과 시작), `unobserved`, `start_at`, `stop_requested_at`, `end_at`. 고장 모드와 계측 이상(켰을 때)을 시작 순으로 함께 싣는다 |
+| `GET /{공장}/anomalies?equip_id=&from=&to=` | 정답지: `event_id`, `equip_id`, `mode`, `code`, `kind`, `cause`, `action`, `expect`, `stages`(단계별 시작), `response_tags`(태그·단계별 효과 시작, `via`: self·driven·process·utility, `hop`: 흐름 단계 — 2026-11-20 전 사건은 null), `unobserved`, `start_at`, `stop_requested_at`, `end_at`. 고장 모드와 계측 이상(켰을 때)을 시작 순으로 함께 싣는다 |
 
 생성기가 이미 `ceil(sim_now)+3` 보다 뒤까지 표본을 만들었으면 그 끝으로 미룬다(이미 만든 표본은 바뀌지 않는다). 응답의 `start_at`·`stop_requested_at` 이 실제 시각이다.
 `POST` 는 `/ingest` 와 같은 토큰 규칙(`INGEST_TOKEN` 이 있으면 `X-Ingest-Token`, 통합 실행인데 토큰이 없으면 403)이다. 그 밖의 오류: 분리 실행 409(`embedded only`), 생성기가 죽었으면 503(`simulator stopped…`),
@@ -343,6 +366,7 @@ v3 에서 `status`(Good/Bad)를 뺐다(사용자 확정 2026-11-19: 설비 상�
 | `GET /{공장}/equipment/{equip_id}/tags/{tag_id}/current` | 태그 현재값. 오래됐는지는 `ts` 로 본다 |
 | `GET /{공장}/timeseries?equip_id=&tag_id=&from=&to=&interval=1h` | 집계 시계열 (`10m` / `1h`) |
 | `GET /{공장}/fault-modes` | 걸 수 있는 고장 모드와 대상 설비 |
+| `GET /{공장}/flow` | 공정 흐름 그래프(가상 공장): `{plant, nodes, equipment: [{equip_id, driven_by}], edges: [{from, to, label, stream}]}`. 3D 뷰어가 하류 영향 표시에 읽는다 |
 | `POST /{공장}/anomalies` | 설비에 고장 모드 주입 (토큰 필요, 통합 실행 전용) |
 | `POST /{공장}/anomalies/{equip_id}/stop` | 그 설비의 사건 멈춤 |
 | `POST /{공장}/anomalies/stop` | 공장의 사건 전부 멈춤 |
