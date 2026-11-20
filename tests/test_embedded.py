@@ -21,8 +21,8 @@ def _wait(client, path, pred, timeout=15.0):
 def test_with_simulators_fills_current_values(rfcc_plant_path, rfcc_runtime_path):
     app = create_single_app(rfcc_plant_path, rfcc_runtime_path, ":memory:", settings=Settings(with_simulators=True, time_mode="live"))
     with TestClient(app) as c:
-        rows = _wait(c, "/plant/current", lambda r: sum(x["status"] == "Good" for x in r) >= 60)
-        assert len(rows) == 81
+        rows = _wait(c, "/plant/current", lambda r: sum(x["value"] is not None for x in r) >= 60)
+        assert len(rows) == 82
 
 
 def test_with_simulators_backfill_keeps_api_responsive(rfcc_plant_path, rfcc_runtime_path, tmp_path):
@@ -38,11 +38,11 @@ def test_with_simulators_backfill_keeps_api_responsive(rfcc_plant_path, rfcc_run
 
 def test_restart_restores_generator_from_db(plant_path, runtime_path, tmp_path, monkeypatch):
     """같은 DB 로 다시 띄우면 LocalSender 가 저장소의 태그별 최근 값을 넘겨 생성기를 되살린다."""
-    from simulator.nelson_model import NelsonGenerator
+    from simulator.model import PlantGenerator
 
     restored = []
-    original = NelsonGenerator.restore
-    monkeypatch.setattr(NelsonGenerator, "restore", lambda self, v: (restored.append(v), original(self, v)))
+    original = PlantGenerator.restore
+    monkeypatch.setattr(PlantGenerator, "restore", lambda self, v: (restored.append(v), original(self, v)))
     settings = Settings(with_simulators=True, time_mode="live")
     with TestClient(create_single_app(plant_path, runtime_path, tmp_path / "rhds.db", settings=settings)) as c:
         _wait(c, "/plant/health", lambda r: r["sim_now"] is not None)

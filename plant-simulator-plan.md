@@ -1,5 +1,8 @@
 # Skadi 앞단 데이터 생성기 기획서
 
+> **2026-11-19 변경 (시나리오 주입형 전환):** 자동 이상·지속 고장·규칙 번호 주입·수집 서버 Nelson 판정(`/alarms`)을 지웠다. 정상 운전은 조용하고, 이상은 고장 모드(`config/fault_modes.yaml`) 주입으로만 생긴다.
+> 5장 이상 생성·판정 부분은 이전 기준이다. 현재 구조는 [README](README.md)·[전환 기록](docs/superpowers/plans/2026-11-19-scenario-driven.md).
+
 Nov 8, 2026 · @xxhigh
 
 ## 1. 개요

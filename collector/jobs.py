@@ -73,23 +73,22 @@ class JobRunner:
     # --- 집계 ---------------------------------------------------------------
     def _aggregate(self, table: str, start: datetime, end: datetime) -> dict[TagKey, dict]:
         """[start, end) 구간을 태그별로 집계해 table 에 넣는다. 모든 표본으로 평균·최소·최대·표준편차를 구한다.
-        status 는 Bad 표본이 하나라도 있으면 Bad, 아니면 Good, 표본이 없으면 NoData."""
+        표본이 없는 태그도 count 0 행으로 남긴다."""
         found = {(r["equip_id"], r["tag_id"]): r for r in self.storage.query_dicts(
             "SELECT equip_id, tag_id, AVG(value) AS avg, MIN(value) AS min, MAX(value) AS max, COUNT(value) AS count, "
-            "AVG(value * value) AS sq, SUM(status = 'Bad') AS bad "
+            "AVG(value * value) AS sq "
             "FROM ts_raw WHERE ts >= ? AND ts < ? GROUP BY equip_id, tag_id", (to_db(start), to_db(end)))}
         rows = []
         for (equip_id, tag_id) in self.tags:
             r = found.get((equip_id, tag_id))
             if r:
                 sd = math.sqrt(max(r["sq"] - r["avg"] ** 2, 0.0))
-                rows.append((equip_id, tag_id, to_db(start), r["avg"], r["min"], r["max"], sd, r["count"],
-                             "Bad" if r["bad"] else "Good"))
+                rows.append((equip_id, tag_id, to_db(start), r["avg"], r["min"], r["max"], sd, r["count"]))
             else:
-                rows.append((equip_id, tag_id, to_db(start), None, None, None, None, 0, "NoData"))
+                rows.append((equip_id, tag_id, to_db(start), None, None, None, None, 0))
         self.storage.executemany(
-            f"INSERT OR REPLACE INTO {table} (equip_id, tag_id, bucket_start, avg, min, max, sd, count, status) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+            f"INSERT OR REPLACE INTO {table} (equip_id, tag_id, bucket_start, avg, min, max, sd, count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
         return found
 
     def _aggregate_10m(self, start: datetime, end: datetime) -> None:

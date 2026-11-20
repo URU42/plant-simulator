@@ -8,7 +8,7 @@ from common.config_models import RuntimeConfig, load_plant
 from common.nelson import HISTORY
 from common.sim_clock import KST, SimClock
 from simulator.main import Simulator, backfill_range, run_backfill_then_live, run_mode
-from simulator.nelson_model import NelsonGenerator
+from simulator.model import PlantGenerator
 from simulator.sender import MemorySender
 
 NOW = datetime(2026, 11, 8, 12, 0, 37, tzinfo=KST)
@@ -66,13 +66,13 @@ async def test_backfill_then_live_has_no_gap_and_is_reproducible(plant_path):
     assert len(a.batches[2].samples) == 4 * 60 + 6
 
     b = await run_once()
-    values = [(s.tag_id, s.ts, s.value, s.status) for x in a.batches for s in x.samples]
-    assert values == [(s.tag_id, s.ts, s.value, s.status) for x in b.batches for s in x.samples]
+    values = [(s.tag_id, s.ts, s.value) for x in a.batches for s in x.samples]
+    assert values == [(s.tag_id, s.ts, s.value) for x in b.batches for s in x.samples]
 
     whole = MemorySender()          # 같은 구간을 한 생성기로 쭉 만든 값
     await Simulator(plant, runtime, whole, SimClock.backfill(LIVE_START - timedelta(hours=2)), window_sec=3600).run(
         until=LIVE_START + timedelta(minutes=3))
-    assert values == [(s.tag_id, s.ts, s.value, s.status) for x in whole.batches for s in x.samples]
+    assert values == [(s.tag_id, s.ts, s.value) for x in whole.batches for s in x.samples]
 
 
 async def test_accelerated_mode_runs_faster_than_wall_clock(plant_path):
@@ -107,8 +107,8 @@ async def test_backfill_resumes_from_collector_time(plant_path):
 async def test_resume_restores_generator_from_recent_values(plant_path, monkeypatch):
     """수집 서버에 값이 있으면 태그별 최근 HISTORY 개로 생성기를 되살린다. 값이 없으면 되살리지 않는다."""
     restored = []
-    original = NelsonGenerator.restore
-    monkeypatch.setattr(NelsonGenerator, "restore", lambda self, v: (restored.append(v), original(self, v)))
+    original = PlantGenerator.restore
+    monkeypatch.setattr(PlantGenerator, "restore", lambda self, v: (restored.append(v), original(self, v)))
     plant = load_plant(plant_path)
     runtime = _runtime(time_mode="backfill", backfill_days=1)
     values = {("P-3103", "VI-A-P3103"): [1.0, 1.1, 1.2]}

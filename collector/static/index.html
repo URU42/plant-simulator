@@ -6,14 +6,14 @@
 <title>plant-simulator · 현재값</title>
 <!-- 디버깅 화면 (RFCC 설계 §4.6, 다중 공장 §4.7). 공장 접두어 아래에서 상대 경로 equipment / current / stream 을 쓴다. 의존성 없음. -->
 <style>
-  :root { --bg: #fff; --fg: #1a1a1a; --muted: #6b6b6b; --line: #e3e3e3; --head: #f5f5f5; --flash: #fff3b0; --bad: #c0392b; }
+  :root { --bg: #fff; --fg: #1a1a1a; --muted: #6b6b6b; --line: #e3e3e3; --head: #f5f5f5; --flash: #dceaff; --bad: #c0392b; }
   body { margin: 0; padding: 16px 24px 48px; font: 14px/1.4 -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
          color: var(--fg); background: var(--bg); }
   header { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; margin-bottom: 16px; }
   header h1 { font-size: 18px; margin: 0; }
   header .meta { color: var(--muted); }
   header .meta b { color: var(--fg); font-variant-numeric: tabular-nums; }
-  #status.ok { color: #1e7e34; } #status.down { color: var(--bad); }
+  #conn.ok { color: #1e7e34; } #conn.down { color: var(--bad); }
   section { margin-bottom: 20px; }
   h2 { font-size: 15px; margin: 0 0 6px; }
   h2 small { color: var(--muted); font-weight: normal; margin-left: 8px; }
@@ -22,22 +22,26 @@
   th { background: var(--head); font-weight: 600; color: var(--muted); }
   td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   td.flash { background: var(--flash); transition: background 0.5s; }
-  td.status.bad { color: var(--bad); font-weight: 600; }
-  tr.nodata td.value::after { content: " (NoData)"; color: var(--muted); font-family: inherit; }
+  /* 한계값을 넘은 값: 경고·알람·정지 (판정이 아니라 보기 편하게 칠한 것. 설비 상태는 탐지·ML 이 판단한다) */
+  tr.lv-warn td, i.lg.warn { background: #fff4d6; }
+  tr.lv-alarm td, i.lg.alarm { background: #ffd9d6; }
+  tr.lv-trip td, i.lg.trip { background: var(--bad); color: #fff; }
+  i.lg { font-style: normal; padding: 0 6px; border-radius: 3px; border: 1px solid var(--line); }
 </style>
 </head>
 <body>
 <header>
   <h1 id="title">plant-simulator · 현재값</h1>
   <span class="meta">sim_now(KST) <b id="sim-now">—</b></span>
-  <span class="meta">SSE <b id="status" class="down">연결 중</b></span>
+  <span class="meta">SSE <b id="conn" class="down">연결 중</b></span>
   <span class="meta">받은 샘플 <b id="count">0</b></span>
+  <span class="meta">한계 넘음 <i class="lg warn">경고</i> <i class="lg alarm">알람</i> <i class="lg trip">정지</i></span>
 </header>
 <main id="main"></main>
 
 <script>
 (function () {
-  const rows = new Map();          // "equip_id|tag_id" → { tr, tds, decimals }. 태그명은 설비 사이에서 겹칠 수 있다
+  const rows = new Map();          // "equip_id|tag_id" → { tr, tds, decimals, limits }. 태그명은 설비 사이에서 겹칠 수 있다
   const keyOf = (s) => `${s.equip_id}|${s.tag_id}`;
   let received = 0, simNowMs = 0;
 
@@ -53,33 +57,40 @@
       section.appendChild(h2);
       const table = el("table");
       const thead = el("thead"); const hr = el("tr");
-      for (const h of ["태그 ID", "설명", "값", "단위", "상태", "측정 시각(KST)", "주기"]) hr.appendChild(el("th", null, h));
+      for (const h of ["태그 ID", "설명", "값", "단위", "측정 시각(KST)", "주기"]) hr.appendChild(el("th", null, h));
       thead.appendChild(hr); table.appendChild(thead);
       const tbody = el("tbody");
       for (const t of e.tags) {
         const tr = el("tr"); tr.id = `tag-${e.equip_id}-${t.tag_id}`;
         const tds = {
           id: el("td", null, t.tag_id), desc: el("td", null, t.description || ""), value: el("td", "num value", "—"),
-          unit: el("td", null, t.unit), status: el("td", "status", "—"), ts: el("td", "num", "—"), iv: el("td", "num", t.interval_sec + "s"),
+          unit: el("td", null, t.unit), ts: el("td", "num", "—"), iv: el("td", "num", t.interval_sec + "s"),
         };
         if (t.limits) tds.value.title = "한계값 " + Object.entries(t.limits).map(([k, v]) => `${k}=${v}`).join(", ");
-        for (const k of ["id", "desc", "value", "unit", "status", "ts", "iv"]) tr.appendChild(tds[k]);
+        for (const k of ["id", "desc", "value", "unit", "ts", "iv"]) tr.appendChild(tds[k]);
         tbody.appendChild(tr);
-        rows.set(`${e.equip_id}|${t.tag_id}`, { tr, tds, decimals: t.decimals });
+        rows.set(`${e.equip_id}|${t.tag_id}`, { tr, tds, decimals: t.decimals, limits: t.limits || {} });
       }
       table.appendChild(tbody); section.appendChild(table); main.appendChild(section);
     }
   }
 
-  // 한 샘플(또는 /current 행)로 행을 갱신한다. status 가 있으면(/current) NoData 표시에 쓴다.
+  // 값이 넘은 가장 높은 한계 단계 (정지 > 알람 > 경고). 한계값이 없거나 안 넘었으면 null
+  function level(v, lim) {
+    for (const lv of ["trip", "alarm", "warn"]) {
+      if ((lim[lv + "_hi"] != null && v > lim[lv + "_hi"]) || (lim[lv + "_lo"] != null && v < lim[lv + "_lo"])) return lv;
+    }
+    return null;
+  }
+
+  // 한 샘플(또는 /current 행)로 행을 갱신한다.
   function update(s, flash) {
     const row = rows.get(keyOf(s));
     if (!row) return;
     row.tds.value.textContent = s.value != null ? Number(s.value).toFixed(row.decimals) : "—";
-    row.tds.status.textContent = s.status || "—";
-    row.tds.status.classList.toggle("bad", s.status === "Bad");
     row.tds.ts.textContent = kst(s.ts);
-    row.tr.classList.toggle("nodata", s.status === "NoData" && !!s.ts);
+    const lv = s.value != null ? level(s.value, row.limits) : null;
+    for (const c of ["warn", "alarm", "trip"]) row.tr.classList.toggle("lv-" + c, lv === c);
     if (flash) {
       row.tds.value.classList.add("flash");
       setTimeout(() => row.tds.value.classList.remove("flash"), 500);
@@ -89,10 +100,10 @@
   }
 
   function connect() {
-    const status = document.getElementById("status");
+    const conn = document.getElementById("conn");
     const es = new EventSource("stream");                  // 공장 접두어 기준 상대 경로. 끊기면 스스로 다시 연결한다
-    es.onopen = () => { status.textContent = "연결됨"; status.className = "ok"; };
-    es.onerror = () => { status.textContent = "재연결 중"; status.className = "down"; };
+    es.onopen = () => { conn.textContent = "연결됨"; conn.className = "ok"; };
+    es.onerror = () => { conn.textContent = "재연결 중"; conn.className = "down"; };
     es.addEventListener("samples", (ev) => {
       const samples = JSON.parse(ev.data);
       received += samples.length;
@@ -103,7 +114,7 @@
         const prev = latest.get(keyOf(s));
         if (!prev || s.ts > prev.ts) latest.set(keyOf(s), s);
       }
-      for (const s of latest.values()) { s.status = undefined; update(s, true); }
+      for (const s of latest.values()) update(s, true);
     });
   }
 
@@ -117,7 +128,7 @@
   }).then((current) => {
     for (const s of current) update(s, false);
     connect();
-  }).catch((err) => { document.getElementById("status").textContent = "불러오기 실패: " + err; });
+  }).catch((err) => { document.getElementById("conn").textContent = "불러오기 실패: " + err; });
 })();
 </script>
 </body>

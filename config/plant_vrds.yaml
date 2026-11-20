@@ -6,10 +6,14 @@
 # - 온도 10초, 나머지 1초. seed_key 는 공장 접두어를 붙여 다른 공장과 겹치지 않는다.
 # - 합성 추가 (2026-11-18): 시나리오의 전동기·기어박스 구성을 위해 자료에 없는 M-4102 를 넣었다. 한계값은 없고 μ·σ 는 합성값이다. 피구동 압축기의 회전속도 μ·σ 와 비율을 맞춰 driven_by 로 속도를 공유한다.
 
+# - 같은 설비 안 관계 (2026-11-19, synthetic): derive 가 있는 태그는 매 표본 그 시각 같은 설비 태그로 계산한다 — 펌프 전류 ∝ 유량 × 양정,
+#   팬 전류 ∝ 유량³·차압 ∝ 유량², 압축기 토출 온도(K) ∝ 흡입 온도(K) × 압축비^m (m 은 자료 μ 로 맞춤), 베어링 온도(K) ∝ 윤활유 온도(K).
+#   식이 정하는 변동을 그대로 쓴다(물리식 우선, 사용자 확정). μ 는 자료 그대로, σ 는 식만의 변동이 자료 σ 를 넘으면 정상 생성값으로 바꿨다
+#   (자체 잡음 = 자료 σ × 0.3). 자료 σ 이하면 자료 σ 에 맞게 자체 잡음으로 채웠다. RFCC 의 μ±3σ 경고 한계는 새 σ 로 다시 계산했다.
 plant:
   plant_id: PL-VRDS
   name: "VRDS (감압 잔사유 수첨탈황)"
-  config_version: 5
+  config_version: 7
   unit_groups:
     - id: UG-VRDS-01
       name: "원료 공급"
@@ -49,6 +53,7 @@ signals:
   - { signal: bearing_temp, prefix: TI, unit: "DEG C", name: 베어링 온도 }
   - { signal: suction_pressure, prefix: PI, unit: "bar(g)", name: 흡입 압력 }
   - { signal: discharge_pressure, prefix: PI, unit: "bar(g)", name: 토출 압력 }
+  - { signal: interstage_pressure, prefix: PI, unit: "bar(g)", name: 단간 압력 }
   - { signal: flow, prefix: FI, unit: "m3/h", name: 유량 }
   - { signal: current, prefix: II, unit: "A", name: 모터 전류 }
   - { signal: suction_temp, prefix: TI, unit: "DEG C", name: 흡입 온도 }
@@ -60,6 +65,13 @@ signals:
   - { signal: oil_temp, prefix: TI, unit: "DEG C", name: 윤활유 온도 }
   - { signal: differential_pressure, prefix: PDI, unit: "Pa", name: 차압 }
   - { signal: process_temp, prefix: TI, unit: "DEG C", name: 공정 유체 온도 }
+
+# 정상 운전 공통 요인 (synthetic): 공정 그룹마다 평균 0 인 빠른 성분 하나를 아래 신호의 태그들이 나눠 갖는다.
+# 태그 분산 중 share 만큼이 공통 요인이고, 부호는 그 신호가 부하와 같이(1)·반대로(-1) 움직이는지다.
+# 평균은 μ 그대로라 Nelson 규칙과 충돌하지 않는다. 느린 부하·운전점 변화는 고장 모드(OP-LOAD-CHANGE)로만 넣는다.
+correlation:
+  share: 0.5
+  signs: { flow: 1, current: 1, speed: 1, discharge_pressure: 1, differential_pressure: 1, suction_pressure: -1 }
 
 equipment:
   # ---------------- UNIT-VRDS-01 잔사유 가압·공급 ----------------
@@ -127,7 +139,8 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: vrds-r006,
-          control: { mean: 165.3, sigma: 0.7011922628681617 } }
+          derive: { formula: power, terms: [{ tag: FI-P4101, exp: 1 }, { tag: PI-D-P4101, minus: PI-S-P4101, exp: 1 }], noise_sigma: 0.210358 },
+          control: { mean: 165.3, sigma: 1.18532 } }
   # ---------------- UNIT-VRDS-02 보충 수소 압축 ----------------
   # 합성 추가 (2026-11-18): 자료에 없는 구동 전동기(C-4102 직결). 한계값 없음, μ·σ 는 합성값. 회전속도는 C-4102 와 같다
   - equip_id: M-4102
@@ -213,6 +226,18 @@ equipment:
           decimals: 2,
           seed_key: vrds-r010,
           control: { mean: 167.53, sigma: 0.1557821805280107 } }
+      # 합성 추가 (2026-11-19): 자료에 없는 계산 태그. 2단 압축·단별 압력비가 같다고 가정한 단간 압력 √(P_s·P_d) (그 시각 절대압, 대기압 1.01325 bar).
+      # + 자체 잡음 σ 0.016(입력 오차 전파 σ 의 약 30 %). μ 는 흡입·토출 μ 로 계산, σ 는 정상 생성값에서 잰 값. 한계값 없음(Setpoint 대상 아님).
+      - { tag_id: PI-I-C4102,
+          signal: interstage_pressure,
+          unit: "bar(g)",
+          description: "1단 토출(단간) 압력 (synthetic)",
+          limit_basis: "synthetic: 2단·단별 압력비 같음 가정 √(P_s·P_d), 한계값 없음",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: vrds-r048,
+          derive: { formula: geometric_mean, inputs: [PI-S-C4102, PI-D-C4102], atm: 1.01325, noise_sigma: 0.016 },
+          control: { mean: 65.201, sigma: 0.04276 } }
       - { tag_id: TI-S-C4102,
           signal: suction_temp,
           unit: "DEG C",
@@ -232,6 +257,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: vrds-r012,
+          derive: { formula: power, out_offset: 273.15, terms: [{ tag: TI-S-C4102, offset: 273.15, exp: 1 }, { tag: PI-D-C4102, offset: 1.01325, exp: 0.1244 }, { tag: PI-S-C4102, offset: 1.01325, exp: -0.1244 }], noise_sigma: 0.180776 },
           control: { mean: 117.3, sigma: 0.2297334741299199 } }
       - { tag_id: FI-C4102,
           signal: flow,
@@ -278,6 +304,7 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: vrds-r016,
+          derive: { formula: power, out_offset: 273.15, terms: [{ tag: TI-LO-C4101, offset: 273.15, exp: 1 }], noise_sigma: 0.0929306 },
           control: { mean: 76.2, sigma: 0.11028022667306278 } }
       - { tag_id: ZI-C4101,
           signal: axial_position,
@@ -328,7 +355,8 @@ equipment:
           interval_sec: 10,
           decimals: 2,
           seed_key: vrds-r021,
-          control: { mean: 67.25, sigma: 0.22766663955316785 } }
+          derive: { formula: power, out_offset: 273.15, terms: [{ tag: TI-S-C4101, offset: 273.15, exp: 1 }, { tag: PI-D-C4101, offset: 1.01325, exp: 0.7518 }, { tag: PI-S-C4101, offset: 1.01325, exp: -0.7518 }], noise_sigma: 0.0683 },
+          control: { mean: 67.25, sigma: 0.303194 } }
       - { tag_id: FI-C4101,
           signal: flow,
           unit: "Nm3/h",
@@ -414,7 +442,8 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: vrds-r029,
-          control: { mean: 58.2, sigma: 0.3990120167440736 } }
+          derive: { formula: power, terms: [{ tag: FI-F4101, exp: 3 }], noise_sigma: 0.119704 },
+          control: { mean: 58.2, sigma: 0.613076 } }
       - { tag_id: FI-F4101,
           signal: flow,
           unit: "m3/h",
@@ -434,7 +463,8 @@ equipment:
           interval_sec: 1,
           decimals: 1,
           seed_key: vrds-r031,
-          control: { mean: 2205.0, sigma: 12.424860035975465 } }
+          derive: { formula: power, terms: [{ tag: FI-F4101, exp: 2 }], noise_sigma: 3.72746 },
+          control: { mean: 2205.0, sigma: 15.638 } }
   # ---------------- UNIT-VRDS-05 잔사유 이송 ----------------
   - equip_id: P-4102
     name: "고온 잔사유 이송 펌프 (Hot Residue Pump)"
@@ -510,7 +540,8 @@ equipment:
           interval_sec: 1,
           decimals: 2,
           seed_key: vrds-r038,
-          control: { mean: 112.2, sigma: 0.4901665879582342 } }
+          derive: { formula: power, terms: [{ tag: FI-P4102, exp: 1 }, { tag: PI-D-P4102, minus: PI-S-P4102, exp: 1 }], noise_sigma: 0.14705 },
+          control: { mean: 112.2, sigma: 1.00425 } }
   # ---------------- UNIT-VRDS-06 환류·순환 ----------------
   - equip_id: P-4103
     name: "분별탑 환류 펌프 (Fractionator Reflux Pump)"

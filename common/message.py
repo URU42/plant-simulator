@@ -1,23 +1,20 @@
-"""메시지 형식 v2 (기획서 6장).
+"""메시지 형식 v3 (기획서 6장).
 
-시뮬레이터가 1분마다 POST /ingest 로 보내는 묶음. 센서가 실제로 알 수 있는 값만 담고,
+시뮬레이터가 POST /ingest 로 보내는 묶음. 센서가 실제로 알 수 있는 값(설비·태그·측정 시각·값)만 담고,
 단위·한계값·이상 여부·시나리오 ID는 일부러 싣지 않는다(6.1).
-v2.x 에서는 필드 추가만 허용한다(6.3).
+v3 에서 status(Good/Bad)를 뺐다 (사용자 확정 2026-11-19: 설비 상태는 플랜트가 아니라 탐지·ML 이 판단한다).
+v3.x 에서는 필드 추가만 허용한다(6.3).
 """
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
-
 from pydantic import AwareDatetime, BaseModel, ConfigDict
 
-SCHEMA_VERSION = "2.0"
-
-Status = Literal["Good", "Bad"]   # 설비 상태. Bad = 그 표본에서 넬슨 규칙이 발동
+SCHEMA_VERSION = "3.0"
 
 
 class Sample(BaseModel):
-    """측정값 한 건. 값은 늘 있고, status 로 설비 상태(Good / Bad)를 함께 싣는다."""
+    """측정값 한 건. 값은 늘 있다."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -25,7 +22,6 @@ class Sample(BaseModel):
     tag_id: str
     ts: AwareDatetime           # 측정 시각. 가속 모드에서는 시뮬레이터 시계 기준
     value: float
-    status: Status
 
 
 class IngestBatch(BaseModel):

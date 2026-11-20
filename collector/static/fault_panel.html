@@ -1,0 +1,124 @@
+<!-- 공장 목록 아래의 고장 설정 (collector.app._snippet 이 __PAGE_DATA__ 를 채워 넣는다). 의존성 없음.
+     적용 중인지는 서버(/{공장}/anomalies/active)에서 읽으므로 다른 화면에 갔다 와도, 다른 사람이 바꿔도 맞게 보인다. -->
+<style>
+  #fault-panel { margin-top: 28px; max-width: 960px; }
+  #fault-panel h2 { font-size: 16px; margin: 0 0 8px; }
+  #fault-panel .fp-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 8px 0; }
+  #fault-panel select, #fault-panel input, #fault-panel button { font: inherit; padding: 4px 8px; }
+  #fault-panel select { max-width: 100%; }
+  #fault-panel button { min-width: 72px; cursor: pointer; }
+  #fault-panel button.stop { color: #fff; background: #c0392b; border: 1px solid #a93226; border-radius: 4px; }
+  #fault-panel .muted { color: #6b6b6b; }
+</style>
+<section id="fault-panel">
+  <h2>고장 설정</h2>
+  <div class="fp-row">
+    <label>설비 <select id="fp-equip"></select></label>
+    <label>고장 유형 <select id="fp-mode"></select></label>
+    <label>진행 속도 <select id="fp-speed">
+      <option value="1">×1 (실제)</option><option value="3">×3</option><option value="5">×5</option><option value="10">×10</option>
+    </select></label>
+    <button id="fp-btn" type="button" disabled>적용</button>
+    <span id="fp-msg" class="muted" role="status"></span>
+  </div>
+  <div class="fp-row">
+    <label>토큰 <input id="fp-token" type="password" autocomplete="off" placeholder="X-Ingest-Token"></label>
+    <span class="muted">적용·해제에 필요합니다. 이 브라우저에만 저장합니다.</span>
+  </div>
+  <p class="muted">진행 속도는 단계가 넘어가는 시각과 서서히 오르는 효과를 빠르게 합니다. 응답 지연, 순간 충격·진동의 모양, 해제 뒤 회복(60초)은 실제 시간 그대로입니다.</p>
+  <p id="fp-active" class="muted">적용 중: 불러오는 중</p>
+</section>
+<script>
+(function () {
+  const DATA = __PAGE_DATA__;
+  const $ = (id) => document.getElementById(id);
+  const equipSel = $("fp-equip"), modeSel = $("fp-mode"), speedSel = $("fp-speed"), btn = $("fp-btn"), msg = $("fp-msg"), tokenIn = $("fp-token");
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+  };
+  const modes = new Map();      // "공장|설비" → [{mode, name}]
+  let active = new Map();       // "공장|설비" → {event_id, mode, start_at}
+  const url = (key, path) => `${DATA.root}/${encodeURIComponent(key)}/${path}`;
+  const getJSON = (u) => fetch(u, { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(`${u} ${r.status}`); return r.json(); });
+  const kst = (iso) => iso ? new Date(iso).toLocaleString("sv-SE", { timeZone: "Asia/Seoul" }) : "—";
+
+  tokenIn.value = store.get("plant-sim:token") || "";
+  tokenIn.addEventListener("change", () => store.set("plant-sim:token", tokenIn.value));
+
+  async function load() {
+    for (const p of DATA.plants) {
+      const [equipment, fms] = await Promise.all([getJSON(url(p.key, "equipment")), getJSON(url(p.key, "fault-modes"))]);
+      const group = document.createElement("optgroup");
+      group.label = `${p.name} (${p.plant_id})`;
+      for (const e of equipment) {
+        const list = fms.filter((m) => m.equip_ids.includes(e.equip_id)).map((m) => ({ mode: m.mode, name: m.name }));
+        if (!list.length) continue;
+        const v = `${p.key}|${e.equip_id}`;
+        modes.set(v, list);
+        const o = document.createElement("option");
+        o.value = v;
+        o.textContent = `${e.equip_id} · ${e.name}`;
+        group.appendChild(o);
+      }
+      equipSel.appendChild(group);
+    }
+    await refresh();
+    const saved = store.get("plant-sim:equip");      // 마지막에 고른 설비, 없으면 적용 중인 첫 설비
+    equipSel.value = saved && modes.has(saved) ? saved : (active.keys().next().value || equipSel.value);
+    render();
+  }
+
+  async function refresh() {
+    const next = new Map();
+    for (const p of DATA.plants) {
+      for (const a of await getJSON(url(p.key, "anomalies/active"))) next.set(`${p.key}|${a.equip_id}`, a);
+    }
+    active = next;
+    $("fp-active").textContent = "적용 중: " + (active.size
+      ? [...active.entries()].map(([k, a]) => `${k.split("|")[1]} ${a.mode} ×${a.speed} (${kst(a.start_at)}부터)`).join(", ")
+      : "없음");
+  }
+
+  function render() {
+    const v = equipSel.value, a = active.get(v), keep = modeSel.value, list = modes.get(v) || [];
+    modeSel.replaceChildren(...list.map((m) => {
+      const o = document.createElement("option");
+      o.value = m.mode;
+      o.textContent = `${m.name} (${m.mode})`;
+      return o;
+    }));
+    if (a) { modeSel.value = a.mode; speedSel.value = String(a.speed); }
+    else if (list.some((m) => m.mode === keep)) modeSel.value = keep;
+    modeSel.disabled = speedSel.disabled = !!a;
+    btn.disabled = !v;
+    btn.textContent = a ? "해제" : "적용";
+    btn.classList.toggle("stop", !!a);
+  }
+
+  equipSel.addEventListener("change", () => { store.set("plant-sim:equip", equipSel.value); msg.textContent = ""; render(); });
+
+  btn.addEventListener("click", async () => {
+    const [key, equip] = equipSel.value.split("|"), a = active.get(equipSel.value);
+    const headers = { "Content-Type": "application/json" };
+    if (tokenIn.value) headers["X-Ingest-Token"] = tokenIn.value;
+    btn.disabled = true;
+    msg.textContent = a ? "해제하는 중…" : "적용하는 중…";
+    try {
+      const r = a
+        ? await fetch(url(key, `anomalies/${encodeURIComponent(equip)}/stop`), { method: "POST", headers })
+        : await fetch(url(key, "anomalies"), { method: "POST", headers, body: JSON.stringify({ equip_id: equip, mode: modeSel.value, speed: Number(speedSel.value) }) });
+      const body = await r.json().catch(() => ({}));
+      if (r.ok) msg.textContent = a ? `해제했습니다 (${kst(body.stop_requested_at)})` : `적용했습니다 (${body.event_id} ×${body.speed}, ${kst(body.start_at)}부터)`;
+      else msg.textContent = `실패 ${r.status}: ${typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail)}`;
+    } catch (e) {
+      msg.textContent = "실패: " + e;
+    }
+    await refresh().catch(() => {});
+    render();
+  });
+
+  load().catch((e) => { msg.textContent = "불러오기 실패: " + e; });
+  setInterval(() => refresh().then(render).catch(() => {}), 5000);    // 다른 화면·다른 사람이 바꾼 상태도 따라간다
+})();
+</script>

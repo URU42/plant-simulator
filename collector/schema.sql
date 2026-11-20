@@ -1,7 +1,8 @@
 -- 프로젝트 DB (SQLite, WAL). 시각 컬럼은 모두 UTC ISO 문자열.
 -- 스키마 v3: 태그는 (equip_id, tag_id) 복합키로 식별한다. 태그명은 같은 설비 안에서만 고유하다.
--- v3 에서 태그에 Nelson 관리 기준(control_mean·control_sigma)을 더하고 알람 지연·측정 위치 칸과 정비·고장 이력 테이블을 뺐고,
--- 한계값 알람(alarm_detail)을 Nelson 알람(nelson_alarm)으로 바꿨다.
+-- v3 에서 태그에 Nelson 관리 기준(control_mean·control_sigma)을 더하고 알람 지연·측정 위치 칸과 정비·고장 이력 테이블을 뺐다.
+-- v4 에서 수집 서버의 Nelson 판정(nelson_alarm)을 빼고 사건 장부를 고장 모드 주입용으로 바꿨다. control_mean 은 운전점을 반영한 값.
+-- v5 에서 status(Good/Bad/NoData) 칸을 뺐다. 설비 상태는 탐지·ML 이 판단한다. 집계 구간에 표본이 없으면 count 0.
 CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL);
 
 -- 시설 계층 (구성안에서 적재)
@@ -29,7 +30,7 @@ CREATE TABLE IF NOT EXISTS equipment_tag (
 
 -- 원시 값 (7.2) — 보관 기간은 실행 설정 raw_retention_days
 CREATE TABLE IF NOT EXISTS ts_raw (
-    equip_id TEXT NOT NULL, tag_id TEXT NOT NULL, ts TEXT NOT NULL, value REAL, status TEXT NOT NULL,
+    equip_id TEXT NOT NULL, tag_id TEXT NOT NULL, ts TEXT NOT NULL, value REAL,
     batch_id TEXT NOT NULL, received_at TEXT NOT NULL,
     PRIMARY KEY (equip_id, tag_id, ts)
 ) WITHOUT ROWID;
@@ -37,43 +38,32 @@ CREATE INDEX IF NOT EXISTS ix_ts_raw_ts ON ts_raw (ts);
 
 -- 현재값
 CREATE TABLE IF NOT EXISTS tag_current (
-    equip_id TEXT NOT NULL, tag_id TEXT NOT NULL, ts TEXT NOT NULL, value REAL, status TEXT NOT NULL, received_at TEXT NOT NULL,
+    equip_id TEXT NOT NULL, tag_id TEXT NOT NULL, ts TEXT NOT NULL, value REAL, received_at TEXT NOT NULL,
     PRIMARY KEY (equip_id, tag_id)
 );
 
 -- 집계 (7.3). bucket_start 는 구간 시작 시각
 CREATE TABLE IF NOT EXISTS ts_10m (
     equip_id TEXT NOT NULL, tag_id TEXT NOT NULL, bucket_start TEXT NOT NULL,
-    avg REAL, min REAL, max REAL, sd REAL, count INTEGER NOT NULL, status TEXT NOT NULL,
+    avg REAL, min REAL, max REAL, sd REAL, count INTEGER NOT NULL,
     PRIMARY KEY (equip_id, tag_id, bucket_start)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS ts_1h (
     equip_id TEXT NOT NULL, tag_id TEXT NOT NULL, bucket_start TEXT NOT NULL,
-    avg REAL, min REAL, max REAL, sd REAL, count INTEGER NOT NULL, status TEXT NOT NULL,
+    avg REAL, min REAL, max REAL, sd REAL, count INTEGER NOT NULL,
     PRIMARY KEY (equip_id, tag_id, bucket_start)
 ) WITHOUT ROWID;
-
--- Nelson 알람 (설계 2026-11-12-nelson-anomaly §4.8). (태그, 규칙)마다 연속 위반을 한 행으로 묶는다.
--- rule 1~8. direction: hi / lo (규칙 1·2·3·5·6), 규칙 4·7·8 은 NULL. cleared_at 은 15 표본 연속 미성립의 첫 표본 시각, 열려 있으면 NULL.
--- value_at_occurrence 는 처음 성립한 표본의 값. 심각도는 두지 않는다.
-CREATE TABLE IF NOT EXISTS nelson_alarm (
-    alarm_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    equip_id TEXT NOT NULL, tag_id TEXT NOT NULL, rule INTEGER NOT NULL, direction TEXT,
-    occurred_at TEXT NOT NULL, cleared_at TEXT, last_hit_at TEXT NOT NULL,
-    hit_count INTEGER NOT NULL, value_at_occurrence REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS ix_nelson_alarm_occurred ON nelson_alarm (occurred_at);
-CREATE INDEX IF NOT EXISTS ix_nelson_alarm_cleared ON nelson_alarm (cleared_at);
 
 -- 수신 묶음 (중복 확인)과 배치 진행 상태
 CREATE TABLE IF NOT EXISTS ingest_batch (batch_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, received_at TEXT NOT NULL, stored INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS job_state (name TEXT PRIMARY KEY, last_bucket_end TEXT NOT NULL);
 
--- 이상 사건 장부 (설계 2026-11-12-nelson-anomaly §4.5–4.6). 정답지 겸 생성기에 알리는 상태.
--- origin: injected(주입) / persistent(지속 고장) / spontaneous(자동 이상). kind·cause·action 은 분류, response_tags 는 반응 태그 JSON 목록.
--- scheduled_end_at 은 자동 이상의 정해진 끝(주입·지속 고장은 NULL), stop_requested_at 은 멈춤 시각(멈추지 않았으면 NULL).
+-- 이상 사건 장부 = 정답지. 주입한 고장 모드(config/fault_modes.yaml)만 적는다 (정상 운전에는 사건이 없다).
+-- kind·cause·action 은 고장 모드의 정답 분류, expect 는 평가용 기대값 JSON(없으면 NULL),
+-- plan 은 주입 당시의 단계({id,name,at_sec,nelson_quiet})·태그별 효과 시작({equip_id,tag_id,stage,start_sec})·unobserved(태그가 없어 못 만든 신호) JSON.
+-- stop_requested_at 은 멈춤 시각(멈추지 않았으면 NULL).
 CREATE TABLE IF NOT EXISTS anomaly_event (
-    event_id TEXT PRIMARY KEY, origin TEXT NOT NULL, equip_id TEXT NOT NULL, rule INTEGER NOT NULL, normal_change INTEGER NOT NULL,
-    kind TEXT NOT NULL, cause TEXT NOT NULL, action TEXT NOT NULL, response_tags TEXT NOT NULL,
-    start_at TEXT NOT NULL, scheduled_end_at TEXT, stop_requested_at TEXT
+    event_id TEXT PRIMARY KEY, equip_id TEXT NOT NULL, mode TEXT NOT NULL,
+    kind TEXT NOT NULL, cause TEXT NOT NULL, action TEXT NOT NULL, expect TEXT, plan TEXT NOT NULL,
+    start_at TEXT NOT NULL, stop_requested_at TEXT
 );

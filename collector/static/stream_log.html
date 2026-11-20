@@ -1,0 +1,17 @@
+<!-- 첫 화면의 브라우저 로그: Redis Stream(plant-sim:data:{공장})으로 보내는 메시지를 그대로 콘솔에 미리 보여 준다.
+     (collector.app._snippet 이 __PAGE_DATA__ 를 채운다.) 서버가 공장별로 초마다 만든 {plant, plant_id, ts, samples} 를 루트 /stream 으로 받는다.
+     실시간이면 공장 수만큼 초당 메시지가 나오고, 10초 태그는 그 초의 메시지에만 들어 있다. -->
+<p style="color:#6b6b6b;margin-top:24px">브라우저 콘솔(F12 → Console)에 Redis Stream 으로 보내는 메시지를 공장별로 초마다 하나씩 보여 줍니다.</p>
+<script>
+(function () {
+  const DATA = __PAGE_DATA__;
+  const kst = (iso) => new Date(iso).toLocaleString("sv-SE", { timeZone: "Asia/Seoul" });
+  const es = new EventSource(`${DATA.root}/stream`);        // 모든 공장을 연결 하나로. 끊기면 스스로 다시 연결한다
+  for (const p of DATA.plants) {
+    es.addEventListener(p.key, (ev) => {
+      const m = JSON.parse(ev.data);                        // Redis Stream 의 data 필드와 같은 JSON
+      console.log(`[stream] plant-sim:data:${m.plant} ${m.plant_id} ${kst(m.ts)} 태그 ${m.samples.length}개`, m);
+    });
+  }
+})();
+</script>

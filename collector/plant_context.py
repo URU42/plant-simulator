@@ -6,15 +6,13 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from collector.alarm_stream import AlarmStream
-from collector.alarms import AlarmTracker
 from collector.anomaly_book import AnomalyBook
+from collector.data_stream import DataStream
 from collector.ingest import IngestResult, Rejection
 from collector.jobs import MAX_WINDOWS_PER_ADVANCE, JobRunner
 from collector.plants import PlantEntry
@@ -23,11 +21,11 @@ from collector.storage import Storage
 from collector.stream import Broadcaster
 from common.config_models import PlantConfig, RuntimeConfig, TagKey, load_plant, load_runtime
 from common.message import Sample
+from simulator.fault import FaultMode
+from simulator.instrument import InstrumentSchedule
 from common.timefmt import from_db, to_db
 
-log = logging.getLogger("collector")
 
-NO_DATA_SEND_INTERVALS = 3      # 전송 주기(또는 더 긴 태그 주기) 3번 동안 안 들어오면 NoData (기획서 6.2)
 
 
 @dataclass
@@ -37,24 +35,23 @@ class PlantContext:
     runtime: RuntimeConfig
     storage: Storage
     jobs: JobRunner
-    broadcaster: Broadcaster
+    broadcaster: Broadcaster                  # /{공장}/stream: 받은 묶음의 표본 배열 (현재값 화면)
     listing: list[dict]                       # GET /equipment 응답 (계층 순서)
     tag_keys: set[TagKey]
-    alarms: AlarmTracker                      # 받을 때마다 Nelson 판정해 nelson_alarm 에 적는다
-    book: AnomalyBook                         # 이상 사건 장부 (통합 실행 생성기의 EventSource, 정답지)
+    book: AnomalyBook                         # 고장 모드 사건 장부 (통합 실행 생성기의 EventSource, 정답지)
     live: bool = False                        # 생성기가 실시간(또는 가속)으로 시계를 따라잡았는가. 백필·밀린 구간 재생 중이면 False
     catch_up_task: asyncio.Task | None = field(default=None)
     simulator_error: str | None = field(default=None)               # 통합 실행의 생성기 태스크가 예외로 끝났을 때
-    alarm_stream: AlarmStream | None = field(default=None)          # 있으면 실시간 구간의 알람 열림·닫힘을 Redis 로 발행
     # 저장·배치 전진은 워커 스레드에서도 돌 수 있다(통합 실행). 한 공장의 SQLite 트랜잭션이 겹치지 않도록 락으로 직렬화한다.
     lock: threading.Lock = field(default_factory=threading.Lock)
     loop: asyncio.AbstractEventLoop | None = field(default=None)    # SSE 발행을 루프 스레드로 넘기기 위해
+    # 초마다 메시지 하나 {plant, plant_id, ts, samples}: 루트 /stream(브라우저 로그)과 Redis Stream 이 같은 메시지를 받는다
+    data_broadcaster: Broadcaster = field(default_factory=Broadcaster)
+    data_stream: DataStream | None = field(default=None)
 
     @classmethod
-    def open(cls, entry: PlantEntry, persistent_fault_interval_min: float | None = None,
-             persistent_fault_max_open: int | None = None, alarm_stream: AlarmStream | None = None) -> "PlantContext":
-        """persistent_fault_interval_min·persistent_fault_max_open 이 있으면 runtime 의 지속 고장 간격·동시 상한을 덮어쓴다.
-        alarm_stream 은 공장들이 함께 쓰는 Redis 발행기다."""
+    def open(cls, entry: PlantEntry, modes: dict[str, FaultMode], redis_url: str | None = None) -> "PlantContext":
+        """modes 는 공장들이 함께 쓰는 고장 모드 정의(config/fault_modes.yaml). redis_url 이 있으면 Redis Stream 으로도 보낸다."""
         plant = load_plant(entry.plant)
         runtime = load_runtime(entry.runtime)
         Path(entry.db).parent.mkdir(parents=True, exist_ok=True) if entry.db != ":memory:" else None
@@ -66,27 +63,24 @@ class PlantContext:
             loop = None
         return cls(key=entry.key, plant=plant, runtime=runtime, storage=storage, jobs=JobRunner(storage, plant, runtime),
                    broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime), tag_keys=storage.tag_keys(),
-                   alarms=AlarmTracker(storage, plant), loop=loop, alarm_stream=alarm_stream,
-                   book=AnomalyBook(storage, plant, runtime.seed, runtime.persistent_fault_interval_min
-                                    if persistent_fault_interval_min is None else persistent_fault_interval_min,
-                                    runtime.persistent_fault_max_open
-                                    if persistent_fault_max_open is None else persistent_fault_max_open))
+                   loop=loop, book=AnomalyBook(storage, plant, modes, _instrument(plant, runtime)),
+                   data_stream=DataStream.from_url(redis_url, entry.key) if redis_url else None)
 
     def set_live(self, at: float) -> None:
-        """생성기가 실시간으로 넘어가 시계를 따라잡았다(at = 따라잡은 첫 구간 시작, epoch 초). 이때부터 주입을 받고 지속 고장을 연다."""
-        self.book.set_live(at)
+        """생성기가 실시간으로 넘어가 시계를 따라잡았다(at = 따라잡은 첫 구간 시작, epoch 초). 이때부터 주입을 받는다."""
         self.live = True
 
     def close(self) -> None:
         if self.catch_up_task:
             self.catch_up_task.cancel()
+        if self.data_stream:
+            self.data_stream.close()
         self.storage.close()
 
     # --- 수신 핵심 (HTTP 라우트와 LocalSender 가 함께 쓴다) -------------------------
     def receive(self, batch_id: str, source_id: str, samples: list[Sample], received_at: str,
                 rejections: list[Rejection] = ()) -> IngestResult:
-        """검증을 마친 샘플을 저장하고 Nelson 판정을 반영한 뒤 배치를 전진시킨다. 같은 batch_id 는 저장하지 않고, 보관 기간 밖 행은 거절한다.
-        실시간 구간이면 알람 열림·닫힘을 락 밖에서 Redis 로 발행한다 (백필·밀린 구간 재생의 알람은 /alarms 로만 본다)."""
+        """검증을 마친 샘플을 저장하고 배치를 전진시킨다. 같은 batch_id 는 저장하지 않고, 보관 기간 밖 행은 거절한다."""
         reasons = list(rejections)
         oldest = self.oldest_allowed()
         accepted: list[Sample] = []
@@ -95,22 +89,23 @@ class PlantContext:
                 reasons.append(Rejection(index=i, tag_id=s.tag_id, reason=f"ts {s.ts.isoformat()} is older than raw retention"))
             else:
                 accepted.append(s)
-        rows = [(s.equip_id, s.tag_id, to_db(s.ts), s.value, s.status) for s in accepted]
+        rows = [(s.equip_id, s.tag_id, to_db(s.ts), s.value) for s in accepted]
         with self.lock:
             if self.storage.batch_seen(batch_id):
                 return IngestResult(batch_id=batch_id, duplicate=True, accepted=len(accepted), stored=0,
                                     rejected=len(reasons), reasons=reasons)
             stored = self.storage.store_batch(batch_id, source_id, received_at, rows)
-            mismatched, events = self.alarms.observe(rows)
             behind = self.jobs.advance(self.storage.sim_now()) >= MAX_WINDOWS_PER_ADVANCE if accepted else False
-        if mismatched:      # /alarms 는 수집 서버 판정을 따른다
-            log.warning("plant %s: status mismatch on %d samples", self.key, mismatched)
-        if events and self.live and self.alarm_stream is not None:
-            self.alarm_stream.publish(self.key, events)
         if behind:
             self.start_catch_up()
-        if accepted and self.broadcaster.has_subscribers():   # 구독자가 없으면 직렬화도 하지 않는다
-            self._publish([s.model_dump(mode="json") for s in accepted])
+        if accepted and (self.broadcaster.has_subscribers() or self.data_broadcaster.has_subscribers() or self.data_stream):
+            dumped = [s.model_dump(mode="json") for s in accepted]       # 받는 곳이 없으면 직렬화도 하지 않는다
+            messages = self.messages(accepted, dumped)
+            if self.data_stream:
+                self.data_stream.submit(messages)
+            self._publish("samples", dumped, self.broadcaster)
+            for m in messages:
+                self._publish(self.key, m, self.data_broadcaster)
         return IngestResult(batch_id=batch_id, duplicate=False, accepted=len(accepted), stored=stored,
                             rejected=len(reasons), reasons=reasons)
 
@@ -121,12 +116,22 @@ class PlantContext:
         except RuntimeError:
             return False
 
-    def _publish(self, data: list[dict]) -> None:
+    def messages(self, samples: list[Sample], dumped: list[dict]) -> list[dict]:
+        """측정 시각(초)마다 메시지 하나 {plant, plant_id, ts, samples}, 시각 순. 10초 태그는 그 초의 메시지에만 들어 있다."""
+        by_ts: dict = {}
+        for s, d in zip(samples, dumped):
+            by_ts.setdefault(s.ts, []).append(d)
+        return [{"plant": self.key, "plant_id": self.plant.plant.plant_id, "ts": rows[0]["ts"], "samples": rows}
+                for _, rows in sorted(by_ts.items())]
+
+    def _publish(self, event: str, data, broadcaster: Broadcaster) -> None:
         """SSE 큐는 루프 스레드에서만 만진다. 워커 스레드에서 왔으면 루프로 넘긴다."""
+        if not broadcaster.has_subscribers():
+            return
         if self.loop is not None and self.loop.is_running() and not self._on_loop_thread():
-            self.loop.call_soon_threadsafe(self.broadcaster.publish, "samples", data)
+            self.loop.call_soon_threadsafe(broadcaster.publish, event, data)
         else:
-            self.broadcaster.publish("samples", data)
+            broadcaster.publish(event, data)
 
     def _advance_locked(self) -> int:
         with self.lock:
@@ -170,19 +175,16 @@ class PlantContext:
             return None
         return to_db(from_db(sim_now) - timedelta(days=self.runtime.raw_retention_days))
 
-    def with_status(self, row: dict | None, key: TagKey) -> dict:
-        """현재값 행의 status 를 정한다. 행의 Good·Bad 를 그대로 쓰되, 행이 없거나 전송·태그 주기 중 긴 쪽의 3배를
-        넘게 안 들어오면 NoData."""
-        if row is None:
-            return {"equip_id": key[0], "tag_id": key[1], "ts": None, "value": None,
-                    "received_at": None, "status": "NoData"}
-        age = (from_db(self.storage.sim_now()) - from_db(row["ts"])).total_seconds()
-        interval = max(self.runtime.send_interval_sec, self.plant.tag_interval_sec(key, self.runtime.sample_interval_sec))
-        return row | {"status": "NoData" if age > NO_DATA_SEND_INTERVALS * interval else row["status"]}
+    @staticmethod
+    def current_row(row: dict | None, key: TagKey) -> dict:
+        """현재값 행. 아직 값이 없는 태그는 ts·value 가 null 이다."""
+        return row or {"equip_id": key[0], "tag_id": key[1], "ts": None, "value": None, "received_at": None}
 
 
 def equipment_listing(plant: PlantConfig, runtime: RuntimeConfig) -> list[dict]:
-    """unit_groups → units → 설비(yaml 순서) 순으로 설비와 태그를 펼친다. 마스터 참고 필드와 한계값도 함께."""
+    """unit_groups → units → 설비(yaml 순서) 순으로 설비와 태그를 펼친다. 마스터 참고 필드와 한계값도 함께.
+    control 은 운전점을 반영한 μ·σ (탐지 쪽 Nelson 기준)."""
+    control = plant.control_by_key()
     out = []
     for group in plant.plant.unit_groups:
         for unit in group.units:
@@ -192,10 +194,17 @@ def equipment_listing(plant: PlantConfig, runtime: RuntimeConfig) -> list[dict]:
                 out.append({
                     "equip_id": e.equip_id, "name": e.name, "type": e.type, "unit_id": unit.id, "unit_name": unit.name,
                     "unit_group_id": group.id, "unit_group_name": group.name, "driven_by": e.driven_by,
+                    "operating": e.operating.model_dump() if e.operating else None,
                     "tags": [{"tag_id": t.tag_id, "signal": t.signal, "unit": t.unit, "description": t.description,
                               "interval_sec": plant.tag_interval_sec((e.equip_id, t.tag_id), runtime.sample_interval_sec),
                               "decimals": t.decimals, "normal_ref": t.normal_ref, "limit_basis": t.limit_basis,
                               "limits": t.limits.model_dump(exclude_none=True) if t.limits else None,
-                              "control": t.control.model_dump()} for t in e.tags],
+                              "control": dict(zip(("mean", "sigma"), control[(e.equip_id, t.tag_id)]))} for t in e.tags],
                 })
     return out
+
+
+def _instrument(plant: PlantConfig, runtime: RuntimeConfig) -> InstrumentSchedule | None:
+    """정답지에 실을 계측 이상 일정. 생성기와 같은 실행 설정(시드·빈도)으로 다시 계산한다."""
+    cfg = runtime.instrument_faults
+    return InstrumentSchedule(plant, cfg, runtime.seed, runtime.sample_interval_sec) if cfg.enabled else None

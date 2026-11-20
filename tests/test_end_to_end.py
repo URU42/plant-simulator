@@ -47,8 +47,8 @@ async def test_resumed_backfill_through_collector(plant_path, runtime_path, capl
     mu = {k: t.control.mean for k, t in plant.tag_by_key().items()}
     with TestClient(create_single_app(plant_path, runtime_path, ":memory:")) as client:
         sender = ClientSender(client)
-        seed = [Sample(equip_id=e, tag_id=t, ts=RESUME - timedelta(seconds=10), value=mu[(e, t)], status="Good") for e, t in keys]
-        seed += [Sample(equip_id=e, tag_id=t, ts=RESUME, value=mu[(e, t)], status="Good") for e, t in keys]
+        seed = [Sample(equip_id=e, tag_id=t, ts=RESUME - timedelta(seconds=10), value=mu[(e, t)]) for e, t in keys]
+        seed += [Sample(equip_id=e, tag_id=t, ts=RESUME, value=mu[(e, t)]) for e, t in keys]
         await sender.send(IngestBatch(source_id="T", batch_id="b-seed", sent_at=RESUME, samples=seed))
 
         await run_backfill_then_live(plant, runtime, sender, now=NOW, live_clock=SimClock.backfill(NOW),
@@ -61,10 +61,8 @@ async def test_resumed_backfill_through_collector(plant_path, runtime_path, capl
         assert st.count("ts_raw") == 2 * len(keys) + (per_hour - len(keys)) + per_hour // 30
         # 10분 구간: 시드의 10:50 구간 + 이어 보낸 6개 (12:00 구간은 아직 미완료)
         assert st.query("SELECT COUNT(*) FROM ts_10m WHERE tag_id = 'VI-A-P3103' AND count > 0")[0][0] == 7
-        # 수집 서버가 생성기와 같은 판정을 한다: 알람이 생기고 받은 status 와 어긋난 표본이 없다
-        assert client.get("/plant/alarms").json() and "status mismatch" not in caplog.text
 
         recent = st.recent_values(3)
         assert set(recent) == set(keys) and all(len(v) == 3 for v in recent.values())
         cur = client.get("/plant/equipment/P-3103/tags/VI-A-P3103/current").json()
-        assert cur["status"] in ("Good", "Bad") and cur["value"] == recent[("P-3103", "VI-A-P3103")][-1]
+        assert cur["value"] == recent[("P-3103", "VI-A-P3103")][-1]

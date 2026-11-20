@@ -15,7 +15,7 @@ from common.config_models import PlantConfig, RuntimeConfig, load_plant, load_ru
 from common.message import IngestBatch, make_batch_id
 from common.nelson import HISTORY
 from common.sim_clock import KST, SimClock, align_down
-from simulator.nelson_model import EventSource, NelsonGenerator
+from simulator.model import EventSource, PlantGenerator
 from simulator.sender import HttpSender, Sender
 
 log = logging.getLogger("simulator")
@@ -32,7 +32,7 @@ class Simulator:
         self.sender = sender
         self.clock = clock
         self.window = timedelta(seconds=window_sec or runtime.send_interval_sec)
-        self.generator = NelsonGenerator(plant, runtime, source)
+        self.generator = PlantGenerator(plant, runtime, source)
         self.seq = 0
         # 다음에 만들 구간의 시작. 재시작 때는 catch_up_windows 만큼 되감아 죽어 있던 구간을 다시 보낸다(수집 서버가 중복은 버린다)
         self.cursor: datetime = align_down(clock.now(), runtime.send_interval_sec) - self.window * catch_up_windows

@@ -19,28 +19,27 @@ def client(rfcc_plant_path, rfcc_runtime_path, tmp_path):
 
 
 def _send(client, tag_id, equip_id, start, count, step_sec, value):
-    samples = [Sample(equip_id=equip_id, tag_id=tag_id, ts=start + timedelta(seconds=i * step_sec), value=value, status="Good")
+    samples = [Sample(equip_id=equip_id, tag_id=tag_id, ts=start + timedelta(seconds=i * step_sec), value=value)
                for i in range(count)]
     batch = IngestBatch(source_id="T", batch_id=f"b-{tag_id}-{start.timestamp()}", sent_at=start, samples=samples)
     assert client.post("/plant/ingest", content=batch.model_dump_json(), headers={"content-type": "application/json"}).status_code == 200
 
 
-def test_ten_second_tag_is_good_until_three_of_its_intervals(client):
+def test_current_keeps_last_value_without_status(client):
+    """현재값은 마지막 값과 측정 시각만 낸다 (status 칸 없음, 2026-11-19). 오래됐는지는 ts 로 본다."""
     _send(client, "TI-P-1101A", "P-1101A", T0, 1, 10, 66.0)
-    _send(client, "VI-P-1101A", "P-1101A", T0, 10, 1, 1.45)                 # sim_now = T0+9s
-    assert client.get("/plant/equipment/P-1101A/tags/TI-P-1101A/current").json()["status"] == "Good"
     _send(client, "VI-P-1101A", "P-1101A", T0 + timedelta(seconds=31), 1, 1, 1.45)
-    assert client.get("/plant/equipment/P-1101A/tags/TI-P-1101A/current").json()["status"] == "NoData"
+    cur = client.get("/plant/equipment/P-1101A/tags/TI-P-1101A/current").json()
+    assert cur["value"] == 66.0 and cur["ts"] == "2026-11-09T01:00:00+00:00" and "status" not in cur
 
 
-def test_aggregates_exist_and_alarms_are_nelson_only(client):
-    _send(client, "VI-P-1101A", "P-1101A", T0, 600, 1, 9.9)                 # 경고 상한 1.5703 위, 한계값 알람은 만들지 않는다 (Nelson 판정만)
+def test_aggregates_exist_and_collector_makes_no_alarm(client):
+    _send(client, "VI-P-1101A", "P-1101A", T0, 600, 1, 9.9)                 # 경고 상한 1.5703 위. 수집 서버는 판정하지 않는다 (탐지 쪽 몫)
     _send(client, "VI-P-1101A", "P-1101A", T0 + timedelta(minutes=10), 1, 1, 9.9)
     st = client.app.state.plants["plant"].storage
     assert st.query("SELECT COUNT(*) FROM ts_10m WHERE tag_id = 'VI-P-1101A' AND count > 0")[0][0] == 1
-    _send(client, "VI-P-1101A", "P-1101A", T0 + timedelta(minutes=20), 1, 1, 9.9)
-    rule1 = [(a["direction"], a["hit_count"], a["cleared_at"]) for a in client.get("/plant/alarms", params={"rule": 1}).json()]
-    assert rule1 == [("hi", 602, None)]                                      # 표본마다 |z|>3: 열린 한 건으로 묶인다
+    tables = {r[0] for r in st.query("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "nelson_alarm" not in tables and client.get("/plant/alarms").status_code == 404
 
 
 def test_old_ingest_batches_are_deleted(client):
@@ -59,16 +58,16 @@ def test_equipment_listing_follows_hierarchy(client):
     assert [e["equip_id"] for e in equipment][:3] == ["P-1101A", "B-1201", "E-1202"]
     assert equipment[0]["unit_group_name"] == "원료 공급" and equipment[1]["driven_by"] == "E-1202"
     tags = {t["tag_id"]: t for e in equipment for t in e["tags"]}
-    assert len(tags) == 81 and tags["TI-P-1101A"]["interval_sec"] == 10 and tags["ZI-E-1202"]["decimals"] == 5
+    assert len(tags) == 82 and tags["TI-P-1101A"]["interval_sec"] == 10 and tags["ZI-E-1202"]["decimals"] == 5
     assert tags["TI-P-1101A"]["description"] == "펌프 구동측 베어링 온도"
 
 
-def test_current_lists_every_tag_with_status(client):
+def test_current_lists_every_tag(client):
     _send(client, "VI-P-1101A", "P-1101A", T0, 1, 1, 1.45)
     rows = {r["tag_id"]: r for r in client.get("/plant/current").json()}
-    assert len(rows) == 81
-    assert rows["VI-P-1101A"]["status"] == "Good" and rows["VI-P-1101A"]["value"] == 1.45
-    assert rows["TI-P-1101A"]["status"] == "NoData" and rows["TI-P-1101A"]["value"] is None
+    assert len(rows) == 82
+    assert rows["VI-P-1101A"]["value"] == 1.45 and "status" not in rows["VI-P-1101A"]
+    assert rows["TI-P-1101A"]["value"] is None and rows["TI-P-1101A"]["ts"] is None      # 아직 값이 없는 태그
 
 
 def test_root_serves_html(client):
