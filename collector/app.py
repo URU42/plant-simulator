@@ -259,7 +259,8 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         modes = load_fault_modes(plants.fault_modes)
-        app.state.plants = {entry.key: PlantContext.open(entry, modes, settings.redis_url) for entry in plants.plants}
+        app.state.plants = {entry.key: PlantContext.open(entry, modes, settings.redis_url, settings.reset_db_on_schema_change)
+                            for entry in plants.plants}
         app.state.started_at = to_db(datetime.now(timezone.utc))
         tasks: list[asyncio.Task] = []
         switch_interval = sys.getswitchinterval()
@@ -326,15 +327,16 @@ def _simulator_done(task: asyncio.Task, ctx: PlantContext) -> None:
     log.error("embedded simulator %s died: %s", task.get_name(), ctx.simulator_error)
 
 
-def check_plants(plants: PlantsConfig) -> None:
-    """서버를 띄우기 전에 공장을 하나씩 열어 본다. 설정·DB 문제는 traceback 대신 "plant <key>: 이유" 한 줄로 알린다."""
+def check_plants(plants: PlantsConfig, reset_db: bool = False) -> None:
+    """서버를 띄우기 전에 공장을 하나씩 열어 본다. 설정·DB 문제는 traceback 대신 "plant <key>: 이유" 한 줄로 알린다.
+    reset_db 면 스키마 버전이 다른 DB 파일은 여기서 지우고 새로 만든다."""
     try:
         modes = load_fault_modes(plants.fault_modes)
     except (OSError, ValueError) as e:       # 파일 없음·형식 오류 (pydantic 검증 오류도 ValueError)
         raise ConfigError(f"fault modes {plants.fault_modes}: {e}") from None
     for entry in plants.plants:
         try:
-            PlantContext.open(entry, modes).close()
+            PlantContext.open(entry, modes, reset_db=reset_db).close()
         except ConfigError as e:
             raise ConfigError(f"plant {entry.key}: {e}") from None
 
@@ -414,7 +416,7 @@ def main(argv=None) -> None:
     try:
         settings = Settings.from_env(with_simulators=args.with_simulators or None, time_mode=args.time_mode,
                                      backfill_days=args.backfill_days)
-        check_plants(plants)
+        check_plants(plants, settings.reset_db_on_schema_change)
     except ConfigError as e:
         sys.exit(f"error: {e}")
     uvicorn.run(create_app(plants, settings), host=args.host, port=args.port, root_path=settings.root_path)

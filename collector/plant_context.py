@@ -50,12 +50,14 @@ class PlantContext:
     data_stream: DataStream | None = field(default=None)
 
     @classmethod
-    def open(cls, entry: PlantEntry, modes: dict[str, FaultMode], redis_url: str | None = None) -> "PlantContext":
-        """modes 는 공장들이 함께 쓰는 고장 모드 정의(config/fault_modes.yaml). redis_url 이 있으면 Redis Stream 으로도 보낸다."""
+    def open(cls, entry: PlantEntry, modes: dict[str, FaultMode], redis_url: str | None = None,
+             reset_db: bool = False) -> "PlantContext":
+        """modes 는 공장들이 함께 쓰는 고장 모드 정의(config/fault_modes.yaml). redis_url 이 있으면 Redis Stream 으로도 보낸다.
+        reset_db 면 스키마 버전이 다른 DB 파일을 지우고 새로 만든다."""
         plant = load_plant(entry.plant)
         runtime = load_runtime(entry.runtime)
         Path(entry.db).parent.mkdir(parents=True, exist_ok=True) if entry.db != ":memory:" else None
-        storage = Storage(entry.db)
+        storage = Storage(entry.db, reset_on_schema_change=reset_db)
         seed_master(storage, plant)
         try:
             loop = asyncio.get_running_loop()

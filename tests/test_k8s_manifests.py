@@ -28,6 +28,7 @@ def test_k8s_manifests_build_and_fit_budget():
     env = {e["name"]: e for e in c["env"]}
     assert env["ROOT_PATH"]["value"] == "/plant-sim" and "secretKeyRef" in env["INGEST_TOKEN"]["valueFrom"]
     assert env["REDIS_URL"]["value"] == "redis://clx-redis:6379"          # 측정값 Stream (클러스터 안, Ingress 와 무관)
+    assert env["RESET_DB_ON_SCHEMA_CHANGE"]["value"] == "1"                 # 스키마가 바뀐 배포는 DB 를 지우고 재백필
     assert "SIM_SCENARIO_DIR" not in env                                   # 시나리오 Secret 은 지웠다
     assert [v["name"] for v in dep["template"]["spec"]["volumes"]] == ["data"]
     assert [m["name"] for m in c["volumeMounts"]] == ["data"]
