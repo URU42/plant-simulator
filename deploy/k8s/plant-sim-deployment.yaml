@@ -38,6 +38,7 @@ spec:
             - { name: ROOT_PATH, value: /plant-sim }          # Ingress 접두어. 루트 링크·리다이렉트·/docs 가 붙인다
             - { name: WITH_SIMULATORS, value: "1" }
             - { name: REDIS_URL, value: "redis://clx-redis:6379" }   # 클러스터 안 Redis. 측정값을 plant-sim:data:{공장} Stream 으로 (Ingress 와 무관)
+            - { name: RESET_DB_ON_SCHEMA_CHANGE, value: "1" }  # 스키마 버전이 다른 DB 파일은 지우고 재백필(합성 데이터, 이전 정답지도 지워진다)
             - name: INGEST_TOKEN                               # 있으면 외부 /ingest·/anomalies(주입·멈춤)는 X-Ingest-Token 필수
               valueFrom:
                 secretKeyRef: { name: plant-sim, key: ingest-token, optional: true }

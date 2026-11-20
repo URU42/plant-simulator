@@ -424,7 +424,8 @@ curl https://u4-2.skala-us.com/plant-sim/health
 ```
 
 - 이미지는 Harbor 비공개 프로젝트(`harbor.uru42.space`)에 있으므로 Deployment 에 `imagePullSecrets: uru42-harbor-pull` 을 적어 둔다(네임스페이스에 그 Secret 이 있어야 한다: `kubectl -n u4-2 get secret uru42-harbor-pull`). 같은 네임스페이스의 `harbor-cred` 는 `harbor.skala-us.com` 인증이라 이 이미지를 받지 못한다(ImagePullBackOff "no basic auth credentials").
-- **DB v5 — 이전 버전에서 올릴 때는 PVC 의 기존 DB 파일(`/app/data/*.db*`)을 지우고 다시 띄운다.** 이전 파일은 열리지 않는다(수집 서버가 알리고 멈춘다).
+- **스키마 버전이 바뀐 배포** (2026-11-20부터): 배포 매니페스트의 `RESET_DB_ON_SCHEMA_CHANGE=1` 로, 버전이 다른 DB 파일(`/app/data/*.db*`)은 시작할 때 지우고 새로 만든다. 하루치 재백필(약 40분)이 따라오고, 이전 정답지(`/anomalies`)·집계도 함께 지워진다(남겨야 하면 배포 전에 API 로 내보낸다). 스키마가 같은 배포는 기존 DB 에서 이어 간다.
+  이 변수가 없으면(로컬 기본) 예전 파일은 열지 않고 알리며 멈춘다. 더 새 버전 파일(예전 이미지로 되돌린 경우)도 같은 방식으로 거부하거나 지운다.
 - 첫 기동은 다섯 공장 하루치 백필이다. CPU 500m 에서 약 40분 걸리며(아래 실측) 그동안 `/health` 의 `sim_now` 가 전진하고 `live` 는 false 다. 파드는 `/health` 가 응답하면 Ready 가 되므로 백필 중에도 조회 API 는 쓸 수 있다.
 - 백필 기간을 늘리려면(`--backfill-days`) PVC 의 DB 파일을 지우고 다시 채워야 한다. 재개는 마지막 시각부터만 이어 간다.
 - 다른 파드는 DB 파일을 직접 읽을 수 없다(RWO). HTTP API(`/current`, `/timeseries`, `/anomalies`, `/stream`)를 쓴다.

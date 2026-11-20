@@ -3,11 +3,13 @@
 수집 서버가 DB에 닿는 유일한 곳이다. 시계열 DB로 바꿀 때 이 모듈만 바꾼다.
 시각은 common.timefmt 규칙(UTC ISO 문자열)으로 저장한다. 태그는 (equip_id, tag_id) 복합키.
 스키마 버전은 schema_meta 에 적는다. 예전 버전(v1 태그 ID 단일 키, v2 한계값 알람용 태그 컬럼·이력 테이블,
-v3 수집 서버 Nelson 알람·규칙 번호 사건, v4 status 칸) 파일은 바꿀 수 없으므로 열지 않고 알린다.
+v3 수집 서버 Nelson 알람·규칙 번호 사건, v4 status 칸) 파일과 더 새 버전 파일은 바꿀 수 없으므로 열지 않고 알린다.
+reset_on_schema_change 면 대신 그 파일을 지우고 새로 만든다(합성 데이터라 백필로 다시 채운다, k8s 배포용 2026-11-20).
 연결 하나를 이벤트 루프 스레드(조회)와 워커 스레드(통합 실행의 저장·배치)가 함께 쓰므로 모든 접근을 재진입 락으로 직렬화한다.
 """
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 from pathlib import Path
@@ -17,21 +19,34 @@ from common.config_models import ConfigError, TagKey
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 SCHEMA_VERSION = 5
+log = logging.getLogger("collector.storage")
 
 
 class Storage:
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, reset_on_schema_change: bool = False) -> None:
         self.db_path = str(db_path)
         self._lock = threading.RLock()
+        self._connect()
+        try:
+            self._check_version()
+        except ConfigError:
+            if not reset_on_schema_change:
+                raise
+            log.warning("DB %s has another schema version: deleting it and starting fresh (v%d, re-backfill)",
+                        self.db_path, SCHEMA_VERSION)
+            for suffix in ("", "-wal", "-shm"):
+                Path(self.db_path + suffix).unlink(missing_ok=True)
+            self._connect()
+        self._conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        if self._conn.execute("SELECT COUNT(*) FROM schema_meta").fetchone()[0] == 0:
+            self._conn.execute("INSERT INTO schema_meta (version) VALUES (?)", (SCHEMA_VERSION,))
+
+    def _connect(self) -> None:
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         if self.db_path != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
-        self._check_version()
-        self._conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
-        if self._conn.execute("SELECT COUNT(*) FROM schema_meta").fetchone()[0] == 0:
-            self._conn.execute("INSERT INTO schema_meta (version) VALUES (?)", (SCHEMA_VERSION,))
 
     def _check_version(self) -> None:
         """테이블이 이미 있는 파일은 버전이 맞아야 한다. 새 파일은 그냥 지나간다."""
@@ -44,6 +59,10 @@ class Storage:
             raise ConfigError(f"DB {self.db_path} was created by an older schema (v{found or 1}); this version needs "
                               f"v{SCHEMA_VERSION} (fault-mode anomaly book, no status column). Move or delete the file, or point this plant's "
                               f"db in plants.yaml to a new file")
+        if found > SCHEMA_VERSION:
+            self._conn.close()
+            raise ConfigError(f"DB {self.db_path} was created by a newer schema (v{found}); this version supports v{SCHEMA_VERSION}. "
+                              f"Deploy the newer image, or move or delete the file")
 
     def close(self) -> None:
         with self._lock:                       # 워커 스레드의 트랜잭션이 끝난 뒤에 닫는다
