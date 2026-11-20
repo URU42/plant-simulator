@@ -251,3 +251,15 @@ def test_derived_tag_moves_with_input_fault(config_dir, modes):
     base = by_tag(PlantGenerator(plant, rt).generate(T0, end))[("C-3102", "PI-I-C3102")]
     hit = by_tag(PlantGenerator(plant, rt, Fixed([ev])).generate(T0, end))[("C-3102", "PI-I-C3102")]
     assert np.std(np.subtract(hit, base)) > 0.05     # 정상 σ 0.043 보다 큰 흔들림
+
+
+def test_unfiltered_normal_has_chance_violations(rhds):
+    """quiet_normal: false 면 억제 표집을 하지 않는다. 규칙 1 비율은 정규분포의 ±3σ 밖(약 0.27 %) 근처여야 한다."""
+    plant, rt = rhds
+    raw = rt.model_copy(update={"quiet_normal": False})
+    s = PlantGenerator(plant, raw).generate(T0, T0 + timedelta(hours=2))
+    assert violations(plant, s)
+    ctl, base = plant.control_by_key(), [x for x in s if plant.tag_by_key()[(x.equip_id, x.tag_id)].derive is None]
+    outside = sum(abs(x.value - ctl[(x.equip_id, x.tag_id)][0]) > 3 * ctl[(x.equip_id, x.tag_id)][1] for x in base) / len(base)
+    assert 0.001 < outside < 0.006
+    assert PlantGenerator(plant, rt).generate(T0, T0 + timedelta(minutes=3)) != PlantGenerator(plant, raw).generate(T0, T0 + timedelta(minutes=3))

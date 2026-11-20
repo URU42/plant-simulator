@@ -417,6 +417,8 @@ class RuntimeConfig(StrictModel):
     collector_url: str = "http://localhost:8000"
     raw_retention_days: int = Field(default=7, ge=1)
     instrument_faults: InstrumentFaults = InstrumentFaults()
+    # 정상 잡음을 Nelson 규칙 1~3 위반 없이 고른다(억제 표집, D3). false 면 거르지 않는다 — 학습·오탐률 평가용 (2026-11-20)
+    quiet_normal: bool = True
 
     @model_validator(mode="after")
     def _intervals(self) -> "RuntimeConfig":
