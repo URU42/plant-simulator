@@ -82,12 +82,16 @@ def test_to_limit_falls_back_to_z_or_skips(config_dir):
 
 
 def test_propagation_follows_shaft_chain_and_skips_driven_speed(config_dir, modes):
-    """M-3101 → GB-3101 → C-3101: 아래쪽 설비 모두에 걸고, 피구동 speed 는 구동기 값을 쓰므로 빼고, 다른 설비는 건드리지 않는다."""
+    """M-3101 → GB-3101 → C-3101: 아래쪽 설비 모두에 걸고, 피구동 speed 는 구동기 값을 쓰므로 빼고,
+    그 밖에는 공정 흐름 하류(P-3102·P-3103)에만 건다."""
     plant = load_plant(config_dir / "plant_rhds.yaml")
-    keys = set(plan(plant, modes["OP-LOAD-CHANGE"], "M-3101", plant.control_by_key()))
+    tags = plan(plant, modes["OP-LOAD-CHANGE"], "M-3101", plant.control_by_key())
+    keys = set(tags)
     assert ("M-3101", "SI-M3101") in keys and ("C-3101", "FI-C3101") in keys
     assert not {k for k in keys if k[0] in ("GB-3101", "C-3101") and "SI-" in k[1]}
-    assert {k[0] for k in keys} <= {"M-3101", "GB-3101", "C-3101"}
+    assert {k[0] for k in keys} <= {"M-3101", "GB-3101", "C-3101", "P-3102", "P-3103"}
+    assert {(tp.via, tp.hop) for k, tp in tags.items() if k[0] == "C-3101"} == {("driven", 0)}
+    assert {(tp.via, tp.hop) for k, tp in tags.items() if k[0] == "P-3102"} == {("process", 1)}
 
 
 def test_shapes_and_recovery():
@@ -160,3 +164,41 @@ def test_speed_keeps_lag_real_time():
     """lag(물리적 응답 지연)는 진행 속도와 상관없이 실제 시간: 단계 100초·lag 22초 → ×10 이면 10 + 22 = 32초부터."""
     from simulator.fault import effect_start
     assert effect_start(122, 22, 10) == 32 and effect_start(122, 22, 1) == 122
+
+
+def test_flow_reach_matches_viewer_rules(config_dir):
+    """흐름 그래프 단계: 공정 노드를 지나 설비에 닿을 때마다 1단계, utility 로 닿은 설비에서 멈춘다(초안 v0.3 도달 표)."""
+    rfcc = load_plant(config_dir / "plant_rfcc.yaml")
+    r = rfcc.downstream(["P-1101A"], 2)
+    assert {d for d, (k, _) in r.items() if k == 1} == {"C-1401", "P-1301A", "P-1302A", "P-1303A"}
+    assert {d for d, (k, _) in r.items() if k == 2} == {"P-1402A", "P-1403A", "P-1501A", "P-1502A"}
+    assert set(rfcc.downstream(["P-1101A"], 1)) == {"C-1401", "P-1301A", "P-1302A", "P-1303A"}
+    hou = load_plant(config_dir / "plant_hou.yaml")
+    assert hou.downstream(["P-2501"], 2) == {"C-2301": (1, "utility")}             # 윤활유: 압축기에서 멈춤
+    assert hou.downstream(["C-2201"], 2)["C-2301"] == (1, "utility")                # 가상 공장 간선
+    assert "C-3101" not in load_plant(config_dir / "plant_rhds.yaml").downstream(["P-3101"], 2)   # 공정 흐름 뒤 수소 계통으로 안 퍼짐
+    cdu = load_plant(config_dir / "plant_cdu.yaml")
+    assert cdu.downstream(["P-8303A"], 2) == {}
+
+
+def test_downstream_effects_shrink_slow_and_recover_late(config_dir, modes):
+    """k단계: 크기 ×0.7^(k−1), lag·rise ×k, 회복 60초 ×(k+1). 0.25σ 이하로 줄면 걸지 않는다."""
+    plant = load_plant(config_dir / "plant_rfcc.yaml")
+    tags = plan(plant, modes["PM-SUCTION-LOSS"], "P-1101A", plant.control_by_key())
+    one, two = tags[("C-1401", "FI-C-1401")], tags[("P-1402A", "FI-P-1402A")]
+    assert (one.via, one.hop, one.recovery) == ("process", 1, 2 * RECOVERY_SEC)
+    assert (two.hop, two.recovery) == (2, 3 * RECOVERY_SEC)
+    (a1,), (a2,) = one.applied, two.applied
+    assert (a1.z, a1.start, a1.effect.rise_sec) == (-1.0, 300 + 60, 300)
+    assert (a2.z, a2.start, a2.effect.rise_sec) == (pytest.approx(-0.7), 300 + 120, 600)
+    stop = 1000.0
+    assert tag_effect(one, stop + 2 * RECOVERY_SEC, stop)[0] == 0.0 and tag_effect(two, stop + 2 * RECOVERY_SEC, stop)[0] != 0.0
+    from simulator.fault import _hop_effect
+    assert _hop_effect(Effect(signal="flow", shape="ramp", z=0.3), 2) is None        # 0.21σ: 걸지 않는다
+
+
+def test_downstream_effect_validation():
+    with pytest.raises(ValueError):
+        FaultMode.model_validate({"id": "X", "name": "x", "equip_types": ["PM"], "label": {"kind": "k", "cause": "c", "action": "a"},
+                                  "stages": [{"id": "S1", "name": "s", "at_sec": 0, "propagate": {"process": [
+                                      {"signal": "flow", "shape": "step", "z": -1}]}}]})

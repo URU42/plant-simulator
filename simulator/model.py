@@ -3,6 +3,7 @@
 태그마다 측정 시각 순으로 z(운전점 μ·σ 대비 편차)를 만들고 값 = round(μ + σ·z) 로 보낸다.
 - 정상: z = 공통 요인 + 개별 AR(1) 잡음. 공통 요인은 공정 그룹마다 하루치 표준정규 수열로, (seed, 그룹, KST 날짜)로 정해져
   Unit 을 나눠 돌려도 같은 값이다. 개별 잡음은 규칙 1~3 위반이 생기는 후보를 다시 뽑아(억제 표집, 최대 100번) 조용하다.
+  runtime.quiet_normal 이 false 면 억제 표집을 하지 않아 정상에서도 우연한 위반이 난다(학습·오탐률 평가용).
 - 고장 모드(주입한 사건): 정상 z 위에 효과 z 를 더한다. 이때 억제 표집은 정상 부분만 보므로 위반은 효과 때문에만 생긴다.
   nelson_quiet 단계에서는 효과를 더한 값으로 판정해 위반이 나지 않게 고른다.
 - 피구동 설비의 speed 태그는 구동기 speed 의 z 를 그대로 쓴다(축 공유).
@@ -24,7 +25,7 @@ import numpy as np
 from common.config_models import Derive, PlantConfig, RuntimeConfig, TagKey
 from common.message import Sample
 from common.nelson import NelsonState, zscore
-from simulator.fault import RECOVERY_SEC, FaultEvent, TagPlan, plan, tag_effect
+from simulator.fault import MAX_RECOVERY_SEC, FaultEvent, TagPlan, plan, tag_effect
 from simulator.instrument import InstrumentEvent, InstrumentSchedule
 
 RHO = 0.12                  # 개별 잡음 AR(1) 계수
@@ -213,7 +214,7 @@ class PlantGenerator:
         """이 창에 효과가 있을 수 있는 사건의 태그별 적용 목록 (이 프로세스가 맡은 태그만)."""
         out: dict[TagKey, list[tuple[FaultEvent, TagPlan]]] = {}
         mine = {t.key for t in self.tags}
-        for ev in self.source.external(s0 - RECOVERY_SEC, s1):
+        for ev in self.source.external(s0 - MAX_RECOVERY_SEC, s1):
             if ev.event_id not in self._plans:
                 self._plans[ev.event_id] = plan(self.plant, ev.mode, ev.equip_id, self.control)
             for key, tp in self._plans[ev.event_id].items():
@@ -225,7 +226,7 @@ class PlantGenerator:
                 copy: dict[int, float] | None, record: dict[int, float] | None) -> list[Sample]:
         """한 태그의 이 창 표본. copy 는 구동기 speed 의 시각별 z, record 는 이 태그 값을 시각별로 적어 둘 곳(구동기·계산 입력)."""
         mu, sg, d, rho, scale, load, own = t.mu, t.sigma, t.decimals, t.rho, t.scale, t.load, t.own
-        safe, bounds, push, normal = t.nelson.safe, t.nelson.bounds, t.nelson.push, t.normal
+        safe, bounds, push, normal = self._safe(t), t.nelson.bounds, t.nelson.push, t.normal
         equip_id, tag_id = t.key
         construct = Sample.model_construct
         seed = self.runtime.seed
@@ -279,7 +280,7 @@ class PlantGenerator:
         못 찾으면 마지막 값을 쓴다 (입력이 정한 몫은 바꿀 수 없어 위반 0 을 보장하지 않는다)."""
         mu, sg, d, noise, value = t.mu, t.sigma, t.decimals, t.derive.noise_sigma, t.derive.value
         ref, ref_out = t.ref
-        safe, push, normal = t.nelson.safe, t.nelson.push, t.normal
+        safe, push, normal = self._safe(t), t.nelson.push, t.normal
         equip_id, tag_id = t.key
         out: list[Sample] = []
         for i in pos:
@@ -300,6 +301,10 @@ class PlantGenerator:
             out.append(Sample.model_construct(equip_id=equip_id, tag_id=tag_id, ts=stamps[i], value=v))
         return out
 
+    def _safe(self, t: _Tag):
+        """억제 표집의 판정. quiet_normal 이 꺼져 있으면 첫 후보를 그대로 쓴다(nelson_quiet 단계도 거르지 않는다)."""
+        return t.nelson.safe if self.runtime.quiet_normal else _accept
+
     def _day(self, t: _Tag, ep: int) -> int:
         """ep 의 KST 날짜. 날짜가 바뀌면 그날의 난수열로 다시 시드한다(복원한 날은 복원 시각도 넣는다)."""
         day = (ep + KST_OFFSET) // DAY_SEC + EPOCH_ORDINAL
@@ -308,6 +313,10 @@ class PlantGenerator:
             seed = self.runtime.seed
             t.reseed([seed, t.crc, day, restore_epoch] if day == restore_day else [seed, t.crc, day], day)
         return day
+
+
+def _accept(z: float) -> bool:
+    return True
 
 
 def _effect(active, ep: int) -> tuple[float, bool]:

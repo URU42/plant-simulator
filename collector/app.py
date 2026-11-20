@@ -104,6 +104,15 @@ def equipment(ctx: PlantContext = Depends(context)):
     return ctx.listing
 
 
+@router.get("/flow")
+def flow(ctx: PlantContext = Depends(context)):
+    """공정 흐름 그래프 (가상 공장). 3D 뷰어가 하류 영향을 계산·표시할 때 읽는다. 축 연결은 equipment 의 driven_by."""
+    f = ctx.plant.flow
+    return {"plant": ctx.plant.plant.plant_id, "nodes": f.nodes,
+            "equipment": [{"equip_id": e.equip_id, "driven_by": e.driven_by} for e in ctx.plant.equipment],
+            "edges": [{"from": a, "to": b, "label": label, "stream": stream} for a, b, label, stream in f.edges]}
+
+
 @router.get("/current")
 def current_all(ctx: PlantContext = Depends(context)):
     """모든 태그의 현재값. 순서는 /equipment 와 같다."""

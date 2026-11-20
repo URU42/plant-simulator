@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import math
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 from typing import Any, Literal
 
@@ -214,6 +214,15 @@ class Correlation(StrictModel):
     signs: dict[str, Literal[-1, 1]]
 
 
+class Flow(StrictModel):
+    """공정 흐름 그래프 (프로젝트 가상 공장, 2026-11-20). 3D 뷰어 그래프에서 출발했고 뷰어가 /flow 로 읽는다.
+    nodes 는 설비가 아닌 공정 노드(ID → 이름). 간선은 [from, to, label, stream]이며 stream 은 process(원료·탄화수소 흐름) 또는
+    utility(수소·연소공기·윤활유·세정수 등 보조 계통). 축 연결은 driven_by 가 맡으므로 여기에 넣지 않는다."""
+
+    nodes: dict[str, str] = {}
+    edges: list[tuple[str, str, str, Literal["process", "utility"]]] = []
+
+
 # 운전점 비 r(설계 rpm 대비)에 대한 태그 μ 의 지수 (상사 법칙 근사, synthetic). 없는 신호는 바뀌지 않는다.
 # discharge_pressure 는 같은 설비 첫 suction_pressure 와의 차(양정)에 r² 를 곱한다.
 AFFINITY = {"speed": 1, "flow": 1, "current": 3, "vibration": 2, "shaft_vibration": 2, "differential_pressure": 2}
@@ -225,6 +234,7 @@ class PlantConfig(StrictModel):
     equipment_types: list[EquipmentType]
     signals: list[SignalType]
     correlation: Correlation | None = None
+    flow: Flow = Flow()
     equipment: list[EquipmentConfig]
 
     # --- 검증 -----------------------------------------------------------
@@ -260,6 +270,14 @@ class PlantConfig(StrictModel):
                     raise ConfigError(f"equipment {e.equip_id}: operating is set on the driver ({e.driven_by}), not on driven equipment")
                 if not any(t.signal == "speed" for t in e.tags):
                     raise ConfigError(f"equipment {e.equip_id}: operating.speed_rpm needs a speed tag")
+        clash = sorted(set(self.flow.nodes) & equip_set)
+        if clash:
+            raise ConfigError(f"flow.nodes: {', '.join(clash)} is equipment, not a process node")
+        known = equip_set | set(self.flow.nodes)
+        for a, b, _, _ in self.flow.edges:
+            for x in (a, b):
+                if x not in known:
+                    raise ConfigError(f"flow edge {a} -> {b}: unknown node {x}")
         if self.correlation is not None:
             unknown = sorted(set(self.correlation.signs) - signal_ids)
             if unknown:
@@ -308,6 +326,40 @@ class PlantConfig(StrictModel):
             return e.equip_id
 
         return {e.equip_id: own.get(root(e), 1.0) for e in self.equipment}
+
+    def downstream(self, start: list[str], max_hop: int) -> dict[str, tuple[int, str]]:
+        """흐름 그래프에서 start(고장 설비와 그 축 사슬, 0단계)로부터 닿는 설비 → (단계, 닿은 간선의 stream).
+        설비에 닿을 때마다 단계가 1 늘고 가장 작은 단계를 쓴다(max_hop 까지). utility 간선은 출발 설비와 utility 로 닿은 공정 노드에서만
+        지나고(공정 흐름에 들어선 뒤에는 보조 계통으로 퍼지지 않는다), utility 로 닿은 설비에서는 멈춘다.
+        들어온 간선과 같은 이름의 출구가 있으면 그 출구로만 나간다(열교환기의 저온측·고온측)."""
+        equip = {e.equip_id for e in self.equipment}
+        out: dict[str, list[tuple[str, str, str]]] = {}
+        for a, b, label, stream in self.flow.edges:
+            out.setdefault(a, []).append((b, label, stream))
+        best: dict[str, tuple[int, str]] = {}
+        seen: dict[tuple[str, str, bool], int] = {}
+        q = deque((s, "", True, 0) for s in start)     # (노드, 들어온 간선 이름, utility 간선을 지날 수 있나, 단계). 0-1 BFS
+        while q:
+            node, side, util, k = q.popleft()
+            if seen.get((node, side, util), max_hop + 1) <= k:
+                continue
+            seen[(node, side, util)] = k
+            edges = out.get(node, [])
+            if side and any(label == side for _, label, _ in edges):
+                edges = [x for x in edges if x[1] == side]
+            for b, label, stream in edges:
+                if (stream == "utility" and not util) or b in start:
+                    continue
+                if b not in equip:
+                    q.appendleft((b, label, stream == "utility", k))
+                    continue
+                if k + 1 > max_hop:
+                    continue
+                if b not in best or k + 1 < best[b][0]:
+                    best[b] = (k + 1, stream)
+                if stream == "process":
+                    q.append((b, "", False, k + 1))
+        return best
 
     def control_by_key(self) -> dict[TagKey, tuple[float, float]]:
         """운전점을 반영한 태그별 (μ, σ). 생성기·설비 마스터·탐지 쪽 기준이 모두 이 값을 쓴다. σ 는 바꾸지 않는다."""
@@ -417,6 +469,8 @@ class RuntimeConfig(StrictModel):
     collector_url: str = "http://localhost:8000"
     raw_retention_days: int = Field(default=7, ge=1)
     instrument_faults: InstrumentFaults = InstrumentFaults()
+    # 정상 잡음을 Nelson 규칙 1~3 위반 없이 고른다(억제 표집, D3). false 면 거르지 않는다 — 학습·오탐률 평가용 (2026-11-20)
+    quiet_normal: bool = True
 
     @model_validator(mode="after")
     def _intervals(self) -> "RuntimeConfig":

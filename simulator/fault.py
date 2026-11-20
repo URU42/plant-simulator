@@ -2,8 +2,9 @@
 
 고장 모드는 config/fault_modes.yaml 에 단계(stage)별 효과로 적는다. 효과는 태그가 아니라 신호(signal)로 지정해
 같은 유형 설비에 재사용한다. 크기는 관리 기준 μ·σ 대비 z 이고, to_limit 을 주면 그 한계값 기준으로 정한다.
-주입하면 설비 하나(와 propagate.driven 이면 그 설비가 구동하는 설비)의 태그마다 적용 목록(TagPlan)을 만들고,
-생성기는 정상 신호 위에 효과 z 를 더한다. 멈춘 뒤에는 RECOVERY_SEC 동안 효과가 0 으로 가라앉는다.
+주입하면 설비 하나(와 propagate.driven 이면 그 설비가 구동하는 설비, propagate.process·utility 면 공정 흐름 그래프의 하류 설비)의
+태그마다 적용 목록(TagPlan)을 만들고, 생성기는 정상 신호 위에 효과 z 를 더한다. 멈춘 뒤에는 RECOVERY_SEC(하류 k단계는 × (k+1))
+동안 효과가 0 으로 가라앉는다.
 """
 from __future__ import annotations
 
@@ -17,6 +18,11 @@ from pydantic import Field, model_validator
 from common.config_models import ConfigError, EquipmentConfig, PlantConfig, StrictModel, TagKey, load_yaml
 
 RECOVERY_SEC = 60       # 멈춘 뒤 효과가 0 으로 가라앉는 시간
+# 공정 흐름 하류 전파 (완만한 감쇠, 사용자 확정 2026-11-20, 수치는 synthetic): k단계 크기 ×0.7^(k−1), lag·rise ×k, 회복 ×(k+1)
+MAX_HOP = 2
+HOP_RATIO = 0.7
+MIN_HOP_Z = 0.25        # 줄인 뒤 |z| 가 이 이하면 걸지 않는다
+MAX_RECOVERY_SEC = RECOVERY_SEC * (MAX_HOP + 1)     # 사건 효과가 남아 있을 수 있는 최대 시간 (멈춤 뒤)
 
 Shape = Literal["step", "ramp", "spike", "wobble"]
 LimitName = Literal["warn_hi", "alarm_hi", "trip_hi", "warn_lo", "alarm_lo", "trip_lo"]
@@ -50,6 +56,15 @@ class Effect(StrictModel):
 
 class Propagation(StrictModel):
     driven: list[Effect] = []           # 축으로 이어진 아래쪽 설비(driven_by 사슬)에 주는 효과. speed 는 생성기가 구동기 값을 그대로 넘긴다
+    process: list[Effect] = []          # 공정 흐름으로 닿은 하류 설비 (1단계 기준. 단계마다 줄인다)
+    utility: list[Effect] = []          # 보조 계통 간선으로 바로 닿은 설비 (윤활유·보충 수소). 거기서 멈춘다
+
+    @model_validator(mode="after")
+    def _downstream(self) -> "Propagation":
+        for e in self.process + self.utility:
+            if e.z is None or e.to_limit is not None or e.shape not in ("ramp", "wobble"):
+                raise ValueError("process/utility effects need z (no to_limit) and shape ramp or wobble")
+        return self
 
 
 class Stage(StrictModel):
@@ -146,6 +161,17 @@ class Applied:
 class TagPlan:
     applied: tuple[Applied, ...]
     quiet: tuple[tuple[float, float], ...]      # 사건 시작 기준 [시작, 끝) — nelson_quiet 단계
+    via: str = "self"                           # self(고장 설비) · driven(축) · process · utility (정답지)
+    hop: int = 0                                # 흐름 그래프 단계 (고장 설비와 축 사슬은 0)
+    recovery: float = RECOVERY_SEC              # 멈춘 뒤 0 으로 가라앉는 시간
+
+
+def _hop_effect(effect: Effect, hop: int) -> Effect | None:
+    """하류 k단계 효과: 크기 ×0.7^(k−1), lag·rise ×k (늦고 천천히). 줄인 크기가 MIN_HOP_Z 이하면 None."""
+    z = effect.z * HOP_RATIO ** (hop - 1)
+    if abs(z) <= MIN_HOP_Z:
+        return None
+    return effect.model_copy(update={"z": z, "lag_sec": effect.lag_sec * hop, "rise_sec": effect.rise_sec * hop})
 
 
 def _target(effect: Effect, mu: float, sigma: float, limits, level: float) -> float | None:
@@ -160,18 +186,25 @@ def _target(effect: Effect, mu: float, sigma: float, limits, level: float) -> fl
 def plan(plant: PlantConfig, mode: FaultMode, equip_id: str,
          control: dict[TagKey, tuple[float, float]]) -> dict[TagKey, TagPlan]:
     """equip_id 에 mode 를 걸 때 태그별 적용 목록. 효과가 하나도 걸리지 않는 태그는 빠진다. control 은 운전점 반영 (μ, σ).
-    propagate.driven 은 축으로 이어진 아래쪽 설비 모두(구동기 → 기어박스 → 압축기)에 건다."""
+    propagate.driven 은 축으로 이어진 아래쪽 설비 모두(구동기 → 기어박스 → 압축기)에 건다.
+    propagate.process·utility 는 고장 설비와 축 사슬에서 흐름 그래프로 닿는 설비(PlantConfig.downstream)에 단계만큼 줄여 건다."""
+    by_id = plant.equipment_by_id()
     driven, frontier = [], {equip_id}
     while frontier:
         nxt = [e for e in plant.equipment if e.driven_by in frontier and e not in driven and e.equip_id != equip_id]
         driven += nxt
         frontier = {e.equip_id for e in nxt}
+    role = {equip_id: ("self", 0)} | {e.equip_id: ("driven", 0) for e in driven}
+    role |= {d: (via, hop) for d, (hop, via) in plant.downstream(list(role), MAX_HOP).items()}
     ends = [s.at_sec for s in mode.stages[1:]] + [math.inf]
     quiet = tuple((s.at_sec, end) for s, end in zip(mode.stages, ends) if s.nelson_quiet)
     found: dict[TagKey, list[Applied]] = {}
     for stage in mode.stages:
-        targets = [(plant.equipment_by_id()[equip_id], stage.effects)] + [(e, stage.propagate.driven) for e in driven]
-        for e, effects in targets:
+        effects_of = {"self": stage.effects, "driven": stage.propagate.driven, "process": stage.propagate.process,
+                      "utility": stage.propagate.utility}
+        for d, (via, hop) in role.items():
+            e = by_id[d]
+            effects = [x for x in (_hop_effect(f, hop) if hop else f for f in effects_of[via]) if x is not None]
             for effect in effects:
                 if e.driven_by is not None and effect.signal == "speed":
                     continue        # 피구동 speed 는 구동기 값을 그대로 쓴다
@@ -183,7 +216,7 @@ def plan(plant: PlantConfig, mode: FaultMode, equip_id: str,
                     z = _target(effect, *control[key], t.limits, level)
                     if z is not None:
                         found.setdefault(key, []).append(Applied(stage.id, stage.at_sec + effect.lag_sec, effect, z))
-    for e in [plant.equipment_by_id()[equip_id], *driven]:
+    for e in (by_id[d] for d in role):
         for t in e.tags:
             if t.derive is None:
                 continue
@@ -191,7 +224,11 @@ def plan(plant: PlantConfig, mode: FaultMode, equip_id: str,
             inherited = [Applied(a.stage, a.start, a.effect, 0.0) for i in t.derive.inputs for a in found.get((e.equip_id, i), ())]
             if inherited:
                 found.setdefault((e.equip_id, t.tag_id), []).extend(inherited)
-    return {key: TagPlan(tuple(a), quiet) for key, a in found.items()}
+    out = {}
+    for key, a in found.items():
+        via, hop = role[key[0]]
+        out[key] = TagPlan(tuple(a), quiet, via, hop, RECOVERY_SEC * (hop + 1))
+    return out
 
 
 def _shape(a: Applied, tau: float, speed: int = 1) -> float:
@@ -217,8 +254,8 @@ def effect_start(start_sec: float, lag_sec: float, speed: int = 1) -> float:
 def tag_effect(tp: TagPlan, t: float, stop: float | None, speed: int = 1) -> tuple[float, bool]:
     """사건 시작 기준 t 초(실제 시간)의 (효과 z 합, nelson_quiet 여부). stop 도 사건 시작 기준(None 이면 멈추기 전).
     효과 시작은 단계 시각/speed + lag (effect_start). 멈추기 전에 시작하지 못한 효과는 없고,
-    멈춘 뒤에는 RECOVERY_SEC 동안 선형으로 0 이 된다."""
-    fade = 1.0 if stop is None or t < stop else max(0.0, 1 - (t - stop) / RECOVERY_SEC)
+    멈춘 뒤에는 tp.recovery 동안 선형으로 0 이 된다."""
+    fade = 1.0 if stop is None or t < stop else max(0.0, 1 - (t - stop) / tp.recovery)
     if fade == 0.0:
         return 0.0, False
     z = 0.0

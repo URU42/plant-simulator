@@ -82,6 +82,10 @@ fault_modes:
           - { signal: flow, shape: wobble, z: 15, period_sec: 4 }
           - { signal: discharge_pressure, shape: wobble, z: 8, period_sec: 4 }
           - { signal: discharge_temp, shape: ramp, z: 10, lag_sec: 30, rise_sec: 300 }
+        # 공정 흐름 하류 (2026-11-20, synthetic). 1단계 크기·지연이며 2단계는 크기 ×0.7, lag·rise ×2, 회복 시간도 단계만큼 늘어난다
+        propagate:
+          process:
+            - { signal: flow, shape: wobble, z: 0.5, period_sec: 4, lag_sec: 10 }     # 서지 맥동이 하류 처리량에 약하게 전달
       - id: S3
         name: 스러스트 베어링·실 충격
         at_sec: 150
@@ -118,6 +122,13 @@ fault_modes:
           - { signal: vibration, shape: ramp, to_limit: warn_hi, margin: 0.1, z: 6, rise_sec: 300 }
           - { signal: flow, shape: ramp, to_limit: warn_lo, margin: 0.05, z: -6, rise_sec: 300 }
           - { signal: discharge_pressure, shape: ramp, z: -8, rise_sec: 300 }
+        # 공정 흐름 하류 (2026-11-20, synthetic). 1단계 크기·지연이며 2단계는 크기 ×0.7, lag·rise ×2, 회복 시간도 단계만큼 늘어난다
+        propagate:
+          process:                                  # 송출량 감소 → 하류 처리량 감소 (전류는 계산 태그라 유량을 따라 움직인다)
+            - { signal: flow, shape: ramp, z: -1.0, lag_sec: 60, rise_sec: 300 }
+          utility:                                  # 윤활유 펌프(HOU P-2501) → 압축기 베어링 온도. 정지(trip)는 모의하지 않아 거기서 멈춘다
+            - { signal: oil_pressure, shape: ramp, z: -2.0, lag_sec: 10, rise_sec: 120 }
+            - { signal: bearing_temp, shape: ramp, z: 2.0, lag_sec: 60, rise_sec: 600 }
       - id: S3
         name: 이상 심화
         at_sec: 900
@@ -163,6 +174,9 @@ fault_modes:
             - { signal: flow, shape: ramp, z: -1.5, lag_sec: 10, rise_sec: 300 }
             - { signal: discharge_pressure, shape: ramp, z: -1.0, lag_sec: 10, rise_sec: 300 }
             - { signal: current, shape: ramp, z: -1.5, lag_sec: 5, rise_sec: 300 }
+          # 공정 흐름 하류 (2026-11-20, synthetic). 1단계 크기·지연이며 2단계는 크기 ×0.7, lag·rise ×2, 회복 시간도 단계만큼 늘어난다
+          process:                                  # 정상 운전 변화라 하류 변화도 정상(코드 1)
+            - { signal: flow, shape: ramp, z: -0.75, lag_sec: 60, rise_sec: 300 }
     expect:
       stages:
         S1: { setpoint: none, nelson: [2], ml_plant: high }    # RFCC 는 경고(통계 ±3σ)를 가끔 넘는다(표본 약 1 %)
@@ -184,6 +198,10 @@ fault_modes:
         effects:
           - { signal: vibration, shape: ramp, to_limit: warn_hi, margin: 0.1, z: 8, rise_sec: 1200 }
           - { signal: flow, shape: ramp, z: -4, rise_sec: 1200 }
+        # 공정 흐름 하류 (2026-11-20, synthetic). 1단계 크기·지연이며 2단계는 크기 ×0.7, lag·rise ×2, 회복 시간도 단계만큼 늘어난다
+        propagate:
+          process:                                  # 연소공기 부족 → 가열로 출구 온도 저하 (process_temp 태그가 있는 하류 펌프만)
+            - { signal: process_temp, shape: ramp, z: -1.0, lag_sec: 120, rise_sec: 600 }
       - id: S2
         name: 불균형 심화
         at_sec: 1200
@@ -257,6 +275,12 @@ fault_modes:
           - { signal: flow, shape: ramp, z: -5, rise_sec: 1200 }
           - { signal: suction_temp, shape: ramp, z: 6, lag_sec: 60, rise_sec: 1200 }
           - { signal: interstage_pressure, shape: ramp, z: -6, rise_sec: 1200 }   # 1단 처리량이 줄어 단간 압력이 내려간다
+        # 공정 흐름 하류 (2026-11-20, synthetic). 1단계 크기·지연이며 2단계는 크기 ×0.7, lag·rise ×2, 회복 시간도 단계만큼 늘어난다
+        propagate:
+          process:                                  # 보충 수소 부족 → 반응 저하 → 분별 처리량 소폭 감소
+            - { signal: flow, shape: ramp, z: -0.5, lag_sec: 300, rise_sec: 600 }
+          utility:                                  # 보충 수소 → 순환 압축기 (가상 공장 간선)
+            - { signal: suction_pressure, shape: ramp, z: -1.0, lag_sec: 120, rise_sec: 600 }
       - id: S2
         name: 재압축 손실 심화
         at_sec: 1200

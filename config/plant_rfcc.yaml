@@ -73,6 +73,35 @@ correlation:
   share: 0.5
   signs: { flow: 1, current: 1, speed: 1, discharge_pressure: 1, steam_pressure: 1, suction_pressure: -1 }
 
+# 공정 흐름 그래프 (프로젝트 가상 공장, 2026-11-20). 3D 뷰어 그래프(2026-11-19)에서 옮겼고 뷰어는 GET /{공장}/flow 로 읽는다.
+# 간선 [from, to, label, stream]. stream 은 뷰어의 계통 구분 규칙을 옮긴 값이다. 축 연결은 driven_by 가 맡아 넣지 않는다.
+flow:
+  nodes:
+    RX: "반응기"
+    REG: "촉매 재생기"
+    FR: "주분별탑"
+    GR: "가스 회수 설비"
+  edges:
+    - [P-1101A, RX, "", process]
+    - [RX, FR, "", process]
+    - [FR, C-1401, "", process]
+    - [C-1401, GR, "", process]
+    - [GR, P-1501A, "", process]
+    - [GR, P-1502A, "", process]
+    - [RX, REG, "", utility]
+    - [REG, RX, "", utility]
+    - [B-1201, REG, "", utility]
+    - [FR, P-1301A, "", process]
+    - [P-1301A, FR, "", process]
+    - [FR, P-1302A, "", process]
+    - [P-1302A, FR, "", process]
+    - [FR, P-1303A, "", process]
+    - [P-1303A, FR, "", process]
+    - [GR, P-1402A, "", process]
+    - [P-1402A, GR, "", process]
+    - [GR, P-1403A, "", process]
+    - [P-1403A, GR, "", process]
+
 equipment:
   # ---------------- UNIT-RFCC-01 원료 공급 ----------------
   - equip_id: P-1101A

@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from collector.storage import Storage
 from common.config_models import PlantConfig
 from common.timefmt import from_db, to_db
-from simulator.fault import RECOVERY_SEC, SPEEDS, FaultEvent, FaultMode, effect_start, plan
+from simulator.fault import MAX_RECOVERY_SEC, RECOVERY_SEC, SPEEDS, FaultEvent, FaultMode, effect_start, plan
 from simulator import instrument as im
 
 log = logging.getLogger("collector.anomaly_book")
@@ -70,7 +70,7 @@ class AnomalyBook:
         with self._lock:
             self._high = max(self._high, end)
             return [e for e in self._events.values()
-                    if e.start < end and (e.stop is None or e.stop + RECOVERY_SEC > start)]
+                    if e.start < end and (e.stop is None or e.stop + MAX_RECOVERY_SEC > start)]
 
     # --- 주입·멈춤 -------------------------------------------------------------
     def inject(self, equip_id: str, mode_id: str, at: float, speed: int = 1) -> FaultEvent:
@@ -92,7 +92,7 @@ class AnomalyBook:
             n = 1 + self.storage.query("SELECT COUNT(*) FROM anomaly_event")[0][0]
             event = FaultEvent(f"FM-{self.plant_id}-{n:04d}", equip_id, mode, at, speed=speed)
             stages = [{"id": s.id, "name": s.name, "at_sec": s.at_sec, "nelson_quiet": s.nelson_quiet} for s in mode.stages]
-            applied = [{"equip_id": k[0], "tag_id": k[1], "stage": a.stage, "start_sec": a.start}
+            applied = [{"equip_id": k[0], "tag_id": k[1], "stage": a.stage, "start_sec": a.start, "via": tp.via, "hop": tp.hop}
                        for k, tp in tags.items() for a in tp.applied]
             self.storage.execute(
                 "INSERT INTO anomaly_event (event_id, equip_id, mode, kind, cause, action, expect, plan, start_at, stop_requested_at) "
@@ -141,9 +141,6 @@ class AnomalyBook:
             start, stop = _epoch(r["start_at"]), _epoch(r["stop_requested_at"])
             if stop is not None and stop <= start:
                 continue
-            end_at = None if stop is None else _db(stop + RECOVERY_SEC)
-            if from_ and end_at is not None and end_at < from_:
-                continue
             p = json.loads(r["plan"])
             speed = p.get("speed", 1)           # 단계 시각은 1/speed, lag 는 그대로 (simulator.fault.effect_start)
             stage_at = {s["id"]: s["at_sec"] for s in p["stages"]}
@@ -153,10 +150,15 @@ class AnomalyBook:
 
             stages = [{"id": s["id"], "name": s["name"], "start_at": _db(start + s["at_sec"] / speed), "nelson_quiet": s["nelson_quiet"]}
                       for s in p["stages"] if started(s["at_sec"])]
-            tags = [{"equip_id": t["equip_id"], "tag_id": t["tag_id"], "stage": t["stage"], "start_at": _db(start + sec)}
+            tags = [{"equip_id": t["equip_id"], "tag_id": t["tag_id"], "stage": t["stage"], "start_at": _db(start + sec),
+                     "via": t.get("via"), "hop": t.get("hop")}   # 2026-11-20 전 사건은 없음(null)
                     for t in p["tags"]
                     for sec in [effect_start(t["start_sec"], t["start_sec"] - stage_at[t["stage"]], speed)]
                     if stop is None or start + sec < stop]
+            hop = max((t["hop"] or 0 for t in tags), default=0)      # 멈추기 전에 시작한 하류 효과 중 가장 먼 단계: 회복이 (k+1)배
+            end_at = None if stop is None else _db(stop + RECOVERY_SEC * (hop + 1))
+            if from_ and end_at is not None and end_at < from_:
+                continue
             out.append({"event_id": r["event_id"], "equip_id": r["equip_id"], "mode": r["mode"],
                         "kind": r["kind"], "cause": r["cause"], "action": r["action"],
                         "expect": None if r["expect"] is None else json.loads(r["expect"]),

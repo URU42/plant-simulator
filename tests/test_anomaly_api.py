@@ -60,6 +60,15 @@ def test_fault_modes_listing(client):
     assert not {"label", "kind", "cause", "expect"} & set(rows["CC-SURGE"])
 
 
+def test_flow_graph(client):
+    """3D 뷰어가 읽는 공정 흐름 그래프: 공정 노드, 설비와 축 연결, 간선(stream)."""
+    body = client.get("/plant/flow").json()
+    assert body["plant"] == "PL-RHDS" and body["nodes"]["SP"] == "고압 분리기"
+    assert {"equip_id": "GB-3101", "driven_by": "M-3101"} in body["equipment"]
+    assert {"from": "C-3102", "to": "C-3101", "label": "보충 수소", "stream": "utility"} in body["edges"]
+    assert {e["stream"] for e in body["edges"]} == {"process", "utility"}
+
+
 def test_inject_busy_stop_answer_key(client):
     """값이 실제로 움직이는지는 생성기·장부 테스트가 본다 (실시간 ramp 는 수십 초가 걸린다)."""
     r = client.post("/plant/anomalies", json=SURGE, headers=TOKEN)

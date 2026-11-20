@@ -9,7 +9,7 @@ from collector.storage import Storage
 from common.config_models import load_plant, load_runtime
 from common.sim_clock import KST
 from common.timefmt import to_db
-from simulator.fault import RECOVERY_SEC, load_fault_modes
+from simulator.fault import MAX_RECOVERY_SEC, RECOVERY_SEC, load_fault_modes
 from simulator.model import PlantGenerator
 
 
@@ -57,8 +57,8 @@ def test_external_includes_recovery_tail(book):
     b.stop(None, at=200.0)
     assert [x.event_id for x in b.external(0, 101)] == [e.event_id]
     assert b.external(0, 100) == []                                          # 시작 전
-    assert [x.stop for x in b.external(200 + RECOVERY_SEC - 1, 400)] == [200.0]
-    assert b.external(200 + RECOVERY_SEC, 400) == []
+    assert [x.stop for x in b.external(200 + MAX_RECOVERY_SEC - 1, 400)] == [200.0]     # 하류 단계의 긴 회복까지
+    assert b.external(200 + MAX_RECOVERY_SEC, 400) == []
 
 
 def test_book_reload_keeps_open_events(book):
@@ -81,7 +81,19 @@ def test_answer_key_fields_and_stage_cut(book):
     assert [s["id"] for s in row["stages"]] == ["S1", "S2"]
     assert {t["stage"] for t in row["response_tags"]} == {"S1", "S2"}
     assert {(t["tag_id"], t["start_at"]) for t in row["response_tags"] if t["stage"] == "S1"} == {("FI-C3101", _utc(1000.0))}
-    assert row["end_at"] == _utc(1130.0 + RECOVERY_SEC)
+    assert row["end_at"] == _utc(1130.0 + RECOVERY_SEC)        # 하류 wobble(S2 + 10초)은 멈춤 전에 시작하지 못했다
+    assert {(t["via"], t["hop"]) for t in row["response_tags"]} == {("self", 0)}
+
+
+def test_answer_key_marks_downstream_and_longer_recovery(book):
+    """하류 효과가 시작한 사건: response_tags 에 via·hop, end_at 은 가장 먼 단계의 회복(60초 × (k+1))까지."""
+    b = book[0]
+    b.inject("C-3101", "CC-SURGE", at=1000.0)
+    b.stop("C-3101", at=1200.0)
+    row = b.answer_key(None, None, None)[0]
+    down = {(t["equip_id"], t["via"], t["hop"]) for t in row["response_tags"] if t["equip_id"] != "C-3101"}
+    assert down == {("P-3102", "process", 1), ("P-3103", "process", 1)}
+    assert row["end_at"] == _utc(1200.0 + 2 * RECOVERY_SEC)
 
 
 def test_answer_key_skips_zero_length_event(book):

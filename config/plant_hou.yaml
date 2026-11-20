@@ -68,6 +68,51 @@ correlation:
   share: 0.5
   signs: { flow: 1, current: 1, speed: 1, discharge_pressure: 1, differential_pressure: 1, suction_pressure: -1 }
 
+# 공정 흐름 그래프 (프로젝트 가상 공장, 2026-11-20). 3D 뷰어 그래프(2026-11-19)에서 옮겼고 뷰어는 GET /{공장}/flow 로 읽는다.
+# 간선 [from, to, label, stream]. stream 은 뷰어의 계통 구분 규칙을 옮긴 값이다. 축 연결은 driven_by 가 맡아 넣지 않는다.
+flow:
+  nodes:
+    FEED: "Heavy hydrocarbon feed"
+    MIX: "Feed + H2 mixer"
+    FURN: "Charge heater"
+    REACT: "Hydrocracking reactor"
+    SEP: "High-pressure separator"
+    STRIP: "Product stripper"
+    FRAC: "Product fractionator"
+    H2: "Fresh H2 supply"
+    PURGE: "Gas purge / treatment"
+    PRODUCT: "Naphtha / kerosene / diesel"
+    GAS: Off-gas
+    AIRC: "Combustion air"
+    LUBE: "Lube oil reservoir"
+    HX: "원료·반응 유출물 열교환기"
+  edges:
+    - [FEED, P-2101, feed, process]
+    - [MIX, HX, "저온측", process]
+    - [HX, FURN, "저온측", process]
+    - [FURN, REACT, "heated feed", process]
+    - [REACT, HX, "고온측", process]
+    - [HX, SEP, "고온측", process]
+    - [SEP, STRIP, "liquid product", process]
+    - [SEP, PURGE, purge, utility]
+    - [SEP, C-2301, "H2-rich recycle", utility]
+    - [STRIP, FRAC, "stripped oil", process]
+    - [STRIP, GAS, gas, utility]
+    - [FRAC, PRODUCT, distillates, process]
+    - [FRAC, P-2601, "overhead liquid", process]
+    - [FRAC, P-2701, "unconverted oil", process]
+    - [H2, C-2201, "make-up H2", utility]
+    - [AIRC, FN-2401, "air / draft", utility]
+    - [LUBE, P-2501, lubricant, utility]
+    - [C-2201, MIX, H2, utility]
+    - [C-2301, MIX, "recycle H2", utility]
+    - [FN-2401, FURN, "combustion air", utility]
+    - [P-2101, MIX, "pressurized feed", process]
+    - [P-2501, C-2301, "lube oil", utility]
+    - [P-2601, FRAC, reflux, process]
+    - [P-2701, MIX, "UCO recycle", process]
+    - [C-2201, C-2301, 보충 수소, utility]   # 가상 공장 추가 (뷰어에 없음)
+
 equipment:
   # ---------------- UNIT-HOU-01 원료 가압·공급 ----------------
   - equip_id: P-2101
