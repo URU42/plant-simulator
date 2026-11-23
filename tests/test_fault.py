@@ -197,11 +197,37 @@ def test_downstream_effects_shrink_slow_and_recover_late(config_dir, modes):
     assert _hop_effect(Effect(signal="flow", shape="ramp", z=0.3), 2) is None        # 0.21σ: 걸지 않는다
 
 
-def test_downstream_effect_validation():
+@pytest.mark.parametrize("prop", [
+    {"process": [{"signal": "flow", "shape": "step", "z": -1}]},                              # 모양
+    {"process": [{"signal": "flow", "shape": "ramp", "z": -1, "to_limit": "warn_lo"}]},       # 공정 하류는 한계 목표 불가
+    {"utility": [{"signal": "bearing_temp", "shape": "ramp", "to_limit": "warn_hi"}]},        # 한계 없는 태그용 z 필요
+])
+def test_downstream_effect_validation(prop):
     with pytest.raises(ValueError):
         FaultMode.model_validate({"id": "X", "name": "x", "equip_types": ["PM"], "label": {"kind": "k", "cause": "c", "action": "a"},
-                                  "stages": [{"id": "S1", "name": "s", "at_sec": 0, "propagate": {"process": [
-                                      {"signal": "flow", "shape": "step", "z": -1}]}}]})
+                                  "stages": [{"id": "S1", "name": "s", "at_sec": 0, "propagate": prop}]})
+
+
+def test_lube_oil_loss_drives_compressor_bearing_to_limits(config_dir, modes):
+    """윤활유 펌프 P-2501 흡입 악화: 자기 윤활유 압력은 S3 경보·S4 정지 한계, 보조 계통으로 닿은 C-2301 베어링 온도는
+    S2 경고 → S3 경보 → S4 정지 한계를 넘는다 (사용자 확정 2026-11-23)."""
+    plant = load_plant(config_dir / "plant_hou.yaml")
+    control = plant.control_by_key()
+    lim = plant.tag_by_key()
+    tags = plan(plant, modes["PM-SUCTION-LOSS"], "P-2501", control)
+
+    def value(key, t):
+        mu, sigma = control[key]
+        return mu + sigma * tag_effect(tags[key], t, None)[0]
+
+    bt = ("C-2301", "TI-2301A")
+    assert (tags[bt].via, tags[bt].hop) == ("utility", 1)
+    b = lim[bt].limits
+    assert b.warn_hi < value(bt, 1000) < b.alarm_hi < value(bt, 1800) < b.trip_hi < value(bt, 3000)
+    oil = ("P-2501", "PI-2501")
+    o = lim[oil].limits
+    assert o.alarm_lo < value(oil, 900) and o.trip_lo < value(oil, 1800) < o.alarm_lo and value(oil, 3000) < o.trip_lo
+    assert ("C-2301", "PI-2301A") not in tags or tags[("C-2301", "PI-2301A")].via == "utility"   # 압축기에는 윤활유 압력 태그가 없다
 
 
 def test_damage_stage_holds_after_stop_until_repair():
