@@ -504,3 +504,17 @@ def load_plant(path: str | Path) -> PlantConfig:
 
 def load_runtime(path: str | Path) -> RuntimeConfig:
     return RuntimeConfig.model_validate(load_yaml(path))
+
+
+# 용도별 실행 설정 (2026-11-23 사용자 확정). demo: 실행 설정 파일 그대로(시연용, 조용한 정상).
+# eval: 학습·평가용 — 정상 억제 표집을 끄고(정상에서도 우연한 규칙 위반) 계측 이상 층을 켠다(빈도·크기는 파일 값, 정답지 코드 2).
+PROFILES = ("demo", "eval")
+
+
+def apply_profile(runtime: RuntimeConfig, profile: str) -> RuntimeConfig:
+    if profile not in PROFILES:
+        raise ConfigError(f"unknown profile {profile!r}: use one of {', '.join(PROFILES)}")
+    if profile == "demo":
+        return runtime
+    faults = runtime.instrument_faults.model_copy(update={"enabled": True})
+    return runtime.model_copy(update={"quiet_normal": False, "instrument_faults": faults})

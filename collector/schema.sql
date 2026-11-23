@@ -68,3 +68,7 @@ CREATE TABLE IF NOT EXISTS anomaly_event (
     kind TEXT NOT NULL, cause TEXT NOT NULL, action TEXT NOT NULL, expect TEXT, plan TEXT NOT NULL,
     start_at TEXT NOT NULL, stop_requested_at TEXT, repair_requested_at TEXT
 );
+
+-- 실행 정보 (2026-11-23): name='profile' 은 이 DB 를 만든 실행 용도(demo·eval). 정답지의 계측 이상은 지금 설정으로 과거 구간까지
+-- 다시 계산하므로, 용도가 다른 실행이 같은 DB 를 이어 쓰면 정답지가 틀린다. 그래서 DB 마다 하나로 고정한다.
+CREATE TABLE IF NOT EXISTS run_meta (name TEXT PRIMARY KEY, value TEXT NOT NULL);

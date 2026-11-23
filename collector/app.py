@@ -278,7 +278,8 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         modes = load_fault_modes(plants.fault_modes)
-        app.state.plants = {entry.key: PlantContext.open(entry, modes, settings.redis_url, settings.reset_db_on_schema_change)
+        app.state.plants = {entry.key: PlantContext.open(entry, modes, settings.redis_url, settings.reset_db_on_schema_change,
+                                                         settings.profile)
                             for entry in plants.plants}
         app.state.started_at = to_db(datetime.now(timezone.utc))
         tasks: list[asyncio.Task] = []
@@ -346,7 +347,7 @@ def _simulator_done(task: asyncio.Task, ctx: PlantContext) -> None:
     log.error("embedded simulator %s died: %s", task.get_name(), ctx.simulator_error)
 
 
-def check_plants(plants: PlantsConfig, reset_db: bool = False) -> None:
+def check_plants(plants: PlantsConfig, reset_db: bool = False, profile: str = "demo") -> None:
     """서버를 띄우기 전에 공장을 하나씩 열어 본다. 설정·DB 문제는 traceback 대신 "plant <key>: 이유" 한 줄로 알린다.
     reset_db 면 스키마 버전이 다른 DB 파일은 여기서 지우고 새로 만든다."""
     try:
@@ -355,7 +356,7 @@ def check_plants(plants: PlantsConfig, reset_db: bool = False) -> None:
         raise ConfigError(f"fault modes {plants.fault_modes}: {e}") from None
     for entry in plants.plants:
         try:
-            PlantContext.open(entry, modes, reset_db=reset_db).close()
+            PlantContext.open(entry, modes, reset_db=reset_db, profile=profile).close()
         except ConfigError as e:
             raise ConfigError(f"plant {entry.key}: {e}") from None
 
@@ -423,6 +424,7 @@ def _parse_args(argv=None) -> argparse.Namespace:
                    help="공장 목록의 생성기를 같은 프로세스에서 돌린다 (WITH_SIMULATORS=1 과 같다)")
     p.add_argument("--time-mode", choices=["backfill", "live", "accelerated"], help="통합 실행에서 각 공장의 time_mode 를 덮어쓴다")
     p.add_argument("--backfill-days", type=int, help="통합 실행에서 각 공장의 backfill_days 를 덮어쓴다")
+    p.add_argument("--profile", choices=["demo", "eval"], help="실행 용도 (DATA_PROFILE 과 같다). eval = 정상 억제 표집 끔·계측 이상 켬")
     return p.parse_args(argv)
 
 
@@ -434,8 +436,8 @@ def main(argv=None) -> None:
     plants = load_plants(args.plants)
     try:
         settings = Settings.from_env(with_simulators=args.with_simulators or None, time_mode=args.time_mode,
-                                     backfill_days=args.backfill_days)
-        check_plants(plants, settings.reset_db_on_schema_change)
+                                     backfill_days=args.backfill_days, profile=args.profile)
+        check_plants(plants, settings.reset_db_on_schema_change, settings.profile)
     except ConfigError as e:
         sys.exit(f"error: {e}")
     uvicorn.run(create_app(plants, settings), host=args.host, port=args.port, root_path=settings.root_path)

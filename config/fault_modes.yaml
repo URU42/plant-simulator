@@ -200,7 +200,8 @@ fault_modes:
 
   - id: OP-LOAD-CHANGE
     name: 운전 부하 감소 (정상 운전 변화)
-    equip_ids: [T-1401, M-3101, M-3102, M-4102]     # 회전속도를 바꾸는 구동기
+    # 회전속도를 바꾸는 구동기. HOU 압축기 2대는 구동기 없이 자기 회전수가 있어 2026-11-23 더했다(사용자 확정, 팬은 제외)
+    equip_ids: [T-1401, M-3101, M-3102, M-4102, C-2201, C-2301]
     unobserved: [운전 지시·속도 설정값(SP)]
     label:
       kind: 정상 운전 변화
@@ -215,6 +216,9 @@ fault_modes:
           # 정상 운전 변화라 한계값(경고 μ±3σ)에는 거의 닿지 않고 Nelson 규칙 2(평균 이동)·ML 만 알아챌 크기 (2026-11-19 축소, 전 −15·−12σ)
           - { signal: speed, shape: ramp, z: -1.5, rise_sec: 300 }
           - { signal: current, shape: ramp, z: -1.5, lag_sec: 5, rise_sec: 300 }
+          # 자기 유량·토출 압력이 있는 설비(HOU 압축기)만 움직인다. 터빈·전동기에는 이 태그가 없어 건너뛴다 (2026-11-23)
+          - { signal: flow, shape: ramp, z: -1.5, lag_sec: 10, rise_sec: 300 }
+          - { signal: discharge_pressure, shape: ramp, z: -1.0, lag_sec: 10, rise_sec: 300 }
         propagate:
           driven:
             - { signal: flow, shape: ramp, z: -1.5, lag_sec: 10, rise_sec: 300 }
@@ -226,6 +230,35 @@ fault_modes:
     expect:
       stages:
         S1: { setpoint: none, nelson: [2], ml_plant: high }    # RFCC 는 경고(통계 ±3σ)를 가끔 넘는다(표본 약 1 %)
+      alarms:
+        - { equip: self, kind: 정상 운전 변화 }
+
+  # 처리량 감소 (2026-11-23 사용자 확정, 수치는 synthetic). 회전수 태그가 없는 펌프로 표현하는 정상 운전 변화.
+  # 원료 공급 펌프의 송출량을 줄이면(유량 조절 밸브) 흐름 그래프를 따라 하류 펌프 처리량이 함께 준다. 처음엔 CDU 만, 같은 날 다섯 공장으로 넓혔다.
+  # 크기는 OP-LOAD-CHANGE 와 같다. 펌프 전류는 계산 태그라 유량·양정을 따라 내려간다.
+  - id: OP-THROUGHPUT-CHANGE
+    name: 처리량 감소 (정상 운전 변화)
+    # 공정 처리량을 정하는 원료 공급 펌프: CDU 원유 공급, RFCC Feed Charge, HOU·RHDS·VRDS 고압 원료 공급
+    equip_ids: [P-8101A, P-1101A, P-2101, P-3101, P-4101]
+    unobserved: [유량 조절 밸브 개도·처리량 설정값(SP)]
+    label:
+      kind: 정상 운전 변화
+      code: 1                                       # 정답지 코드 1 = 정상
+      cause: 의도한 처리량 감소 (공급 유량 하향)
+      action: 기계 수리 아님. 운전 지시·처리량 조건 확인
+    stages:
+      - id: S1
+        name: 공급 유량 하향
+        at_sec: 0
+        effects:
+          - { signal: flow, shape: ramp, z: -1.5, rise_sec: 300 }
+          - { signal: discharge_pressure, shape: ramp, z: -1.0, rise_sec: 300 }
+        propagate:
+          process:                                  # 정상 운전 변화라 하류 변화도 정상(코드 1)
+            - { signal: flow, shape: ramp, z: -0.75, lag_sec: 60, rise_sec: 300 }
+    expect:
+      stages:
+        S1: { setpoint: none, nelson: [2], ml_plant: high }
       alarms:
         - { equip: self, kind: 정상 운전 변화 }
 

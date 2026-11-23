@@ -19,7 +19,7 @@ from collector.plants import PlantEntry
 from collector.seed_master import seed_master
 from collector.storage import Storage
 from collector.stream import Broadcaster
-from common.config_models import PlantConfig, RuntimeConfig, TagKey, load_plant, load_runtime
+from common.config_models import ConfigError, PlantConfig, RuntimeConfig, TagKey, apply_profile, load_plant, load_runtime
 from common.message import Sample
 from simulator.fault import FaultMode
 from simulator.instrument import InstrumentSchedule
@@ -51,13 +51,14 @@ class PlantContext:
 
     @classmethod
     def open(cls, entry: PlantEntry, modes: dict[str, FaultMode], redis_url: str | None = None,
-             reset_db: bool = False) -> "PlantContext":
+             reset_db: bool = False, profile: str = "demo") -> "PlantContext":
         """modes 는 공장들이 함께 쓰는 고장 모드 정의(config/fault_modes.yaml). redis_url 이 있으면 Redis Stream 으로도 보낸다.
-        reset_db 면 스키마 버전이 다른 DB 파일을 지우고 새로 만든다."""
+        reset_db 면 스키마 버전이 다른 DB 파일을 지우고 새로 만든다. profile 은 실행 용도(demo·eval)로 DB 마다 하나로 고정된다."""
         plant = load_plant(entry.plant)
-        runtime = load_runtime(entry.runtime)
+        runtime = apply_profile(load_runtime(entry.runtime), profile)
         Path(entry.db).parent.mkdir(parents=True, exist_ok=True) if entry.db != ":memory:" else None
         storage = Storage(entry.db, reset_on_schema_change=reset_db)
+        _pin_profile(storage, entry.db, profile)
         seed_master(storage, plant)
         try:
             loop = asyncio.get_running_loop()
@@ -210,3 +211,15 @@ def _instrument(plant: PlantConfig, runtime: RuntimeConfig) -> InstrumentSchedul
     """정답지에 실을 계측 이상 일정. 생성기와 같은 실행 설정(시드·빈도)으로 다시 계산한다."""
     cfg = runtime.instrument_faults
     return InstrumentSchedule(plant, cfg, runtime.seed, runtime.sample_interval_sec) if cfg.enabled else None
+
+
+def _pin_profile(storage: Storage, db: str, profile: str) -> None:
+    """DB 의 실행 용도를 기록하고, 다른 용도로 만든 DB 면 멈춘다. 기록 전에 데이터가 있던 DB 는 demo 로 본다(이 기능 전 실행)."""
+    rows = storage.query("SELECT value FROM run_meta WHERE name = 'profile'")
+    found = rows[0][0] if rows else ("demo" if storage.sim_now() is not None else None)
+    if found is not None and found != profile:
+        storage.close()
+        raise ConfigError(f"DB {db} was generated with profile {found!r}, not {profile!r}: the answer key would mix both. "
+                          "Point this plant's db to another file for this profile, or move or delete the file")
+    if not rows:
+        storage.execute("INSERT INTO run_meta (name, value) VALUES ('profile', ?)", (profile,))
