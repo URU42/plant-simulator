@@ -172,3 +172,16 @@ def test_legacy_event_without_damage_flags_holds_no_damage(book):
     b.stop("GB-3101", at=1000.0)
     st.execute("UPDATE anomaly_event SET plan = json_remove(json_remove(plan, '$.stages[0].damage'), '$.stages[1].damage')")
     assert AnomalyBook(st, plant, modes).damaged() == [] and e.event_id
+
+
+def test_answer_key_records_boost(book):
+    """교호작용 사건: 정답지에 boost(규칙)와 키운 태그의 boost_by(온도 태그)가 남는다."""
+    b = book[0]
+    b.inject("P-3102", "PM-SUCTION-HOT", at=0.0)
+    row = b.answer_key(None, None, None)[0]
+    assert row["boost"] == {"by": "process_temp", "signals": ["vibration", "flow"], "per_unit": 0.03, "max_gain": 2.0,
+                            "hold_below_alarm": True}
+    boosted = {t["tag_id"] for t in row["response_tags"] if t["boost_by"]}
+    assert boosted == {"VI-A-P3102", "FI-P3102"}
+    assert {t["boost_by"] for t in row["response_tags"] if t["boost_by"]} == {"TI-F-P3102"}
+    assert "TI-F-P3102" in {t["tag_id"] for t in row["response_tags"]}

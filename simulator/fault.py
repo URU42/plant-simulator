@@ -5,7 +5,8 @@
 주입하면 설비 하나(와 propagate.driven 이면 그 설비가 구동하는 설비, propagate.process·utility 면 공정 흐름 그래프의 하류 설비)의
 태그마다 적용 목록(TagPlan)을 만들고, 생성기는 정상 신호 위에 효과 z 를 더한다. 멈춘 뒤에는 RECOVERY_SEC(하류 k단계는 × (k+1))
 동안 효과가 0 으로 가라앉는다. 손상 단계(damage)의 step·ramp 효과는 멈춘 시각의 크기로 남아 있다가 수리(repair) 뒤
-같은 회복 시간 동안 0 으로 가라앉는다.
+같은 회복 시간 동안 0 으로 가라앉는다. 고장 모드의 boost 는 같은 설비의 다른 신호(예: 유체 온도)가 사건으로 오른 만큼(태그 단위)
+효과를 키우는 교호작용이다.
 """
 from __future__ import annotations
 
@@ -37,6 +38,7 @@ class Effect(StrictModel):
     signal: str
     shape: Shape
     z: float | None = None              # 크기(σ 배수, 앞 효과에 더한다). to_limit 이 태그에 없을 때의 대안이기도 하다
+    delta: float | None = None          # 크기(태그 단위, 예: +15 ℃). σ 가 설비마다 달라도 같은 물리량만큼 움직인다. z 보다 먼저 쓴다
     # 그 태그의 효과 합을 한계값까지 (margin 만큼 더: 목표 z = (한계 − μ)/σ × (1 + margin)). 앞 단계 step·ramp 가 남긴 수준을 빼고 그만큼만 움직인다
     to_limit: LimitName | None = None
     margin: float = 0.0
@@ -47,8 +49,8 @@ class Effect(StrictModel):
 
     @model_validator(mode="after")
     def _check(self) -> "Effect":
-        if self.z is None and self.to_limit is None:
-            raise ValueError("effect needs z or to_limit")
+        if self.z is None and self.to_limit is None and self.delta is None:
+            raise ValueError("effect needs z, delta or to_limit")
         if self.shape == "wobble" and self.period_sec is None:
             raise ValueError("wobble needs period_sec")
         if self.shape == "spike" and self.decay_sec <= 0:
@@ -88,6 +90,19 @@ class Label(StrictModel):
     code: Literal[0, 1] = 0     # 정답지 코드: 0 비정상(설비 고장), 1 정상(정상 운전 변화). 계측 이상은 2 (simulator.instrument)
 
 
+class Boost(StrictModel):
+    """교호작용 (2026-11-23 사용자 요청, 계수는 synthetic): 같은 설비의 by 신호 태그가 사건으로 오른 만큼(ΔT, 태그 단위) signals 효과를 키운다.
+    배율 = min(max_gain, 1 + per_unit × max(0, ΔT)). ΔT 는 정상 잡음·계측 이상을 뺀 사건 효과(공정 상태)다. 내려가면 키우지 않는다."""
+
+    by: str                             # 예: process_temp (흡입 유체 온도)
+    signals: list[str]                  # 키울 효과의 신호 (예: vibration, flow)
+    per_unit: float = Field(gt=0)       # by 태그 단위 1 당 배율 증가 (예: ℃ 당 0.03)
+    max_gain: float = Field(gt=1)
+    # 경고 구간 보장: 그 태그의 경보 한계 목표(to_limit alarm_*) 효과가 시작되기 전에는 키운 효과가 경보 한계 HOLD_MARGIN_Z 안쪽에 머문다.
+    # 경고와 경보가 거의 같이 나지 않게 경고 단계를 남긴다. 경보 단계부터는 그대로 키운다 (사용자 확정 2026-11-23)
+    hold_below_alarm: bool = False
+
+
 class FaultMode(StrictModel):
     id: str
     name: str
@@ -98,6 +113,7 @@ class FaultMode(StrictModel):
     expect: dict[str, Any] | None = None    # 평가용 기대값 (자유 형식, 정답지에 그대로 싣는다)
     # 실제 고장이면 보일 신호지만 마스터에 태그가 없어 만들지 않는 것 (예: 증기 온도). 기록용이며 생성에는 쓰지 않는다
     unobserved: list[str] = []
+    boost: Boost | None = None          # 교호작용 (주입 설비의 효과만 키운다. 하류·축 전파 효과는 그대로)
 
     @model_validator(mode="after")
     def _check(self) -> "FaultMode":
@@ -162,6 +178,21 @@ class Applied:
     damage: bool = False                # 손상 단계의 step·ramp: 멈춘 뒤에도 수리 전까지 남는다
 
 
+HOLD_MARGIN_Z = 3.0         # 경고 구간 보장: 키운 효과의 상한 = 경보 한계 z − 3 (잡음으로 경보를 건드리지 않게)
+
+
+@dataclass(frozen=True)
+class TagBoost:
+    """한 태그에 걸린 교호작용. per_z 는 by 태그 z 1 당 배율 증가(= per_unit × σ_by).
+    hold 는 경고 구간 보장: (경보 목표 효과의 정의상 시작 초, 그 lag, 그 rise_sec, |z| 상한). 그 시작 전에는 키운 효과가 상한을 넘지 않고,
+    시작 뒤 rise_sec 동안 상한을 서서히 푼다 (한꺼번에 풀면 단계 경계에서 값이 계단처럼 튄다)."""
+
+    by: TagKey
+    per_z: float
+    max_gain: float
+    hold: tuple[float, float, float, float] | None = None
+
+
 @dataclass(frozen=True)
 class TagPlan:
     applied: tuple[Applied, ...]
@@ -169,6 +200,7 @@ class TagPlan:
     via: str = "self"                           # self(고장 설비) · driven(축) · process · utility (정답지)
     hop: int = 0                                # 흐름 그래프 단계 (고장 설비와 축 사슬은 0)
     recovery: float = RECOVERY_SEC              # 멈춘 뒤 0 으로 가라앉는 시간
+    boost: TagBoost | None = None               # 교호작용 (이 태그에 걸린 것)
 
 
 def _hop_effect(effect: Effect, hop: int) -> Effect | None:
@@ -181,11 +213,11 @@ def _hop_effect(effect: Effect, hop: int) -> Effect | None:
 
 def _target(effect: Effect, mu: float, sigma: float, limits, level: float) -> float | None:
     """효과의 크기 z. to_limit 이 그 태그에 있으면 효과 합이 그 한계값(+margin)에 닿도록 지금까지 남은 수준(level)을 뺀 값,
-    없으면 z, 둘 다 없으면 None(이 태그에는 걸지 않는다)."""
+    없으면 delta/σ 나 z, 모두 없으면 None(이 태그에는 걸지 않는다)."""
     bound = getattr(limits, effect.to_limit) if effect.to_limit and limits is not None else None
     if bound is not None:
         return (bound - mu) / sigma * (1 + effect.margin) - level
-    return effect.z
+    return effect.delta / sigma if effect.delta is not None else effect.z
 
 
 def plan(plant: PlantConfig, mode: FaultMode, equip_id: str,
@@ -230,11 +262,51 @@ def plan(plant: PlantConfig, mode: FaultMode, equip_id: str,
             inherited = [Applied(a.stage, a.start, a.effect, 0.0, a.damage) for i in t.derive.inputs for a in found.get((e.equip_id, i), ())]
             if inherited:
                 found.setdefault((e.equip_id, t.tag_id), []).extend(inherited)
+    boost: dict[TagKey, TagBoost] = {}
+    src = next((t for t in by_id[equip_id].tags if mode.boost and t.signal == mode.boost.by), None)
+    if src is not None:
+        b, by = mode.boost, (equip_id, src.tag_id)
+        for t in by_id[equip_id].tags:
+            if t.signal in b.signals:
+                key = (equip_id, t.tag_id)
+                boost[key] = TagBoost(by, b.per_unit * control[by][1], b.max_gain,
+                                      _hold(found.get(key, ()), t.limits, *control[key]) if b.hold_below_alarm else None)
     out = {}
     for key, a in found.items():
         via, hop = role[key[0]]
-        out[key] = TagPlan(tuple(a), quiet, via, hop, RECOVERY_SEC * (hop + 1))
+        out[key] = TagPlan(tuple(a), quiet, via, hop, RECOVERY_SEC * (hop + 1), boost.get(key))
     return out
+
+
+def _hold(applied, limits, mu: float, sigma: float) -> tuple[float, float, float, float] | None:
+    """경고 구간 보장: 첫 경보 한계 목표 효과의 (시작, lag, rise_sec, |경보 z| − HOLD_MARGIN_Z). 그 태그에 경보 목표가 없으면 None."""
+    for a in applied:
+        name = a.effect.to_limit
+        bound = getattr(limits, name) if name and name.startswith("alarm") and limits is not None else None
+        if bound is not None:
+            return a.start, a.effect.lag_sec, a.effect.rise_sec, abs(bound - mu) / sigma - HOLD_MARGIN_Z
+    return None
+
+
+def boost_gain(boost: TagBoost, z_by: float) -> float:
+    """교호작용 배율: by 태그의 사건 효과 z 가 오른 만큼 키운다 (내려가면 1)."""
+    return min(boost.max_gain, 1 + boost.per_z * max(0.0, z_by))
+
+
+def boosted(boost: TagBoost, z: float, z_by: float, t: float, speed: int = 1) -> float:
+    """사건 시작 기준 t 초의 효과 z 를 교호작용으로 키운 값. 경보 목표 효과가 시작되기 전에는 hold 상한(원래 효과가 이미
+    넘었으면 원래 크기)을 넘지 않고, 시작 뒤 그 효과의 상승 시간(ramp 처럼 1/speed) 동안 상한을 키운 값까지 선형으로 푼다."""
+    zb = z * boost_gain(boost, z_by)
+    if boost.hold is None:
+        return zb
+    start, lag, rise, cap = boost.hold
+    cap = max(cap, abs(z))
+    if abs(zb) <= cap:
+        return zb
+    rise /= speed
+    released = t - effect_start(start, lag, speed)
+    frac = 0.0 if released < 0 else 1.0 if rise <= 0 or released >= rise else released / rise
+    return math.copysign(cap + frac * (abs(zb) - cap), zb)
 
 
 def _shape(a: Applied, tau: float, speed: int = 1) -> float:

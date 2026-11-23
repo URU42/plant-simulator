@@ -231,3 +231,66 @@ def test_holds_damage_only_if_damage_started_before_stop():
     assert not holds_damage(tags, FaultEvent("e", "P-8101A", m, 1000.0, stop=1100.0))        # 손상 단계 시작 시각에 멈췄다
     assert holds_damage(tags, FaultEvent("e", "P-8101A", m, 1000.0, stop=1101.0))
     assert holds_damage(tags, FaultEvent("e", "P-8101A", m, 1000.0, stop=1011.0, speed=10))  # ×10 이면 S2 는 10초에 시작
+
+
+def test_delta_effect_is_in_tag_units():
+    """delta 는 태그 단위 크기: z = delta / σ (σ 가 다른 설비도 같은 ℃ 만큼)."""
+    from simulator.fault import _target
+    e = Effect(signal="process_temp", shape="ramp", delta=15, rise_sec=10)
+    assert _target(e, 280.0, 0.5, None, 0.0) == 30.0
+
+
+def test_boost_only_on_injected_pump_with_temp_tag(modes, config_dir):
+    """흡입 악화 교호작용: 온도 태그가 있는 펌프(P-3102)의 진동·유량만 키운다. 계수는 ℃ 당이라 by 태그 σ 를 곱해 z 당으로 바꾼다."""
+    from simulator.fault import boost_gain
+    plant = load_plant(config_dir / "plant_rhds.yaml")
+    ctrl = plant.control_by_key()
+    tags = plan(plant, modes["PM-SUCTION-HOT"], "P-3102", ctrl)
+    by = ("P-3102", "TI-F-P3102")
+    assert {k for k, tp in tags.items() if tp.boost} == {("P-3102", "VI-A-P3102"), ("P-3102", "FI-P3102")}
+    b = tags[("P-3102", "VI-A-P3102")].boost
+    assert b.by == by and b.per_z == pytest.approx(0.03 * ctrl[by][1])
+    assert boost_gain(b, 10 / ctrl[by][1]) == pytest.approx(1.3)          # +10 ℃ → ×1.3
+    assert boost_gain(b, 60 / ctrl[by][1]) == 2.0 and boost_gain(b, -5.0) == 1.0   # 상한, 내려가면 키우지 않는다
+    assert not any(tp.boost for tp in plan(plant, modes["PM-SUCTION-LOSS"], "P-3101", ctrl).values())   # 온도 태그 없는 펌프
+    assert "PM-SUCTION-HOT" not in {m.id for m in modes.values() if m.applies_to(plant.equipment_by_id()["P-3101"])}
+
+
+def test_generator_scales_boosted_effect_by_temperature_effect(modes, config_dir):
+    """생성기: 같은 흡입 악화 효과가 유체 온도 사건 효과(+15 ℃ → ×1.45)만큼 커진다. 온도 사건이 없으면 그대로."""
+    from simulator.fault import FaultEvent
+    from simulator.model import _effect
+    plant = load_plant(config_dir / "plant_rhds.yaml")
+    ctrl = plant.control_by_key()
+    vib, temp = ("P-3102", "VI-A-P3102"), ("P-3102", "TI-F-P3102")
+    loss, hot = modes["PM-SUCTION-LOSS"], modes["PM-SUCTION-HOT"]
+    ev_l, ev_h = FaultEvent("l", "P-3102", loss, 0.0), FaultEvent("h", "P-3102", hot, 0.0)
+    pl, ph = plan(plant, loss, "P-3102", ctrl), plan(plant, hot, "P-3102", ctrl)
+    act_l = {k: [(ev_l, tp)] for k, tp in pl.items()}
+    act_h = {k: [(ev_h, tp)] for k, tp in ph.items()}
+    ep = 1600                                                         # 온도 ramp 끝, 경고 구간 보장(S3 900초 + 상승 600초)도 다 풀린 뒤
+    base = _effect(act_l[vib], ep, act_l)[0]
+    assert _effect(act_l[vib], ep, {})[0] == base                     # 온도 사건이 없으면 배율 1
+    assert _effect(act_h[temp], ep, act_h)[0] * ctrl[temp][1] == pytest.approx(15.0)
+    assert _effect(act_h[vib], ep, act_h)[0] == pytest.approx(base * 1.45)
+
+
+def test_hold_keeps_boost_below_alarm_until_alarm_stage():
+    """경고 구간 보장: 경보 목표 효과 전에는 상한에 머물고, 그 효과의 상승 시간 동안 선형으로 풀린다. 원래 효과가 이미 넘었으면 그대로."""
+    from simulator.fault import TagBoost, boosted
+    b = TagBoost(("E", "T"), per_z=0.1, max_gain=2.0, hold=(900.0, 0.0, 600.0, 50.0))
+    assert boosted(b, -40.0, 10.0, 500) == -50.0                  # ×2 = −80 → 상한 −50
+    assert boosted(b, -20.0, 10.0, 500) == -40.0                  # 상한 안쪽은 그대로 키운다
+    assert boosted(b, -40.0, 10.0, 1200) == pytest.approx(-65.0)  # 풀리는 중 절반: 50 + (80 − 50)/2
+    assert boosted(b, -40.0, 10.0, 1500) == -80.0                 # 다 풀림
+    assert boosted(b, 60.0, 0.0, 500) == 60.0                     # 배율 1, 원래 효과가 상한 위
+    assert boosted(b, -40.0, 10.0, 950, speed=10) == -80.0        # ×10: 시작 90초, 상승 60초 → 150초에 다 풀림
+
+
+def test_hold_is_set_from_first_alarm_target(modes, config_dir):
+    plant = load_plant(config_dir / "plant_rhds.yaml")
+    ctrl = plant.control_by_key()
+    tp = plan(plant, modes["PM-SUCTION-HOT"], "P-3102", ctrl)[("P-3102", "FI-P3102")]
+    mu, sg = ctrl[("P-3102", "FI-P3102")]
+    alarm = plant.tag_by_key()[("P-3102", "FI-P3102")].limits.alarm_lo
+    assert tp.boost.hold == pytest.approx((900.0, 0.0, 600.0, abs(alarm - mu) / sg - 3.0))

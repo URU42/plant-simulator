@@ -4,7 +4,7 @@
 - 정상: z = 공통 요인 + 개별 AR(1) 잡음. 공통 요인은 공정 그룹마다 하루치 표준정규 수열로, (seed, 그룹, KST 날짜)로 정해져
   Unit 을 나눠 돌려도 같은 값이다. 개별 잡음은 규칙 1~3 위반이 생기는 후보를 다시 뽑아(억제 표집, 최대 100번) 조용하다.
   runtime.quiet_normal 이 false 면 억제 표집을 하지 않아 정상에서도 우연한 위반이 난다(학습·오탐률 평가용).
-- 고장 모드(주입한 사건): 정상 z 위에 효과 z 를 더한다. 이때 억제 표집은 정상 부분만 보므로 위반은 효과 때문에만 생긴다.
+- 고장 모드(주입한 사건): 정상 z 위에 효과 z 를 더한다. 교호작용(boost)이 있으면 같은 설비 by 태그의 사건 효과만큼 키운다. 이때 억제 표집은 정상 부분만 보므로 위반은 효과 때문에만 생긴다.
   nelson_quiet 단계에서는 효과를 더한 값으로 판정해 위반이 나지 않게 고른다.
 - 피구동 설비의 speed 태그는 구동기 speed 의 z 를 그대로 쓴다(축 공유).
 - 계산 태그(derive)는 그 시각 입력 태그 값의 계산식 + 자체 잡음 + 효과다. 억제 표집은 자체 잡음만 다시 뽑으므로 위반 0 을 보장하지 않는다.
@@ -25,7 +25,7 @@ import numpy as np
 from common.config_models import Derive, PlantConfig, RuntimeConfig, TagKey
 from common.message import Sample
 from common.nelson import NelsonState, zscore
-from simulator.fault import MAX_RECOVERY_SEC, FaultEvent, TagPlan, plan, tag_effect
+from simulator.fault import MAX_RECOVERY_SEC, FaultEvent, TagPlan, boosted, plan, tag_effect
 from simulator.instrument import InstrumentEvent, InstrumentSchedule
 
 RHO = 0.12                  # 개별 잡음 AR(1) 계수
@@ -164,14 +164,14 @@ class PlantGenerator:
         columns: dict[TagKey, list[Sample]] = {}
         for t in self._order:
             if t.derive is not None:
-                columns[t.key] = self._derived(t, positions[t.interval], epochs, stamps, active.get(t.key, ()),
+                columns[t.key] = self._derived(t, positions[t.interval], epochs, stamps, active.get(t.key, ()), active,
                                                [values[k] for k in t.inputs], values.get(t.key))
                 continue
             copy = None
             if t.driver:
                 dmu, dsg = self.control[t.driver]
                 copy = {ep: (v - dmu) / dsg for ep, v in values[t.driver].items()}
-            columns[t.key] = self._series(t, positions[t.interval], epochs, stamps, active.get(t.key, ()), copy,
+            columns[t.key] = self._series(t, positions[t.interval], epochs, stamps, active.get(t.key, ()), active, copy,
                                           values.get(t.key))
 
         measure = self._measure(s0, s1)
@@ -222,9 +222,9 @@ class PlantGenerator:
                     out.setdefault(key, []).append((ev, tp))
         return out
 
-    def _series(self, t: _Tag, pos: list[int], epochs: range, stamps: list[datetime], active,
+    def _series(self, t: _Tag, pos: list[int], epochs: range, stamps: list[datetime], active, everything,
                 copy: dict[int, float] | None, record: dict[int, float] | None) -> list[Sample]:
-        """한 태그의 이 창 표본. copy 는 구동기 speed 의 시각별 z, record 는 이 태그 값을 시각별로 적어 둘 곳(구동기·계산 입력)."""
+        """한 태그의 이 창 표본. active 는 이 태그, everything 은 모든 태그의 사건 적용(교호작용의 by 태그를 볼 때). copy 는 구동기 speed 의 시각별 z, record 는 이 태그 값을 시각별로 적어 둘 곳(구동기·계산 입력)."""
         mu, sg, d, rho, scale, load, own = t.mu, t.sigma, t.decimals, t.rho, t.scale, t.load, t.own
         safe, bounds, push, normal = self._safe(t), t.nelson.bounds, t.nelson.push, t.normal
         equip_id, tag_id = t.key
@@ -236,7 +236,7 @@ class PlantGenerator:
         for i in pos:
             ep = epochs[i]
             day = self._day(t, ep)
-            fx, quiet = _effect(active, ep)
+            fx, quiet = _effect(active, ep, everything)
             if copy is not None and ep in copy:
                 z = copy[ep]
                 v = round(mu + sg * z, d)
@@ -274,7 +274,7 @@ class PlantGenerator:
         t.ep = ep_prev
         return out
 
-    def _derived(self, t: _Tag, pos: list[int], epochs: range, stamps: list[datetime], active,
+    def _derived(self, t: _Tag, pos: list[int], epochs: range, stamps: list[datetime], active, everything,
                  ins: list[dict[int, float]], record: dict[int, float] | None) -> list[Sample]:
         """계산 태그의 이 창 표본: 그 시각 입력 값의 계산식 + 자체 잡음(iid) + 효과. 자체 잡음만 TRIES 번 다시 뽑고,
         못 찾으면 마지막 값을 쓴다 (입력이 정한 몫은 바꿀 수 없어 위반 0 을 보장하지 않는다)."""
@@ -286,7 +286,7 @@ class PlantGenerator:
         for i in pos:
             ep = epochs[i]
             self._day(t, ep)
-            fx, quiet = _effect(active, ep)
+            fx, quiet = _effect(active, ep, everything)
             base = value([x[ep] for x in ins], ref, ref_out)
             total = fx == 0.0 or quiet
             for _ in range(TRIES):
@@ -319,12 +319,15 @@ def _accept(z: float) -> bool:
     return True
 
 
-def _effect(active, ep: int) -> tuple[float, bool]:
-    """ep 에서 걸린 사건들의 (효과 z 합, nelson_quiet 여부)."""
+def _effect(active, ep: int, everything=None) -> tuple[float, bool]:
+    """ep 에서 걸린 사건들의 (효과 z 합, nelson_quiet 여부). 교호작용이 있는 적용은 그 시각 by 태그의 사건 효과 z(모든 사건 합,
+    정상 잡음 제외)로 배율을 정한다. by 태그에는 교호작용이 없어 한 단계로 끝난다."""
     fx, quiet = 0.0, False
     for ev, tp in active:
         z, q = tag_effect(tp, ep - ev.start, None if ev.stop is None else ev.stop - ev.start, ev.speed,
                           None if ev.repair is None else ev.repair - ev.start)
+        if tp.boost is not None and z:
+            z = boosted(tp.boost, z, _effect((everything or {}).get(tp.boost.by, ()), ep)[0], ep - ev.start, ev.speed)
         fx += z
         quiet = quiet or q
     return fx, quiet
