@@ -11,7 +11,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Callable
 
-from common.config_models import PlantConfig, RuntimeConfig, load_plant, load_runtime
+from common.config_models import PROFILES, PlantConfig, RuntimeConfig, apply_profile, load_plant, load_runtime
 from common.message import IngestBatch, make_batch_id
 from common.nelson import HISTORY
 from common.sim_clock import KST, SimClock, align_down
@@ -134,6 +134,8 @@ def _parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--runtime", default=os.environ.get("RUNTIME_CONFIG", "config/runtime_rhds.yaml"))
     p.add_argument("--time-mode", choices=["backfill", "live", "accelerated"], help="실행 설정의 time_mode 를 덮어쓴다")
     p.add_argument("--collector-url", default=os.environ.get("COLLECTOR_URL"), help="실행 설정의 collector_url 을 덮어쓴다")
+    p.add_argument("--profile", choices=PROFILES, default=os.environ.get("DATA_PROFILE") or "demo",
+                   help="실행 용도 demo/eval (DATA_PROFILE). 수집 서버와 같은 값을 써야 정답지의 계측 이상이 맞는다")
     return p.parse_args(argv)
 
 
@@ -141,7 +143,7 @@ def main(argv=None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args = _parse_args(argv)
     plant = load_plant(args.plant)
-    runtime = load_runtime(args.runtime)
+    runtime = apply_profile(load_runtime(args.runtime), args.profile)
     overrides = {k: v for k, v in {"time_mode": args.time_mode, "collector_url": args.collector_url}.items() if v}
     if overrides:
         runtime = runtime.model_validate(runtime.model_dump() | overrides)

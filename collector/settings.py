@@ -6,6 +6,7 @@ INGEST_TOKEN       있으면 POST /{공장}/ingest·/{공장}/anomalies 는 헤�
 WITH_SIMULATORS    1/true 면 공장 목록의 생성기를 같은 프로세스에서 돌린다
 REDIS_URL          있으면 받은 값을 공장별 Redis Stream plant-sim:data:{공장} 으로 보낸다 (collector.data_stream)
 RESET_DB_ON_SCHEMA_CHANGE  1/true 면 스키마 버전이 다른 공장 DB 파일을 지우고 새로 만든다(백필로 다시 채움). 기본은 오류로 멈춘다
+DATA_PROFILE       실행 용도 demo(기본, 시연용 조용한 정상) / eval(학습·평가용: 정상 억제 표집 끔, 계측 이상 켬). DB 마다 하나로 고정된다
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ class Settings:
     reset_db_on_schema_change: bool = False
     time_mode: str | None = None          # 통합 실행에서 각 공장 runtime 의 time_mode 를 덮어쓴다
     backfill_days: int | None = None      # 통합 실행에서 각 공장 runtime 의 backfill_days 를 덮어쓴다
+    profile: str = "demo"                 # 실행 용도 (common.config_models.PROFILES)
 
     @classmethod
     def from_env(cls, **overrides) -> "Settings":
@@ -37,6 +39,7 @@ class Settings:
             with_simulators=env.get("WITH_SIMULATORS", "").strip().lower() in TRUE_VALUES,
             redis_url=env.get("REDIS_URL") or None,
             reset_db_on_schema_change=env.get("RESET_DB_ON_SCHEMA_CHANGE", "").strip().lower() in TRUE_VALUES,
+            profile=env.get("DATA_PROFILE", "").strip() or "demo",
         )
         for name, value in overrides.items():
             if value is not None:

@@ -18,11 +18,13 @@ def test_every_tag_has_control_and_fine_decimals(config_dir, key):
         assert 10 ** -t.decimals <= 0.1 * t.control.sigma + 1e-12, t.tag_id
 
 
-def test_rfcc_limits_are_three_sigma(config_dir):
+def test_rfcc_limits_are_engineering_not_statistical(config_dir):
+    """2026-11-23: RFCC 한계값은 통계 μ±3σ 가 아니라 공학 기준값이다(다른 공장처럼 정상에서 멀다). μ·σ(Nelson 기준)는 그대로."""
+    names = ("trip_lo", "alarm_lo", "warn_lo", "warn_hi", "alarm_hi", "trip_hi")
     for t in load_plant(config_dir / "plant_rfcc.yaml").all_tags():
-        c = t.control
-        assert t.limits.warn_lo == pytest.approx(c.mean - 3 * c.sigma, abs=1e-4)
-        assert t.limits.warn_hi == pytest.approx(c.mean + 3 * c.sigma, abs=1e-4)
+        c, lim = t.control, {n: getattr(t.limits, n) for n in names if getattr(t.limits, n) is not None}
+        assert lim and all(abs(v - c.mean) > 10 * c.sigma for v in lim.values()), t.tag_id
+        assert list(lim.values()) == sorted(lim.values()), t.tag_id                 # 정지 < 알람 < 경고 < μ < 경고 < 알람 < 정지
 
 
 @pytest.mark.skipif(not BASELINES.exists(), reason="data-v3 자료 없음")

@@ -70,3 +70,6 @@ def test_plants_yaml_lists_five(config_dir):
     assert [p.key for p in load_plants(config_dir / "plants.yaml").plants] == ["rfcc", "cdu", "hou", "rhds", "vrds"]
     k8s = load_plants(config_dir / "plants.k8s.yaml").plants
     assert [p.key for p in k8s] == ["rfcc", "cdu", "hou", "rhds", "vrds"] and all(p.db.startswith("/app/data/") for p in k8s)
+    local, ev = load_plants(config_dir / "plants.yaml").plants, load_plants(config_dir / "plants.eval.yaml").plants
+    assert [(p.key, p.plant, p.runtime) for p in ev] == [(p.key, p.plant, p.runtime) for p in local]   # 같은 구성안·실행 설정
+    assert all(p.db.startswith("data/eval/") for p in ev)                   # demo DB 와 겹치지 않는다(DB 마다 용도 고정)

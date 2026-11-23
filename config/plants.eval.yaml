@@ -1,0 +1,9 @@
+# 로컬 학습·평가(eval) 실행용 공장 목록 (2026-11-23). 서버 배포는 demo(실시간 시연)만 쓰고, eval 은 로컬에서만 돌린다(사용자 확정).
+# DB 는 용도마다 하나로 고정되므로(run_meta) demo 용 data/*.db 와 겹치지 않게 data/eval/ 에 둔다.
+# 실행: python -m collector.app --plants config/plants.eval.yaml --with-simulators --profile eval
+plants:
+  - { key: rfcc, plant: config/plant_rfcc.yaml, runtime: config/runtime_rfcc.yaml, db: data/eval/rfcc.db }
+  - { key: cdu,  plant: config/plant_cdu.yaml,  runtime: config/runtime_cdu.yaml,  db: data/eval/cdu.db }
+  - { key: hou,  plant: config/plant_hou.yaml,  runtime: config/runtime_hou.yaml,  db: data/eval/hou.db }
+  - { key: rhds, plant: config/plant_rhds.yaml, runtime: config/runtime_rhds.yaml, db: data/eval/rhds.db }
+  - { key: vrds, plant: config/plant_vrds.yaml, runtime: config/runtime_vrds.yaml, db: data/eval/vrds.db }
