@@ -312,16 +312,16 @@ def test_fan_speed_boost_scales_design_effect_by_speed_ratio_squared(modes, conf
     from simulator.model import _effect
     mode = modes["FN-IMPELLER-FOULING"]
     design_plant = load_plant(config_dir / "plant_rhds.yaml")
-    vib = ("F-3101", "VI-A-F3101")
+    vib, brg = ("F-3101", "VI-A-F3101"), ("F-3101", "TI-B-F3101")
     speed = design_plant.tag_by_key()[("F-3101", "SI-F3101")].control.mean
 
-    def effect_at(r, ep=1190):
+    def effect_at(r, ep=1190, key=vib):
         plant = design_plant.model_copy(deep=True)
         plant.equipment_by_id()["F-3101"].operating = None if r == 1.0 else Operating(speed_rpm=speed * r)
         tags = plan(plant, mode, "F-3101", plant.control_by_key())
         ev = FaultEvent("e", "F-3101", mode, 0.0)
         act = {k: [(ev, tp)] for k, tp in tags.items()}
-        return tags[vib], _effect(act[vib], ep, act)[0]
+        return tags[key], _effect(act[key], ep, act)[0]
 
     tp1, z1 = effect_at(1.0)
     assert boost_gain(tp1.boost, 0.0) == pytest.approx(1.0)
@@ -330,4 +330,5 @@ def test_fan_speed_boost_scales_design_effect_by_speed_ratio_squared(modes, conf
         assert tp.applied[0].z == pytest.approx(tp1.applied[0].z)          # 한계 목표는 설계 μ 로 정한다
         assert boost_gain(tp.boost, 0.0) == pytest.approx(r * r)
         assert z == pytest.approx(z1 * r * r)
+        assert effect_at(r, 2000, brg)[1] == pytest.approx(effect_at(1.0, 2000, brg)[1] * r * r)   # 베어링 온도도 같은 배율 (S2 + 120초 뒤)
     assert not effect_at(1.0)[0].boost.hold                                  # 경고 구간 보장은 켜지 않았다
