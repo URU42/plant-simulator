@@ -40,7 +40,7 @@ EPOCH_ORDINAL = date(1970, 1, 1).toordinal()
 
 class EventSource(Protocol):
     """생성기 밖에서 오는 사건(주입한 고장 모드). external 은 [start, end) 에 효과가 남아 있을 수 있는 사건을 모두 돌려준다
-    (시작 < end 이고, 안 멈췄거나 멈춤 + 회복 > start)."""
+    (시작 < end 이고, 안 멈췄거나 멈춤 + 회복 > start, 손상이 남았으면 안 고쳤거나 수리 + 회복 > start)."""
 
     def external(self, start: float, end: float) -> list[FaultEvent]: ...
 
@@ -323,7 +323,8 @@ def _effect(active, ep: int) -> tuple[float, bool]:
     """ep 에서 걸린 사건들의 (효과 z 합, nelson_quiet 여부)."""
     fx, quiet = 0.0, False
     for ev, tp in active:
-        z, q = tag_effect(tp, ep - ev.start, None if ev.stop is None else ev.stop - ev.start, ev.speed)
+        z, q = tag_effect(tp, ep - ev.start, None if ev.stop is None else ev.stop - ev.start, ev.speed,
+                          None if ev.repair is None else ev.repair - ev.start)
         fx += z
         quiet = quiet or q
     return fx, quiet

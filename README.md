@@ -110,7 +110,9 @@ curl localhost:8000/rhds/health                               # "live": true 가
 curl localhost:8000/rhds/fault-modes                          # CC-SURGE → C-3101, OP-LOAD-CHANGE → M-3101·M-3102 …
 curl -XPOST -H "$H" -H 'content-type: application/json' \
      localhost:8000/rhds/anomalies -d '{"equip_id":"C-3101","mode":"CC-SURGE"}'   # → event_id, start_at
-curl -XPOST -H "$H" localhost:8000/rhds/anomalies/C-3101/stop # 그 설비만 정상으로 (60초 회복)
+curl -XPOST -H "$H" localhost:8000/rhds/anomalies/C-3101/stop # 그 설비만 정상으로 (60초 회복, 손상 단계를 지났으면 손상은 남는다)
+curl localhost:8000/rhds/anomalies/damaged                    # 멈췄지만 손상이 남은 사건
+curl -XPOST -H "$H" localhost:8000/rhds/anomalies/GB-3101/repair # 남은 손상 수리 (60초 회복)
 curl "localhost:8000/rhds/anomalies?from=2026-11-19T00:00:00Z" # 정답지 → 채점에만 쓰고 탐지·요약 입력에는 주지 않는다
 ```
 
@@ -216,16 +218,18 @@ flow:
 | `propagate.driven` | 축으로 이어진 아래쪽 설비(`driven_by` 사슬) 전부에 주는 효과. 피구동 설비 `speed` 는 늘 구동기 값을 그대로 쓴다 |
 | `propagate.process` | 공정 흐름 그래프(`flow`)로 닿은 하류 설비에 주는 효과(1단계 기준). `z` 만 쓰고(`to_limit` 불가) 모양은 `ramp`·`wobble` |
 | `propagate.utility` | 보조 계통 간선으로 바로 닿은 설비(윤활유 펌프 → 압축기, 보충 수소 → 순환 압축기)에 주는 효과. 그 설비에서 멈춘다 |
+| `damage` | 손상 단계. 그 단계의 step·ramp 효과는 멈춘 뒤에도 멈춘 시각의 크기로 남고, 수리(`POST …/repair`) 뒤 60초(하류 k단계는 × (k+1)) 동안 0 이 된다. spike·wobble 은 남지 않는다. 대상 단계는 이름(손상·마모·오염·침식·누설·파손)을 따라 골랐고 사용자 확정(2026-11-23)이다. 수리는 API·화면으로만 하며 백엔드 조치 완료와는 연결하지 않는다(사용자 결정 2026-11-23, 바뀔 수 있다) |
 | `nelson_quiet` | 그 단계 동안은 효과를 더한 값도 Nelson 규칙 1~3 을 어기지 않게 잡음을 고른다. Setpoint·Nelson 은 못 보고 ML 만 볼 수 있는 전조를 만드는 **합성 장치** |
 
 - 같은 설비에는 안 멈춘 사건이 하나뿐이다(겹치면 409). 사건은 멈출 때까지 가고, 멈추면 효과가 60초(하류 k단계는 60초 × (k+1)) 동안 0 으로 가라앉는다.
+  단, 멈추기 전에 시작한 손상 단계(`damage`)의 step·ramp 효과는 수리할 때까지 남는다(멈춤 = 원인 해제, 수리 = 손상 회복). 손상이 남은 설비에도 새 사건을 걸 수 있고 효과는 더해진다.
 - 공정 흐름 하류 전파 (2026-11-20, 사용자 확정, 수치는 synthetic): 고장 설비와 그 축 사슬을 0단계로, 흐름 그래프를 따라 설비에 닿을 때마다 1단계씩
   최대 2단계까지 퍼진다. **완만한 감쇠**: k단계 크기 = 1단계 × 0.7^(k−1), `lag`·`rise` × k(늦고 천천히 오른다), 회복 60초 × (k+1).
   줄인 크기가 0.25σ 이하면 걸지 않는다. utility 간선은 출발 설비와 utility 로 닿은 공정 노드에서만 지나고(공정 흐름에 들어선 뒤 보조 계통으로
   퍼지지 않는다), utility 로 닿은 설비에서는 멈춘다(정지(trip)는 모의하지 않는다). 전파하는 모드: `PM-SUCTION-LOSS`·`CC-SURGE`·
   `FN-IMPELLER-FOULING`·`OP-LOAD-CHANGE`·`RC-VALVE-LEAK`. 근거·도달 표는 위키 raw 초안 `PSIM-LINK-20261120` v0.3.
 - 효과는 단계가 끝나도 남는다(예: S0 의 wobble 은 S2·S3 에도 계속된다). `nelson_quiet` 는 그 단계 동안만이다.
-- 정답지의 `end_at` 은 멈춤 + 60초(멈추기 전에 시작한 하류 효과가 있으면 가장 먼 단계 k 의 60초 × (k+1))다. 그 뒤 규칙 창(8표본, 10초 태그는 80초) 안의 위반은 사건 꼬리다.
+- 정답지의 `end_at` 은 멈춤 + 60초(멈추기 전에 시작한 하류 효과가 있으면 가장 먼 단계 k 의 60초 × (k+1))다. 손상이 남은 사건(`damage_remains`)은 수리 + 회복이고, 안 고쳤으면 null 이다. 그 뒤 규칙 창(8표본, 10초 태그는 80초) 안의 위반은 사건 꼬리다.
 - 시나리오는 **지금 있는 설비·태그만으로** 표현한다. 고장 모드가 가리킨 신호의 태그가 그 설비에 없으면 건너뛴다. 실제 고장이면 보일 신호지만 태그가 없어 만들지 않는 것은 모드의 `unobserved` 에 적고 `/fault-modes`·정답지에 싣는다(예: 드레인 밸브 상태, 밸브 커버 온도). 태그를 더할지는 따로 정한다.
 - 계산 태그 (구성안 `derive`, 2026-11-19, synthetic): 같은 설비 안 관계를 매 표본 지킨다. 값 = 그 시각 입력 태그 값의 계산식
   + 자체 잡음(`noise_sigma`) + 고장 효과. 입력이 움직이면 따라 움직이고(정답지에도 입력 효과의 단계·시작으로 실린다), 자기 효과는 관계를 깬다.
@@ -259,8 +263,10 @@ flow:
 | `POST /{공장}/anomalies` `{"equip_id","mode","speed"}` | 시뮬레이터 시각 기준 `ceil(sim_now)+3`초 첫 표본부터 사건 시작. `speed` 는 진행 속도 1·3·5·10 (기본 1). 201 + `{event_id, equip_id, mode, speed, start_at}` |
 | `POST /{공장}/anomalies/{equip_id}/stop` | 그 설비의 안 멈춘 사건을 `ceil(sim_now)+3`초에 멈추고 회복. 200 + `{"stopped": [event_id…], "stop_requested_at"}`. 사건이 없으면 404 |
 | `POST /{공장}/anomalies/stop` | 공장의 안 멈춘 사건 전부를 같은 방식으로 멈춘다. 200 + `{"stopped": [event_id…], "stop_requested_at"}`(없으면 빈 목록) |
+| `POST /{공장}/anomalies/{equip_id}/repair` | 그 설비의 멈췄지만 손상이 남은 사건을 `ceil(sim_now)+3`초에 고친다(손상 효과 회복). 200 + `{"repaired": [event_id…], "repair_requested_at"}`. 고칠 손상이 없으면(안 멈춘 사건 포함) 404 |
+| `GET /{공장}/anomalies/damaged` | 멈췄지만 손상이 남아 안 고친 사건 `[{event_id, equip_id, mode, start_at, stop_requested_at}]` (화면의 수리 버튼용) |
 | `GET /{공장}/anomalies/active` | 안 멈춘 고장 모드 사건 `[{event_id, equip_id, mode, start_at}]`. 정답 분류는 싣지 않는다 (화면의 적용/해제 상태용) |
-| `GET /{공장}/anomalies?equip_id=&from=&to=` | 정답지: `event_id`, `equip_id`, `mode`, `code`, `kind`, `cause`, `action`, `expect`, `stages`(단계별 시작), `response_tags`(태그·단계별 효과 시작, `via`: self·driven·process·utility, `hop`: 흐름 단계 — 2026-11-20 전 사건은 null), `unobserved`, `start_at`, `stop_requested_at`, `end_at`. 고장 모드와 계측 이상(켰을 때)을 시작 순으로 함께 싣는다 |
+| `GET /{공장}/anomalies?equip_id=&from=&to=` | 정답지: `event_id`, `equip_id`, `mode`, `code`, `kind`, `cause`, `action`, `expect`, `stages`(단계별 시작), `response_tags`(태그·단계별 효과 시작, `via`: self·driven·process·utility, `hop`: 흐름 단계 — 2026-11-20 전 사건은 null), `unobserved`, `start_at`, `stop_requested_at`, `damage_remains`(멈춘 뒤 손상이 남았는가), `repair_requested_at`, `end_at`. `response_tags` 의 `damage` 는 수리 전까지 남는 효과. 고장 모드와 계측 이상(켰을 때)을 시작 순으로 함께 싣는다 |
 
 생성기가 이미 `ceil(sim_now)+3` 보다 뒤까지 표본을 만들었으면 그 끝으로 미룬다(이미 만든 표본은 바뀌지 않는다). 응답의 `start_at`·`stop_requested_at` 이 실제 시각이다.
 `POST` 는 `/ingest` 와 같은 토큰 규칙(`INGEST_TOKEN` 이 있으면 `X-Ingest-Token`, 통합 실행인데 토큰이 없으면 403)이다. 그 밖의 오류: 분리 실행 409(`embedded only`), 생성기가 죽었으면 503(`simulator stopped…`),
@@ -295,8 +301,9 @@ flow:
 첫 화면(공장 목록, 배포에서는 `/plant-sim/`) 아래 **고장 설정**에서 설비(공장별 묶음) → 고장 유형(그 설비에 걸 수 있는 모드) → 진행 속도(×1·×3·×5·×10) → 적용/해제를 고른다.
 진행 속도는 단계 시작 시각과 ramp 상승을 1/속도로 줄인다. lag(응답 지연)·spike·wobble 모양·해제 뒤 회복(60초)은 실제 시간 그대로다(진동 주기를 줄이면 1초 표본에서 사라지고, spike 뒤에 맞춘 lag 를 줄이면 둘이 겹친다).
 예: 펌프 흡입 악화의 첫 정지 ×1 34분 → ×10 3.4분. 정답지의 `stages`·`response_tags` 시각도 이 규칙으로 계산하고 `speed` 를 싣는다.
-적용 중인지는 서버(`/anomalies/active`)에서 5초마다 읽으므로 다른 화면에 갔다 오거나 다른 사람이 바꿔도 "해제"로 맞게 보인다.
-적용·해제는 API 와 같은 토큰(`X-Ingest-Token`)이 필요하다. 화면의 토큰 칸에 넣으면 그 브라우저의 localStorage 에만 저장된다. 분리 실행에서는 안내 문구만 나온다.
+고장 유형에 "해제 후 손상 남음"이 붙은 모드는 손상 단계를 지나 해제하면 손상이 남는다. 그 설비를 고르면 **수리** 버튼이 나오고, 누르면 손상이 60초 동안 회복한다. 화면의 "손상 남음" 줄에 안 고친 사건이 모두 나온다.
+적용 중인지는 서버(`/anomalies/active`, 손상은 `/anomalies/damaged`)에서 5초마다 읽으므로 다른 화면에 갔다 오거나 다른 사람이 바꿔도 "해제"로 맞게 보인다.
+적용·해제·수리는 API 와 같은 토큰(`X-Ingest-Token`)이 필요하다. 화면의 토큰 칸에 넣으면 그 브라우저의 localStorage 에만 저장된다. 분리 실행에서는 안내 문구만 나온다.
 
 ### 계측 이상 (`instrument_faults`)
 
@@ -370,6 +377,7 @@ v3 에서 `status`(Good/Bad)를 뺐다(사용자 확정 2026-11-19: 설비 상�
 | `POST /{공장}/anomalies` | 설비에 고장 모드 주입 (토큰 필요, 통합 실행 전용) |
 | `POST /{공장}/anomalies/{equip_id}/stop` | 그 설비의 사건 멈춤 |
 | `POST /{공장}/anomalies/stop` | 공장의 사건 전부 멈춤 |
+| `POST /{공장}/anomalies/{equip_id}/repair` | 그 설비의 남은 손상 수리 |
 | `GET /{공장}/anomalies?equip_id=&from=&to=` | 정답지 (고장 모드·분류·단계·태그별 효과 시작) |
 | `GET /{공장}/stream` | SSE 로 새 값 실시간 전달 (이벤트 `samples`, 받은 묶음마다 하나 — 실시간이면 초마다 그 초의 태그 전체) |
 | `GET /stream` | 모든 공장의 초 단위 메시지를 연결 하나로 (이벤트 이름 = 공장 키, 데이터 = Redis Stream 의 `data` 와 같은 `{plant, plant_id, ts, samples}`). 공장마다 연결을 열면 HTTP/1.1 의 호스트당 연결 한도(6)를 거의 다 쓴다 |

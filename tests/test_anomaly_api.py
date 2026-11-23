@@ -150,3 +150,24 @@ def test_inject_with_speed(client):
     assert body["speed"] == 10
     assert any(a["event_id"] == body["event_id"] and a["speed"] == 10 for a in client.get("/plant/anomalies/active").json())
     client.post("/plant/anomalies/F-3101/stop", headers=TOKEN)
+
+
+def test_repair_after_stop_clears_damage(client):
+    """왕복동 밸브 누설은 처음 단계부터 손상이라, 시작 뒤 멈추면 손상이 남고 수리로 고친다."""
+    body = client.post("/plant/anomalies", json={"equip_id": "C-3102", "mode": "RC-VALVE-LEAK"}, headers=TOKEN).json()
+    assert client.post("/plant/anomalies/C-3102/repair", headers=TOKEN).status_code == 404      # 안 멈췄다
+    _wait(client, "/plant/health", lambda h: h["sim_now"] > body["start_at"], timeout=8.0)
+    stop = client.post("/plant/anomalies/C-3102/stop", headers=TOKEN).json()
+    damaged = client.get("/plant/anomalies/damaged").json()
+    assert {"event_id": body["event_id"], "equip_id": "C-3102", "mode": "RC-VALVE-LEAK", "start_at": body["start_at"],
+            "stop_requested_at": stop["stop_requested_at"]} in damaged
+    assert client.post("/plant/anomalies/C-3102/repair").status_code == 403
+    r = client.post("/plant/anomalies/C-3102/repair", headers=TOKEN)
+    assert r.status_code == 200 and r.json()["repaired"] == [body["event_id"]] and r.json()["repair_requested_at"] >= stop["stop_requested_at"]
+    assert all(d["equip_id"] != "C-3102" for d in client.get("/plant/anomalies/damaged").json())
+    assert client.post("/plant/anomalies/C-3102/repair", headers=TOKEN).status_code == 404
+    assert client.post("/plant/anomalies/X-9999/repair", headers=TOKEN).status_code == 404
+    row = next(x for x in client.get("/plant/anomalies?equip_id=C-3102").json() if x["event_id"] == body["event_id"])
+    assert row["damage_remains"] and row["repair_requested_at"] == r.json()["repair_requested_at"] and row["end_at"] > row["repair_requested_at"]
+    stages = next(m for m in client.get("/plant/fault-modes").json() if m["mode"] == "RC-VALVE-LEAK")["stages"]
+    assert [s["damage"] for s in stages] == [True, True]

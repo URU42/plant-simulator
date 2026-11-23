@@ -2,7 +2,7 @@
 
 실행: python -m collector.app --plants config/plants.yaml --port 8000
 라우트는 한 번만 정의하고 경로 앞의 {plant_key} 로 공장 문맥(PlantContext)을 고른다. 루트 / 는 공장 목록, /health 는 전체 상태.
-통합 실행에서는 /{공장}/anomalies 로 고장 모드(가상 시나리오)를 주입·멈추고 정답지를 낸다. 정상 운전에는 이상이 없다.
+통합 실행에서는 /{공장}/anomalies 로 고장 모드(가상 시나리오)를 주입·멈추고, 남은 손상을 수리하고, 정답지를 낸다. 정상 운전에는 이상이 없다.
 """
 from __future__ import annotations
 
@@ -189,7 +189,7 @@ def fault_modes(ctx: PlantContext = Depends(context)):
         equip_ids = [e.equip_id for e in ctx.plant.equipment if mode in ctx.book.applicable(e.equip_id)]
         if equip_ids:
             out.append({"mode": mode.id, "name": mode.name, "equip_ids": equip_ids, "unobserved": mode.unobserved,
-                        "stages": [{"id": s.id, "name": s.name, "at_sec": s.at_sec} for s in mode.stages]})
+                        "stages": [{"id": s.id, "name": s.name, "at_sec": s.at_sec, "damage": s.damage} for s in mode.stages]})
     return out
 
 
@@ -231,6 +231,25 @@ async def stop_anomaly(equip_id: str, request: Request, ctx: PlantContext = Depe
     if not stopped:
         raise HTTPException(404, f"no live anomaly on {equip_id}")
     return {"stopped": stopped, "stop_requested_at": _utc(at)}
+
+
+@router.post("/anomalies/{equip_id}/repair")
+async def repair_anomaly(equip_id: str, request: Request, ctx: PlantContext = Depends(context)):
+    """그 설비의 멈췄지만 손상이 남은 사건을 고친다 (손상 효과가 회복 시간 동안 0 이 된다). 모르는 설비이거나 고칠 손상이 없으면 404.
+    안 멈춘 사건의 손상은 고치지 않는다 (먼저 멈춘다)."""
+    require_live(request, ctx)
+    _require_equipment(ctx, equip_id)
+    at, repaired = await asyncio.to_thread(lambda: ctx.book.repair(equip_id, event_time(ctx)))
+    if not repaired:
+        raise HTTPException(404, f"no damage left to repair on {equip_id}")
+    return {"repaired": repaired, "repair_requested_at": _utc(at)}
+
+
+@router.get("/anomalies/damaged")
+def damaged_anomalies(ctx: PlantContext = Depends(context)):
+    """멈췄지만 손상이 남아 아직 안 고친 사건 (화면의 수리 버튼용). 정답 분류는 싣지 않는다."""
+    return [{"event_id": e.event_id, "equip_id": e.equip_id, "mode": e.mode.id, "start_at": _utc(e.start), "stop_requested_at": _utc(e.stop)}
+            for e in ctx.book.damaged()]
 
 
 @router.get("/anomalies/active")

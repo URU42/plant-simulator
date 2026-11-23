@@ -4,7 +4,8 @@
 같은 유형 설비에 재사용한다. 크기는 관리 기준 μ·σ 대비 z 이고, to_limit 을 주면 그 한계값 기준으로 정한다.
 주입하면 설비 하나(와 propagate.driven 이면 그 설비가 구동하는 설비, propagate.process·utility 면 공정 흐름 그래프의 하류 설비)의
 태그마다 적용 목록(TagPlan)을 만들고, 생성기는 정상 신호 위에 효과 z 를 더한다. 멈춘 뒤에는 RECOVERY_SEC(하류 k단계는 × (k+1))
-동안 효과가 0 으로 가라앉는다.
+동안 효과가 0 으로 가라앉는다. 손상 단계(damage)의 step·ramp 효과는 멈춘 시각의 크기로 남아 있다가 수리(repair) 뒤
+같은 회복 시간 동안 0 으로 가라앉는다.
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ MIN_HOP_Z = 0.25        # 줄인 뒤 |z| 가 이 이하면 걸지 않는다
 MAX_RECOVERY_SEC = RECOVERY_SEC * (MAX_HOP + 1)     # 사건 효과가 남아 있을 수 있는 최대 시간 (멈춤 뒤)
 
 Shape = Literal["step", "ramp", "spike", "wobble"]
+HELD = ("step", "ramp")     # 손상 단계에서 멈춘 뒤에도 남는 모양 (spike·wobble 은 순간 현상이라 남지 않는다)
 LimitName = Literal["warn_hi", "alarm_hi", "trip_hi", "warn_lo", "alarm_lo", "trip_lo"]
 
 
@@ -72,6 +74,7 @@ class Stage(StrictModel):
     name: str
     at_sec: float = Field(ge=0)         # 주입 시각 기준 단계 시작
     nelson_quiet: bool = False          # 이 단계 동안은 효과를 더한 값도 규칙 1~3 을 어기지 않게 고른다 (ML 전용 전조를 만드는 합성 장치)
+    damage: bool = False                # 손상 단계: step·ramp 효과가 멈춘 뒤에도 수리 전까지 남는다 (대상 단계 사용자 확정 2026-11-23)
     effects: list[Effect] = []
     propagate: Propagation = Propagation()
 
@@ -145,6 +148,7 @@ class FaultEvent:
     start: float
     stop: float | None = None
     speed: int = 1
+    repair: float | None = None         # 수리 시각 (epoch 초). 손상 효과는 이때부터 회복한다
 
 
 @dataclass(frozen=True)
@@ -155,6 +159,7 @@ class Applied:
     start: float
     effect: Effect
     z: float
+    damage: bool = False                # 손상 단계의 step·ramp: 멈춘 뒤에도 수리 전까지 남는다
 
 
 @dataclass(frozen=True)
@@ -215,13 +220,14 @@ def plan(plant: PlantConfig, mode: FaultMode, equip_id: str,
                     level = sum(a.z for a in found.get(key, ()) if a.effect.shape in ("step", "ramp"))  # 앞 효과가 남긴 수준
                     z = _target(effect, *control[key], t.limits, level)
                     if z is not None:
-                        found.setdefault(key, []).append(Applied(stage.id, stage.at_sec + effect.lag_sec, effect, z))
+                        held = stage.damage and effect.shape in HELD
+                        found.setdefault(key, []).append(Applied(stage.id, stage.at_sec + effect.lag_sec, effect, z, held))
     for e in (by_id[d] for d in role):
         for t in e.tags:
             if t.derive is None:
                 continue
             # 계산 태그는 입력이 움직이면 따라 움직인다. 정답지에 반응 시작을 남기려고 입력의 효과를 크기 0 으로 적는다
-            inherited = [Applied(a.stage, a.start, a.effect, 0.0) for i in t.derive.inputs for a in found.get((e.equip_id, i), ())]
+            inherited = [Applied(a.stage, a.start, a.effect, 0.0, a.damage) for i in t.derive.inputs for a in found.get((e.equip_id, i), ())]
             if inherited:
                 found.setdefault((e.equip_id, t.tag_id), []).extend(inherited)
     out = {}
@@ -251,17 +257,31 @@ def effect_start(start_sec: float, lag_sec: float, speed: int = 1) -> float:
     return (start_sec - lag_sec) / speed + lag_sec
 
 
-def tag_effect(tp: TagPlan, t: float, stop: float | None, speed: int = 1) -> tuple[float, bool]:
-    """사건 시작 기준 t 초(실제 시간)의 (효과 z 합, nelson_quiet 여부). stop 도 사건 시작 기준(None 이면 멈추기 전).
+def tag_effect(tp: TagPlan, t: float, stop: float | None, speed: int = 1,
+               repair: float | None = None) -> tuple[float, bool]:
+    """사건 시작 기준 t 초(실제 시간)의 (효과 z 합, nelson_quiet 여부). stop·repair 도 사건 시작 기준(None 이면 아직 안 함).
     효과 시작은 단계 시각/speed + lag (effect_start). 멈추기 전에 시작하지 못한 효과는 없고,
-    멈춘 뒤에는 tp.recovery 동안 선형으로 0 이 된다."""
-    fade = 1.0 if stop is None or t < stop else max(0.0, 1 - (t - stop) / tp.recovery)
-    if fade == 0.0:
-        return 0.0, False
+    멈춘 뒤에는 tp.recovery 동안 선형으로 0 이 된다. 손상 효과(a.damage)는 멈춘 시각의 크기로 남아 있다가
+    수리 뒤 tp.recovery 동안 0 이 된다."""
+    stopped = stop is not None and t >= stop
+    fade = max(0.0, 1 - (t - stop) / tp.recovery) if stopped else 1.0
+    healed = 1.0 if repair is None or t < repair else max(0.0, 1 - (t - repair) / tp.recovery)
     z = 0.0
     for a in tp.applied:
         s = effect_start(a.start, a.effect.lag_sec, speed)
-        if s <= t and (stop is None or s < stop):
-            z += _shape(a, t - s, speed)
-    quiet = (stop is None or t < stop) and any(lo / speed <= t < hi / speed for lo, hi in tp.quiet)
-    return z * fade, quiet
+        if s > t or (stop is not None and s >= stop):
+            continue
+        if stopped and a.damage:
+            z += _shape(a, stop - s, speed) * healed
+        else:
+            z += _shape(a, t - s, speed) * fade
+    quiet = not stopped and any(lo / speed <= t < hi / speed for lo, hi in tp.quiet)
+    return z, quiet
+
+
+def holds_damage(tags: dict[TagKey, TagPlan], ev: FaultEvent) -> bool:
+    """멈춘 사건에 수리 전까지 남는 손상 효과가 있는가 (손상 단계의 step·ramp 가 멈추기 전에 시작했다)."""
+    if ev.stop is None:
+        return False
+    return any(a.damage and effect_start(a.start, a.effect.lag_sec, ev.speed) < ev.stop - ev.start
+               for tp in tags.values() for a in tp.applied)

@@ -38,6 +38,8 @@ class Storage:
                 Path(self.db_path + suffix).unlink(missing_ok=True)
             self._connect()
         self._conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        if "repair_requested_at" not in {r[1] for r in self._conn.execute("PRAGMA table_info(anomaly_event)")}:
+            self._conn.execute("ALTER TABLE anomaly_event ADD COLUMN repair_requested_at TEXT")   # 2026-11-23 수리 API, 기존 v5 파일
         if self._conn.execute("SELECT COUNT(*) FROM schema_meta").fetchone()[0] == 0:
             self._conn.execute("INSERT INTO schema_meta (version) VALUES (?)", (SCHEMA_VERSION,))
 
