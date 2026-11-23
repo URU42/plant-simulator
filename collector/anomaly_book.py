@@ -110,7 +110,7 @@ class AnomalyBook:
             applied = [{"equip_id": k[0], "tag_id": k[1], "stage": a.stage, "start_sec": a.start, "via": tp.via, "hop": tp.hop,
                         "damage": a.damage, "boost_by": tp.boost and tp.boost.by[1]}
                        for k, tp in tags.items() for a in tp.applied]
-            boost = mode.boost and mode.boost.model_dump()
+            boost = mode.boost and mode.boost.model_dump(exclude_none=True)
             self.storage.execute(
                 "INSERT INTO anomaly_event (event_id, equip_id, mode, kind, cause, action, expect, plan, start_at, stop_requested_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
