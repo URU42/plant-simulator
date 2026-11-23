@@ -294,3 +294,40 @@ def test_hold_is_set_from_first_alarm_target(modes, config_dir):
     mu, sg = ctrl[("P-3102", "FI-P3102")]
     alarm = plant.tag_by_key()[("P-3102", "FI-P3102")].limits.alarm_lo
     assert tp.boost.hold == pytest.approx((900.0, 0.0, 600.0, abs(alarm - mu) / sg - 3.0))
+
+
+def test_boost_needs_exactly_one_kind():
+    from simulator.fault import Boost
+    with pytest.raises(ValueError):
+        Boost(by="speed", signals=["vibration"], max_gain=2.0)
+    with pytest.raises(ValueError):
+        Boost(by="speed", signals=["vibration"], per_unit=0.1, exponent=2, max_gain=2.0)
+
+
+def test_fan_speed_boost_scales_design_effect_by_speed_ratio_squared(modes, config_dir):
+    """팬 오염 × 회전수: 진동 효과는 설계 회전수 기준 크기에 (운전점 / 설계)² 를 곱한다. 설계 운전점이면 배율 1.
+    운전점이 옮긴 μ 로 한계 목표를 정하면 저속에서 효과가 더 커져 회전수 차이를 상쇄한다 (그래서 설계 μ 로 정한다)."""
+    from common.config_models import Operating
+    from simulator.fault import FaultEvent, boost_gain
+    from simulator.model import _effect
+    mode = modes["FN-IMPELLER-FOULING"]
+    design_plant = load_plant(config_dir / "plant_rhds.yaml")
+    vib = ("F-3101", "VI-A-F3101")
+    speed = design_plant.tag_by_key()[("F-3101", "SI-F3101")].control.mean
+
+    def effect_at(r, ep=1190):
+        plant = design_plant.model_copy(deep=True)
+        plant.equipment_by_id()["F-3101"].operating = None if r == 1.0 else Operating(speed_rpm=speed * r)
+        tags = plan(plant, mode, "F-3101", plant.control_by_key())
+        ev = FaultEvent("e", "F-3101", mode, 0.0)
+        act = {k: [(ev, tp)] for k, tp in tags.items()}
+        return tags[vib], _effect(act[vib], ep, act)[0]
+
+    tp1, z1 = effect_at(1.0)
+    assert boost_gain(tp1.boost, 0.0) == pytest.approx(1.0)
+    for r in (0.8, 1.05):
+        tp, z = effect_at(r)
+        assert tp.applied[0].z == pytest.approx(tp1.applied[0].z)          # 한계 목표는 설계 μ 로 정한다
+        assert boost_gain(tp.boost, 0.0) == pytest.approx(r * r)
+        assert z == pytest.approx(z1 * r * r)
+    assert not effect_at(1.0)[0].boost.hold                                  # 경고 구간 보장은 켜지 않았다

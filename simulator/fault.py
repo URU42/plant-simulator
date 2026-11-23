@@ -91,16 +91,27 @@ class Label(StrictModel):
 
 
 class Boost(StrictModel):
-    """교호작용 (2026-11-23 사용자 요청, 계수는 synthetic): 같은 설비의 by 신호 태그가 사건으로 오른 만큼(ΔT, 태그 단위) signals 효과를 키운다.
-    배율 = min(max_gain, 1 + per_unit × max(0, ΔT)). ΔT 는 정상 잡음·계측 이상을 뺀 사건 효과(공정 상태)다. 내려가면 키우지 않는다."""
+    """교호작용 (2026-11-23 사용자 확정, 계수는 synthetic): 같은 설비 by 신호 태그의 상태에 따라 signals 효과를 키운다. 두 방식 중 하나.
+    - per_unit (선형): 배율 = min(max_gain, 1 + per_unit × max(0, ΔT)). ΔT 는 by 태그가 사건으로 오른 만큼(태그 단위, 정상 잡음·계측
+      이상 제외). 내려가면 키우지 않는다. 예: 흡입 유체 온도 → 캐비테이션.
+    - exponent (비율 거듭제곱): 배율 = min(max_gain, (N / N_설계)^exponent). N = 운전점 μ + 사건 효과(태그 단위). 낮으면 1 보다 작다.
+      키우는 태그의 효과 크기(to_limit 포함)는 설계 운전점 μ 로 정한다 — 운전점이 옮긴 μ 로 정하면 한계 목표가 회전수 차이를 상쇄한다.
+      예: 팬 회전수 → 불균형 진동 (불균형 힘 ∝ 회전수²)."""
 
-    by: str                             # 예: process_temp (흡입 유체 온도)
+    by: str                             # 예: process_temp (흡입 유체 온도), speed (회전수)
     signals: list[str]                  # 키울 효과의 신호 (예: vibration, flow)
-    per_unit: float = Field(gt=0)       # by 태그 단위 1 당 배율 증가 (예: ℃ 당 0.03)
+    per_unit: float | None = Field(default=None, gt=0)    # 선형: by 태그 단위 1 당 배율 증가 (예: ℃ 당 0.03)
+    exponent: float | None = Field(default=None, gt=0)    # 비율 거듭제곱의 지수 (예: 2)
     max_gain: float = Field(gt=1)
     # 경고 구간 보장: 그 태그의 경보 한계 목표(to_limit alarm_*) 효과가 시작되기 전에는 키운 효과가 경보 한계 HOLD_MARGIN_Z 안쪽에 머문다.
     # 경고와 경보가 거의 같이 나지 않게 경고 단계를 남긴다. 경보 단계부터는 그대로 키운다 (사용자 확정 2026-11-23)
     hold_below_alarm: bool = False
+
+    @model_validator(mode="after")
+    def _one_kind(self) -> "Boost":
+        if (self.per_unit is None) == (self.exponent is None):
+            raise ValueError("boost needs exactly one of per_unit or exponent")
+        return self
 
 
 class FaultMode(StrictModel):
@@ -183,7 +194,8 @@ HOLD_MARGIN_Z = 3.0         # 경고 구간 보장: 키운 효과의 상한 = �
 
 @dataclass(frozen=True)
 class TagBoost:
-    """한 태그에 걸린 교호작용. per_z 는 by 태그 z 1 당 배율 증가(= per_unit × σ_by).
+    """한 태그에 걸린 교호작용. 선형이면 per_z 는 by 태그 z 1 당 배율 증가(= per_unit × σ_by).
+    비율 거듭제곱이면 power = (운전점 μ_by / 설계 μ_by, σ_by / 설계 μ_by, 지수) 이고 per_z 는 쓰지 않는다.
     hold 는 경고 구간 보장: (경보 목표 효과의 정의상 시작 초, 그 lag, 그 rise_sec, |z| 상한). 그 시작 전에는 키운 효과가 상한을 넘지 않고,
     시작 뒤 rise_sec 동안 상한을 서서히 푼다 (한꺼번에 풀면 단계 경계에서 값이 계단처럼 튄다)."""
 
@@ -191,6 +203,7 @@ class TagBoost:
     per_z: float
     max_gain: float
     hold: tuple[float, float, float, float] | None = None
+    power: tuple[float, float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -236,6 +249,9 @@ def plan(plant: PlantConfig, mode: FaultMode, equip_id: str,
     ends = [s.at_sec for s in mode.stages[1:]] + [math.inf]
     quiet = tuple((s.at_sec, end) for s, end in zip(mode.stages, ends) if s.nelson_quiet)
     found: dict[TagKey, list[Applied]] = {}
+    # 비율 거듭제곱 교호작용으로 키우는 태그는 효과 크기를 설계 운전점 μ 로 정한다 (Boost 설명)
+    design = {(equip_id, t.tag_id): (t.control.mean, t.control.sigma) for t in by_id[equip_id].tags
+              if mode.boost and mode.boost.exponent and t.signal in mode.boost.signals}
     for stage in mode.stages:
         effects_of = {"self": stage.effects, "driven": stage.propagate.driven, "process": stage.propagate.process,
                       "utility": stage.propagate.utility}
@@ -250,7 +266,7 @@ def plan(plant: PlantConfig, mode: FaultMode, equip_id: str,
                         continue
                     key = (e.equip_id, t.tag_id)
                     level = sum(a.z for a in found.get(key, ()) if a.effect.shape in ("step", "ramp"))  # 앞 효과가 남긴 수준
-                    z = _target(effect, *control[key], t.limits, level)
+                    z = _target(effect, *design.get(key, control[key]), t.limits, level)
                     if z is not None:
                         held = stage.damage and effect.shape in HELD
                         found.setdefault(key, []).append(Applied(stage.id, stage.at_sec + effect.lag_sec, effect, z, held))
@@ -269,8 +285,9 @@ def plan(plant: PlantConfig, mode: FaultMode, equip_id: str,
         for t in by_id[equip_id].tags:
             if t.signal in b.signals:
                 key = (equip_id, t.tag_id)
-                boost[key] = TagBoost(by, b.per_unit * control[by][1], b.max_gain,
-                                      _hold(found.get(key, ()), t.limits, *control[key]) if b.hold_below_alarm else None)
+                power = (control[by][0] / src.control.mean, control[by][1] / src.control.mean, b.exponent) if b.exponent else None
+                boost[key] = TagBoost(by, (b.per_unit or 0.0) * control[by][1], b.max_gain,
+                                      _hold(found.get(key, ()), t.limits, *control[key]) if b.hold_below_alarm else None, power)
     out = {}
     for key, a in found.items():
         via, hop = role[key[0]]
@@ -289,7 +306,11 @@ def _hold(applied, limits, mu: float, sigma: float) -> tuple[float, float, float
 
 
 def boost_gain(boost: TagBoost, z_by: float) -> float:
-    """교호작용 배율: by 태그의 사건 효과 z 가 오른 만큼 키운다 (내려가면 1)."""
+    """교호작용 배율. 선형: by 태그의 사건 효과 z 가 오른 만큼 키운다(내려가면 1).
+    비율 거듭제곱: (운전점 + 사건 효과) / 설계 의 지수 거듭제곱 (낮으면 1 보다 작다)."""
+    if boost.power is not None:
+        r0, k, exp = boost.power
+        return min(boost.max_gain, max(0.0, r0 + k * z_by) ** exp)
     return min(boost.max_gain, 1 + boost.per_z * max(0.0, z_by))
 
 
