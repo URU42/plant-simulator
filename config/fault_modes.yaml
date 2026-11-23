@@ -41,17 +41,17 @@ fault_modes:
         name: 열충격·액체 충돌
         at_sec: 900
         effects:
-          - { signal: shaft_vibration, shape: spike, to_limit: warn_hi, margin: 0.5, rise_sec: 5, decay_sec: 60 }
+          - { signal: shaft_vibration, shape: spike, to_limit: alarm_hi, margin: 0.1, rise_sec: 5, decay_sec: 60 }   # 2026-11-23 RFCC 공학 한계값에 맞춰 z → to_limit (z 는 그 한계가 없는 태그의 대안)
           - { signal: speed, shape: spike, z: -4, rise_sec: 3, decay_sec: 30 }     # 피구동 압축기 회전속도도 같이
-          - { signal: steam_temp, shape: ramp, z: -220, rise_sec: 120 }           # 약 −40 ℃, 젖은 증기로 포화 온도 쪽으로
+          - { signal: steam_temp, shape: ramp, to_limit: warn_lo, margin: 0.1, z: -220, rise_sec: 120 }   # 약 −44 ℃, 젖은 증기로 포화 온도 쪽으로
       - id: S3
         name: 로터·블레이드 손상
         at_sec: 1020
         damage: true
         effects:
           - { signal: shaft_vibration, shape: step, to_limit: warn_hi, margin: 0.2 }
-          - { signal: shaft_vibration, shape: ramp, z: 12, rise_sec: 1800 }
-          - { signal: bearing_temp, shape: ramp, z: 15, lag_sec: 60, rise_sec: 1200 }
+          - { signal: shaft_vibration, shape: ramp, to_limit: trip_hi, margin: 0.05, z: 12, rise_sec: 1800 }   # 2026-11-23 RFCC 공학 한계값에 맞춰 z → to_limit (z 는 그 한계가 없는 태그의 대안)
+          - { signal: bearing_temp, shape: ramp, to_limit: warn_hi, margin: 0.1, z: 15, lag_sec: 60, rise_sec: 1200 }
           - { signal: oil_temp, shape: ramp, z: 5, lag_sec: 300, rise_sec: 1200 }
         propagate:
           driven:
@@ -60,7 +60,7 @@ fault_modes:
     expect:
       stages:
         S0: { setpoint: none, nelson: [], ml_plant: high, top_signals: [steam_temp, steam_pressure, shaft_vibration] }
-        S2: { setpoint: trip, nelson: [1], nelson_maybe: [3], ml_plant: high }    # RFCC 정지 한계 μ±6σ (2026-11-19 합성)
+        S2: { setpoint: alarm, nelson: [1], nelson_maybe: [3], ml_plant: high }   # 2026-11-23 RFCC 공학 한계값 (전: μ±6σ 로 정지)
         S3: { setpoint: trip, nelson: [1, 2], ml_plant: high }
       alarms:
         - { equip: self, count: 1, opens_in: S0, opened_by: ml, upgrades_in: S2 }
@@ -213,7 +213,7 @@ fault_modes:
         name: 회전속도·부하 하향
         at_sec: 0
         effects:
-          # 정상 운전 변화라 한계값(경고 μ±3σ)에는 거의 닿지 않고 Nelson 규칙 2(평균 이동)·ML 만 알아챌 크기 (2026-11-19 축소, 전 −15·−12σ)
+          # 정상 운전 변화라 경고 한계에 닿지 않고 Nelson 규칙 2(평균 이동)·ML 만 알아챌 크기 (2026-11-19 축소, 전 −15·−12σ)
           - { signal: speed, shape: ramp, z: -1.5, rise_sec: 300 }
           - { signal: current, shape: ramp, z: -1.5, lag_sec: 5, rise_sec: 300 }
           # 자기 유량·토출 압력이 있는 설비(HOU 압축기)만 움직인다. 터빈·전동기에는 이 태그가 없어 건너뛴다 (2026-11-23)
@@ -229,7 +229,7 @@ fault_modes:
             - { signal: flow, shape: ramp, z: -0.75, lag_sec: 60, rise_sec: 300 }
     expect:
       stages:
-        S1: { setpoint: none, nelson: [2], ml_plant: high }    # RFCC 는 경고(통계 ±3σ)를 가끔 넘는다(표본 약 1 %)
+        S1: { setpoint: none, nelson: [2], ml_plant: high }    # RFCC 도 2026-11-23 공학 한계값 뒤로는 경고에 닿지 않는다(전: 통계 ±3σ 라 표본 약 1 %)
       alarms:
         - { equip: self, kind: 정상 운전 변화 }
 
@@ -315,7 +315,7 @@ fault_modes:
         at_sec: 0
         damage: true
         effects:
-          - { signal: shaft_vibration, shape: ramp, z: 6, rise_sec: 1800 }
+          - { signal: shaft_vibration, shape: ramp, to_limit: warn_hi, margin: 0.1, z: 6, rise_sec: 1800 }   # 2026-11-23 RFCC 공학 한계값에 맞춰 z → to_limit (z 는 그 한계가 없는 태그의 대안)
           - { signal: axial_position, shape: ramp, z: 4, rise_sec: 1800 }
       - id: S2
         name: 효율 저하 — 회수 동력 감소
@@ -333,16 +333,16 @@ fault_modes:
         at_sec: 2400
         damage: true
         effects:
-          - { signal: shaft_vibration, shape: ramp, z: 10, rise_sec: 900 }
-          - { signal: bearing_temp, shape: ramp, z: 8, lag_sec: 60, rise_sec: 900 }
+          - { signal: shaft_vibration, shape: ramp, to_limit: alarm_hi, margin: 0.05, z: 10, rise_sec: 900 }   # 2026-11-23 RFCC 공학 한계값에 맞춰 z → to_limit (z 는 그 한계가 없는 태그의 대안)
+          - { signal: bearing_temp, shape: ramp, to_limit: warn_hi, margin: 0.05, z: 8, lag_sec: 60, rise_sec: 900 }
         propagate:
           driven:
             - { signal: shaft_vibration, shape: ramp, z: 3, lag_sec: 10, rise_sec: 600 }
     expect:
       stages:
-        S1: { setpoint: trip, nelson: [1, 2], ml_plant: high }    # RFCC 정지 한계 μ±6σ (2026-11-19 합성)
-        S2: { setpoint: trip, nelson: [1, 2], ml_plant: high }
-        S3: { setpoint: trip, nelson: [1, 2], ml_plant: high }
+        S1: { setpoint: none, nelson: [1, 2], ml_plant: high }    # 2026-11-23 RFCC 공학 한계값 (전: μ±6σ 로 모두 정지). 부착은 서서히 — 경고는 S2 초반
+        S2: { setpoint: warn, nelson: [1, 2], ml_plant: high }
+        S3: { setpoint: alarm, nelson: [1, 2], ml_plant: high }
       alarms:
         - { equip: self, count: 1, opens_in: S1 }
         - { equip: driven, count: 1, opens_in: S2, related_to: self }

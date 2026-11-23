@@ -12,12 +12,15 @@ def test_rfcc_plant_matches_sample_package(rfcc_plant_path):
     temps = [t for t in tags if t.signal in TEMPS]
     assert len(temps) == 16 and all(t.interval_sec == 10 for t in temps)
     assert all(t.interval_sec == 1 for t in tags if t.signal not in TEMPS)
-    assert all(t.limits.warn_lo < t.control.mean < t.limits.warn_hi for t in tags)   # 통계 경고 μ±3σ
-    for t in plant.all_tags():          # 알람 μ±4.5σ·정지 μ±6σ 는 합성 (2026-11-19)
-        mu, sg = t.control.mean, t.control.sigma
-        assert (t.limits.alarm_hi, t.limits.trip_hi) == (round(mu + 4.5 * sg, 4), round(mu + 6 * sg, 4)), t.tag_id
-        assert (t.limits.alarm_lo, t.limits.trip_lo) == (round(mu - 4.5 * sg, 4), round(mu - 6 * sg, 4)), t.tag_id
     by_key = plant.tag_by_key()
+    # 공학 기준값 (2026-11-23, synthetic): 펌프 진동 절대값, 축 진동 ISO 7919-3 회전수 식, 유량 비율, 대기압 가까운 입구는 따로
+    lim = lambda e, t: by_key[(e, t)].limits
+    assert (lim("P-1101A", "VI-P-1101A").warn_hi, lim("P-1101A", "VI-P-1101A").alarm_hi, lim("P-1101A", "VI-P-1101A").trip_hi) == (3.0, 4.5, 7.1)
+    rpm = by_key[("C-1401", "SI-C-1401")].control.mean
+    assert lim("C-1401", "VX-C-1401").alarm_hi == float(f"{9000 / rpm ** 0.5:.3g}")
+    assert lim("P-1101A", "FI-P-1101A").warn_lo == float(f"{by_key[('P-1101A', 'FI-P-1101A')].control.mean * 0.766:.3g}")
+    assert (lim("B-1201", "PS-B-1201").warn_lo, lim("B-1201", "PS-B-1201").trip_lo) == (-0.05, -0.1)
+    assert lim("P-1101A", "FI-P-1101A").warn_hi is None and lim("T-1401", "STT-T-1401").warn_lo == 362.0
     assert (by_key[("P-1101A", "VI-P-1101A")].control.mean, by_key[("P-1101A", "VI-P-1101A")].control.sigma) == (1.4575, 0.03761084502112299)
     assert by_key[("E-1202", "ZI-E-1202")].decimals == 5 and by_key[("B-1201", "FI-B-1201")].decimals == 4
     equip = plant.equipment_by_id()

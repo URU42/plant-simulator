@@ -1,9 +1,13 @@
 # 구성안 2: RFCC 회전기계 (설계 docs/superpowers/specs/2026-11-09-rfcc-simulator-design.md)
 # - 출처: rfcc-20261109 v1.2.0 의 support/config.json. 설비 12대, 태그 81개 + 합성 1개(STT-T-1401, 2026-11-19).
 # - 온도(bearing_temp / suction_temp / discharge_temp / oil_temp) 16개는 10초, 나머지 65개는 1초 주기.
-# - 한계값은 Nelson 관리 기준(control: μ·σ, 팀의 baselines.json)에서 정했다 (상·하한, 소수 4자리): 경고 μ ± 3σ.
-#   알람 μ ± 4.5σ·정지 μ ± 6σ 는 자료에 없어 합성으로 더했다 (사용자 확정 2026-11-19, synthetic).
-#   매뉴얼의 정상 중심값은 그대로 경보값으로 쓰지 않았다.
+# - 한계값 (2026-11-23 사용자 확정, synthetic): 공학 기준값으로 바꿨다. 이전의 통계 한계(경고 μ±3σ, 알람 μ±4.5σ·정지 μ±6σ, D23)는 대체했다.
+#   다른 공장(CDU·HOU·RHDS·VRDS) 같은 신호의 규칙을 옮겼다 — 펌프 진동 3.0/4.5/7.1 mm/s, 베어링 온도 펌프 80/90/100·터보기계 85/95/105 ℃,
+#   축 위치 ±0.35/±0.53/±0.88 mm 는 절대값, 유량·압력·전류·회전수·윤활유·흡입/토출 온도는 μ 대비 비율 중앙값(태그별 limit_basis).
+#   축 진동은 ISO 7919-3 회전수 의존 영역 경계(A/B·B/C·C/D = 4800·9000·13200/√N µm p-p, 사용자 확정 2026-11-23 — API 617 식은 출하 시험
+#   기준이라 정상 μ 보다 낮아 쓰지 않았다). 증기 압력·온도는 설계값 ±10/15/20 %.
+#   대기압 가까운 압력 2개(송풍기 입구 PS-B-1201, 팽창 터빈 출구 PD-E-1202)는 따로 정했다(AI 결정). 유효숫자 3자리.
+#   control(μ·σ, 팀의 baselines.json)은 그대로라 탐지 쪽 Nelson 관리 기준은 바뀌지 않는다. 매뉴얼의 정상 중심값은 그대로 경보값으로 쓰지 않았다.
 # - driven_by: 같은 축으로 직접 결합된 설비. 피구동 설비의 speed 태그는 구동기의 속도를 그대로 쓴다.
 # - seed_key: 태그 r001~r081. ID 를 바꿔도 생성 값이 유지된다.
 
@@ -14,7 +18,7 @@
 plant:
   plant_id: PL-RFCC
   name: "RFCC(중질유 유동상 촉매 분해)"
-  config_version: 7
+  config_version: 8                 # 2026-11-23 한계값을 공학 기준값으로 (7: 통계 μ±3σ·4.5σ·6σ)
   unit_groups:
     - id: UG-RFCC-01
       name: 원료 공급
@@ -110,22 +114,22 @@ equipment:
     unit_id: UNIT-RFCC-01
     tags:
       - { tag_id: VI-P-1101A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
-          limits: { trip_lo: 1.2318, alarm_lo: 1.2883, warn_lo: 1.3447, warn_hi: 1.5703, alarm_hi: 1.6267, trip_hi: 1.6832 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 }, limit_basis: "펌프 진동 3.0/4.5/7.1 mm/s(API 610 선호운전영역·ISO 20816-3 경계, 다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r001, control: { mean: 1.4575, sigma: 0.03761084502112299 } }
       - { tag_id: TI-P-1101A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
-          limits: { trip_lo: 63.9526, alarm_lo: 64.2174, warn_lo: 64.4822, warn_hi: 65.5412, alarm_hi: 65.806, trip_hi: 66.0708 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, limit_basis: "펌프 베어링 80/90/100 ℃(다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r002, control: { mean: 65.0117, sigma: 0.17651137414737636 } }
       - { tag_id: PS-P-1101A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
-          limits: { trip_lo: 3.1543, alarm_lo: 3.1657, warn_lo: 3.1771, warn_hi: 3.2229, alarm_hi: 3.2343, trip_hi: 3.2457 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 1.33, alarm_lo: 1.67, warn_lo: 2.09 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.652μ·alarm_lo 0.522μ·trip_lo 0.417μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r003, control: { mean: 3.2, sigma: 0.0076193214288587 } }
       - { tag_id: PD-P-1101A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
-          limits: { trip_lo: 18.8304, alarm_lo: 18.876, warn_lo: 18.9216, warn_hi: 19.1041, alarm_hi: 19.1497, trip_hi: 19.1953 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { alarm_lo: 11.1, warn_lo: 13.8, warn_hi: 24, alarm_hi: 25.2, trip_hi: 26.4 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.264μ·alarm_hi 1.328μ·trip_hi 1.39μ·warn_lo 0.724μ·alarm_lo 0.583μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r004, control: { mean: 19.01285, sigma: 0.030415587636555778 } }
       - { tag_id: FI-P-1101A, signal: flow, unit: m3/h, description: "액체 체적 유량",
-          limits: { trip_lo: 205.483, alarm_lo: 206.4766, warn_lo: 207.4702, warn_hi: 211.4444, alarm_hi: 212.438, trip_hi: 213.4316 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 110, alarm_lo: 138, warn_lo: 160 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.766μ·alarm_lo 0.659μ·trip_lo 0.526μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r005, control: { mean: 209.4573, sigma: 0.6623794814991241 } }
       - { tag_id: II-P-1101A, signal: current, unit: A, description: "구동 모터 전류",
-          limits: { trip_lo: 140.6956, alarm_lo: 141.7064, warn_lo: 142.7172, warn_hi: 146.7606, alarm_hi: 147.7714, trip_hi: 148.7822 }, limit_basis: "Nelson 관리한계 μ±3σ (μ 는 baselines.json, σ 는 계산 태그 정상 생성값 — 자료 σ 0.343305, 2026-11-19) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 185, alarm_hi: 197, trip_hi: 212 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.28μ·alarm_hi 1.359μ·trip_hi 1.464μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r006,
           derive: { formula: power, terms: [{ tag: FI-P-1101A, exp: 1 }, { tag: PD-P-1101A, minus: PS-P-1101A, exp: 1 }], noise_sigma: 0.102991 }, control: { mean: 144.7389, sigma: 0.67389 } }
   # ---------------- UNIT-RFCC-02 촉매 재생 ----------------
@@ -136,28 +140,28 @@ equipment:
     driven_by: E-1202
     tags:
       - { tag_id: VX-B-1201, signal: shaft_vibration, unit: um p-p, description: "구동측 X축 상대 진동",
-          limits: { trip_lo: 27.5279, alarm_lo: 28.6556, warn_lo: 29.7834, warn_hi: 34.2943, alarm_hi: 35.4221, trip_hi: 36.5498 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 66.6, alarm_hi: 125, trip_hi: 183 }, limit_basis: "ISO 7919-3 영역 경계 A/B·B/C·C/D = 4800·9000·13200/√N µm p-p, N 5199 rpm (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r007, control: { mean: 32.03885, sigma: 0.751828352128607 } }
       - { tag_id: VY-B-1201, signal: shaft_vibration, unit: um p-p, description: "구동측 Y축 상대 진동",
-          limits: { trip_lo: 25.0136, alarm_lo: 26.0695, warn_lo: 27.1255, warn_hi: 31.3493, alarm_hi: 32.4053, trip_hi: 33.4612 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 66.6, alarm_hi: 125, trip_hi: 183 }, limit_basis: "ISO 7919-3 영역 경계 A/B·B/C·C/D = 4800·9000·13200/√N µm p-p, N 5199 rpm (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r008, control: { mean: 29.2374, sigma: 0.7039693346693882 } }
       - { tag_id: TI-B-1201, signal: bearing_temp, unit: degC, description: "구동측 저널 베어링 온도",
-          limits: { trip_lo: 75.8691, alarm_lo: 76.147, warn_lo: 76.425, warn_hi: 77.5367, alarm_hi: 77.8147, trip_hi: 78.0926 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 85, alarm_hi: 95, trip_hi: 105 }, limit_basis: "터보기계 베어링 85/95/105 ℃(다른 공장 압축기에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r009, control: { mean: 76.98085, sigma: 0.18529889308277228 } }
       - { tag_id: PS-B-1201, signal: suction_pressure, unit: bar(g), description: "입구 공기 압력",
-          limits: { trip_lo: -0.021, alarm_lo: -0.0195, warn_lo: -0.018, warn_hi: -0.0118, alarm_hi: -0.0103, trip_hi: -0.0088 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: -0.1, alarm_lo: -0.08, warn_lo: -0.05 }, limit_basis: "주 공기 송풍기 입구(대기 흡입) — 입구 필터 막힘 저압 −0.05/−0.08/−0.10 bar(g) (AI 결정, synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r010, control: { mean: -0.0149, sigma: 0.0010244233694958035 } }
       - { tag_id: PD-B-1201, signal: discharge_pressure, unit: bar(g), description: "토출 공기 압력",
-          limits: { trip_lo: 2.7264, alarm_lo: 2.7448, warn_lo: 2.7632, warn_hi: 2.837, alarm_hi: 2.8554, trip_hi: 2.8738 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 3.02, alarm_hi: 3.17, trip_hi: 3.32 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.078μ·alarm_hi 1.131μ·trip_hi 1.187μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r011, control: { mean: 2.8001, sigma: 0.012287028986959738 } }
       - { tag_id: FI-B-1201, signal: flow, unit: Nm3/h, description: "표준 상태 공기 체적 유량",
-          limits: { trip_lo: 176909.9169, alarm_lo: 177670.4254, warn_lo: 178430.9339, warn_hi: 181472.9679, alarm_hi: 182233.4764, trip_hi: 182993.9849 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 97500, alarm_lo: 122000, warn_lo: 142000 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.788μ·alarm_lo 0.678μ·trip_lo 0.542μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r012, control: { mean: 179951.9509, sigma: 507.0056623217567 } }
       - { tag_id: SI-B-1201, signal: speed, unit: rpm, description: "축 회전속도",
-          limits: { trip_lo: 5189.7143, alarm_lo: 5192.0844, warn_lo: 5194.4545, warn_hi: 5203.9349, alarm_hi: 5206.305, trip_hi: 5208.6751 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { alarm_lo: 4720, warn_lo: 4910, warn_hi: 5510, alarm_hi: 5730, trip_hi: 5950 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.06μ·alarm_hi 1.102μ·trip_hi 1.145μ·warn_lo 0.945μ·alarm_lo 0.907μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r013, control: { mean: 5199.1947, sigma: 1.580063664122426 } }
       - { tag_id: LOP-B-1201, signal: oil_pressure, unit: bar(g), description: "윤활유 공급 압력",
-          limits: { trip_lo: 2.1936, alarm_lo: 2.1996, warn_lo: 2.2056, warn_hi: 2.2296, alarm_hi: 2.2356, trip_hi: 2.2416 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 1.09, alarm_lo: 1.32, warn_lo: 1.64 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.741μ·alarm_lo 0.593μ·trip_lo 0.493μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r014, control: { mean: 2.2176, sigma: 0.003996040570360755 } }
   # ---------------- UNIT-RFCC-03 동력 회수 ----------------
   - equip_id: E-1202
@@ -166,29 +170,29 @@ equipment:
     unit_id: UNIT-RFCC-03
     tags:
       - { tag_id: VX-E-1202, signal: shaft_vibration, unit: um p-p, description: "구동측 X축 상대 진동",
-          limits: { trip_lo: 30.8548, alarm_lo: 31.9788, warn_lo: 33.1028, warn_hi: 37.5988, alarm_hi: 38.7228, trip_hi: 39.8468 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 66.6, alarm_hi: 125, trip_hi: 183 }, limit_basis: "ISO 7919-3 영역 경계 A/B·B/C·C/D = 4800·9000·13200/√N µm p-p, N 5199 rpm (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r015, control: { mean: 35.3508, sigma: 0.749339183942845 } }
       - { tag_id: VY-E-1202, signal: shaft_vibration, unit: um p-p, description: "구동측 Y축 상대 진동",
-          limits: { trip_lo: 27.6303, alarm_lo: 28.8248, warn_lo: 30.0194, warn_hi: 34.7975, alarm_hi: 35.9921, trip_hi: 37.1866 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 66.6, alarm_hi: 125, trip_hi: 183 }, limit_basis: "ISO 7919-3 영역 경계 A/B·B/C·C/D = 4800·9000·13200/√N µm p-p, N 5199 rpm (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r016, control: { mean: 32.40845, sigma: 0.7963585003956682 } }
       - { tag_id: TI-E-1202, signal: bearing_temp, unit: degC, description: "저널 베어링 온도",
-          limits: { trip_lo: 79.8299, alarm_lo: 80.126, warn_lo: 80.4222, warn_hi: 81.6069, alarm_hi: 81.9031, trip_hi: 82.1992 }, limit_basis: "Nelson 관리한계 μ±3σ (μ 는 baselines.json, σ 는 계산 태그 정상 생성값 — 자료 σ 0.172083, 2026-11-19) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 85, alarm_hi: 95, trip_hi: 105 }, limit_basis: "터보기계 베어링 85/95/105 ℃(다른 공장 압축기에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r017,
           derive: { formula: power, out_offset: 273.15, terms: [{ tag: LOT-E-1202, offset: 273.15, exp: 1 }], noise_sigma: 0.0516249 }, control: { mean: 81.01455, sigma: 0.197449 } }
       - { tag_id: ZI-E-1202, signal: axial_position, unit: mm, description: "축방향 상대 위치",
-          limits: { trip_lo: 0.0354, alarm_lo: 0.0366, warn_lo: 0.0377, warn_hi: 0.0423, alarm_hi: 0.0434, trip_hi: 0.0445 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: -0.88, alarm_lo: -0.53, warn_lo: -0.35, warn_hi: 0.35, alarm_hi: 0.53, trip_hi: 0.88 }, limit_basis: "축 위치 ±0.35/±0.53/±0.88 mm(RHDS·VRDS 원심 압축기와 같게) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 5, seed_key: r018, control: { mean: 0.039975, sigma: 0.0007604983890332853 } }
       - { tag_id: SI-E-1202, signal: speed, unit: rpm, description: "축 회전속도",
-          limits: { trip_lo: 5189.7143, alarm_lo: 5192.0844, warn_lo: 5194.4545, warn_hi: 5203.9349, alarm_hi: 5206.305, trip_hi: 5208.6751 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { alarm_lo: 4720, warn_lo: 4910, warn_hi: 5510, alarm_hi: 5730, trip_hi: 5950 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.06μ·alarm_hi 1.102μ·trip_hi 1.145μ·warn_lo 0.945μ·alarm_lo 0.907μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r019, control: { mean: 5199.1947, sigma: 1.580063664122426 } }
       - { tag_id: PS-E-1202, signal: suction_pressure, unit: bar(g), description: "배기가스 입구 압력",
-          limits: { trip_lo: 2.5261, alarm_lo: 2.5448, warn_lo: 2.5635, warn_hi: 2.6383, alarm_hi: 2.657, trip_hi: 2.6757 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 1.37, alarm_lo: 1.71, warn_lo: 2.14 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.821μ·alarm_lo 0.657μ·trip_lo 0.526μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r020, control: { mean: 2.6009, sigma: 0.01247486657660781 } }
       - { tag_id: PD-E-1202, signal: discharge_pressure, unit: bar(g), description: "배기가스 출구 압력",
-          limits: { trip_lo: 0.1123, alarm_lo: 0.1168, warn_lo: 0.1212, warn_hi: 0.1388, alarm_hi: 0.1432, trip_hi: 0.1477 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 0.219, alarm_hi: 0.28, trip_hi: 0.344 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값을 절대압에 적용(대기압 가까움, AI 결정): warn_hi 1.078·alarm_hi 1.131·trip_hi 1.187 × (μ + 1.013) − 1.013 (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r021, control: { mean: 0.13, sigma: 0.002944302718680332 } }
       - { tag_id: LOT-E-1202, signal: oil_temp, unit: degC, description: "윤활유 공급 온도",
-          limits: { trip_lo: 42.9234, alarm_lo: 43.1917, warn_lo: 43.46, warn_hi: 44.5331, alarm_hi: 44.8014, trip_hi: 45.0697 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 55.7, alarm_hi: 62.9, trip_hi: 73 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.267μ·alarm_hi 1.429μ·trip_hi 1.659μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r022, control: { mean: 43.99655, sigma: 0.17886445463821105 } }
   # ---------------- UNIT-RFCC-04 슬러리·LCO 순환·탑정 처리 ----------------
   - equip_id: P-1301A
@@ -197,22 +201,22 @@ equipment:
     unit_id: UNIT-RFCC-04
     tags:
       - { tag_id: VI-P-1301A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
-          limits: { trip_lo: 1.6262, alarm_lo: 1.6855, warn_lo: 1.7449, warn_hi: 1.9821, alarm_hi: 2.0415, trip_hi: 2.1008 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 }, limit_basis: "펌프 진동 3.0/4.5/7.1 mm/s(API 610 선호운전영역·ISO 20816-3 경계, 다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r023, control: { mean: 1.8635, sigma: 0.03954995647946755 } }
       - { tag_id: TI-P-1301A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
-          limits: { trip_lo: 71.9542, alarm_lo: 72.2153, warn_lo: 72.4763, warn_hi: 73.5206, alarm_hi: 73.7816, trip_hi: 74.0427 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, limit_basis: "펌프 베어링 80/90/100 ℃(다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r024, control: { mean: 72.99844999999999, sigma: 0.17403457423901625 } }
       - { tag_id: PS-P-1301A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
-          limits: { trip_lo: 4.0541, alarm_lo: 4.0655, warn_lo: 4.077, warn_hi: 4.1228, alarm_hi: 4.1343, trip_hi: 4.1457 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 1.71, alarm_lo: 2.14, warn_lo: 2.67 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.652μ·alarm_lo 0.522μ·trip_lo 0.417μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r025, control: { mean: 4.0999, sigma: 0.007641136483435408 } }
       - { tag_id: PD-P-1301A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
-          limits: { trip_lo: 10.3487, alarm_lo: 10.388, warn_lo: 10.4274, warn_hi: 10.5846, alarm_hi: 10.624, trip_hi: 10.6633 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { alarm_lo: 6.12, warn_lo: 7.61, warn_hi: 13.3, alarm_hi: 14, trip_hi: 14.6 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.264μ·alarm_hi 1.328μ·trip_hi 1.39μ·warn_lo 0.724μ·alarm_lo 0.583μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r026, control: { mean: 10.506, sigma: 0.02621133446502676 } }
       - { tag_id: FI-P-1301A, signal: flow, unit: m3/h, description: "액체 체적 유량",
-          limits: { trip_lo: 372.8006, alarm_lo: 374.3589, warn_lo: 375.9172, warn_hi: 382.1506, alarm_hi: 383.7089, trip_hi: 385.2672 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 199, alarm_lo: 250, warn_lo: 290 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.766μ·alarm_lo 0.659μ·trip_lo 0.526μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r027, control: { mean: 379.0339, sigma: 1.0388873656211892 } }
       - { tag_id: II-P-1301A, signal: current, unit: A, description: "구동 모터 전류",
-          limits: { trip_lo: 182.1327, alarm_lo: 184.0081, warn_lo: 185.8835, warn_hi: 193.3853, alarm_hi: 195.2607, trip_hi: 197.1361 }, limit_basis: "Nelson 관리한계 μ±3σ (μ 는 baselines.json, σ 는 계산 태그 정상 생성값 — 자료 σ 0.408778, 2026-11-19) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 243, alarm_hi: 258, trip_hi: 278 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.28μ·alarm_hi 1.359μ·trip_hi 1.464μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r028,
           derive: { formula: power, terms: [{ tag: FI-P-1301A, exp: 1 }, { tag: PD-P-1301A, minus: PS-P-1301A, exp: 1 }], noise_sigma: 0.122633 }, control: { mean: 189.6344, sigma: 1.25029 } }
   - equip_id: P-1302A
@@ -221,22 +225,22 @@ equipment:
     unit_id: UNIT-RFCC-04
     tags:
       - { tag_id: VI-P-1302A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
-          limits: { trip_lo: 0.96, alarm_lo: 1.0271, warn_lo: 1.0942, warn_hi: 1.3624, alarm_hi: 1.4295, trip_hi: 1.4966 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 }, limit_basis: "펌프 진동 3.0/4.5/7.1 mm/s(API 610 선호운전영역·ISO 20816-3 경계, 다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r029, control: { mean: 1.2283, sigma: 0.044709429136401774 } }
       - { tag_id: TI-P-1302A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
-          limits: { trip_lo: 65.8832, alarm_lo: 66.1632, warn_lo: 66.4432, warn_hi: 67.5632, alarm_hi: 67.8432, trip_hi: 68.1232 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, limit_basis: "펌프 베어링 80/90/100 ℃(다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r030, control: { mean: 67.00319999999999, sigma: 0.18666314336870024 } }
       - { tag_id: PS-P-1302A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
-          limits: { trip_lo: 2.9509, alarm_lo: 2.9631, warn_lo: 2.9754, warn_hi: 3.0242, alarm_hi: 3.0365, trip_hi: 3.0487 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 1.25, alarm_lo: 1.57, warn_lo: 1.96 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.652μ·alarm_lo 0.522μ·trip_lo 0.417μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r031, control: { mean: 2.9998, sigma: 0.008145917873199654 } }
       - { tag_id: PD-P-1302A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
-          limits: { trip_lo: 9.3461, alarm_lo: 9.3851, warn_lo: 9.4241, warn_hi: 9.5799, alarm_hi: 9.6189, trip_hi: 9.6579 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { alarm_lo: 5.54, warn_lo: 6.88, warn_hi: 12, alarm_hi: 12.6, trip_hi: 13.2 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.264μ·alarm_hi 1.328μ·trip_hi 1.39μ·warn_lo 0.724μ·alarm_lo 0.583μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r032, control: { mean: 9.502, sigma: 0.02597628212588041 } }
       - { tag_id: FI-P-1302A, signal: flow, unit: m3/h, description: "액체 체적 유량",
-          limits: { trip_lo: 236.4926, alarm_lo: 237.3128, warn_lo: 238.133, warn_hi: 241.414, alarm_hi: 242.2342, trip_hi: 243.0544 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 126, alarm_lo: 158, warn_lo: 184 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.766μ·alarm_lo 0.659μ·trip_lo 0.526μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r033, control: { mean: 239.7735, sigma: 0.5468200201303282 } }
       - { tag_id: II-P-1302A, signal: current, unit: A, description: "구동 모터 전류",
-          limits: { trip_lo: 94.3081, alarm_lo: 95.2165, warn_lo: 96.1249, warn_hi: 99.7585, alarm_hi: 100.6669, trip_hi: 101.5753 }, limit_basis: "Nelson 관리한계 μ±3σ (μ 는 baselines.json, σ 는 계산 태그 정상 생성값 — 자료 σ 0.164056, 2026-11-19) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 125, alarm_hi: 133, trip_hi: 143 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.28μ·alarm_hi 1.359μ·trip_hi 1.464μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r034,
           derive: { formula: power, terms: [{ tag: FI-P-1302A, exp: 1 }, { tag: PD-P-1302A, minus: PS-P-1302A, exp: 1 }], noise_sigma: 0.0492168 }, control: { mean: 97.9417, sigma: 0.605601 } }
   - equip_id: P-1303A
@@ -245,22 +249,22 @@ equipment:
     unit_id: UNIT-RFCC-04
     tags:
       - { tag_id: VI-P-1303A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
-          limits: { trip_lo: 0.7679, alarm_lo: 0.8371, warn_lo: 0.9062, warn_hi: 1.1827, alarm_hi: 1.2518, trip_hi: 1.321 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 }, limit_basis: "펌프 진동 3.0/4.5/7.1 mm/s(API 610 선호운전영역·ISO 20816-3 경계, 다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r035, control: { mean: 1.0444499999999999, sigma: 0.046084199686418054 } }
       - { tag_id: TI-P-1303A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
-          limits: { trip_lo: 55.9378, alarm_lo: 56.2091, warn_lo: 56.4805, warn_hi: 57.5659, alarm_hi: 57.8373, trip_hi: 58.1086 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, limit_basis: "펌프 베어링 80/90/100 ℃(다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r036, control: { mean: 57.0232, sigma: 0.18090717515896632 } }
       - { tag_id: PS-P-1303A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
-          limits: { trip_lo: 2.4511, alarm_lo: 2.4631, warn_lo: 2.4752, warn_hi: 2.5234, alarm_hi: 2.5355, trip_hi: 2.5475 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 1.04, alarm_lo: 1.3, warn_lo: 1.63 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.652μ·alarm_lo 0.522μ·trip_lo 0.417μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r037, control: { mean: 2.4993, sigma: 0.0080414497170889 } }
       - { tag_id: PD-P-1303A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
-          limits: { trip_lo: 8.0481, alarm_lo: 8.0868, warn_lo: 8.1255, warn_hi: 8.2803, alarm_hi: 8.319, trip_hi: 8.3577 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { alarm_lo: 4.78, warn_lo: 5.94, warn_hi: 10.4, alarm_hi: 10.9, trip_hi: 11.4 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.264μ·alarm_hi 1.328μ·trip_hi 1.39μ·warn_lo 0.724μ·alarm_lo 0.583μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r038, control: { mean: 8.2029, sigma: 0.02579795645701467 } }
       - { tag_id: FI-P-1303A, signal: flow, unit: m3/h, description: "액체 체적 유량",
-          limits: { trip_lo: 132.7091, alarm_lo: 133.2733, warn_lo: 133.8375, warn_hi: 136.0942, alarm_hi: 136.6584, trip_hi: 137.2226 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 71, alarm_lo: 88.9, warn_lo: 103 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.766μ·alarm_lo 0.659μ·trip_lo 0.526μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r039, control: { mean: 134.96585, sigma: 0.37611812374023723 } }
       - { tag_id: II-P-1303A, signal: current, unit: A, description: "구동 모터 전류",
-          limits: { trip_lo: 62.185, alarm_lo: 62.8865, warn_lo: 63.588, warn_hi: 66.394, alarm_hi: 67.0955, trip_hi: 67.797 }, limit_basis: "Nelson 관리한계 μ±3σ (μ 는 baselines.json, σ 는 계산 태그 정상 생성값 — 자료 σ 0.139475, 2026-11-19) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 83.2, alarm_hi: 88.3, trip_hi: 95.1 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.28μ·alarm_hi 1.359μ·trip_hi 1.464μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r040,
           derive: { formula: power, terms: [{ tag: FI-P-1303A, exp: 1 }, { tag: PD-P-1303A, minus: PS-P-1303A, exp: 1 }], noise_sigma: 0.0418425 }, control: { mean: 64.991, sigma: 0.467667 } }
   # ---------------- UNIT-RFCC-05 습가스 압축 ----------------
@@ -271,35 +275,35 @@ equipment:
     driven_by: T-1401
     tags:
       - { tag_id: VX-C-1401, signal: shaft_vibration, unit: um p-p, description: "구동측 X축 상대 진동",
-          limits: { trip_lo: 25.9287, alarm_lo: 27.0405, warn_lo: 28.1523, warn_hi: 32.5994, alarm_hi: 33.7112, trip_hi: 34.823 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 53, alarm_hi: 99.4, trip_hi: 146 }, limit_basis: "ISO 7919-3 영역 경계 A/B·B/C·C/D = 4800·9000·13200/√N µm p-p, N 8198 rpm (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r041, control: { mean: 30.37585, sigma: 0.7411891611858159 } }
       - { tag_id: VY-C-1401, signal: shaft_vibration, unit: um p-p, description: "구동측 Y축 상대 진동",
-          limits: { trip_lo: 22.3821, alarm_lo: 23.4999, warn_lo: 24.6178, warn_hi: 29.089, alarm_hi: 30.2069, trip_hi: 31.3247 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 53, alarm_hi: 99.4, trip_hi: 146 }, limit_basis: "ISO 7919-3 영역 경계 A/B·B/C·C/D = 4800·9000·13200/√N µm p-p, N 8198 rpm (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r042, control: { mean: 26.8534, sigma: 0.7452131868519561 } }
       - { tag_id: TI-C-1401, signal: bearing_temp, unit: degC, description: "구동측 저널 베어링 온도",
-          limits: { trip_lo: 74.9304, alarm_lo: 75.1993, warn_lo: 75.4682, warn_hi: 76.5438, alarm_hi: 76.8127, trip_hi: 77.0816 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 85, alarm_hi: 95, trip_hi: 105 }, limit_basis: "터보기계 베어링 85/95/105 ℃(다른 공장 압축기에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r043, control: { mean: 76.006, sigma: 0.1792640392241305 } }
       - { tag_id: ZI-C-1401, signal: axial_position, unit: mm, description: "축방향 상대 위치",
-          limits: { trip_lo: 0.0255, alarm_lo: 0.0266, warn_lo: 0.0277, warn_hi: 0.0322, alarm_hi: 0.0334, trip_hi: 0.0345 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: -0.88, alarm_lo: -0.53, warn_lo: -0.35, warn_hi: 0.35, alarm_hi: 0.53, trip_hi: 0.88 }, limit_basis: "축 위치 ±0.35/±0.53/±0.88 mm(RHDS·VRDS 원심 압축기와 같게) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 5, seed_key: r044, control: { mean: 0.02998, sigma: 0.0007537998874631821 } }
       - { tag_id: PS-C-1401, signal: suction_pressure, unit: bar(g), description: "1단 흡입 압력",
-          limits: { trip_lo: 1.1645, alarm_lo: 1.1734, warn_lo: 1.1823, warn_hi: 1.2179, alarm_hi: 1.2268, trip_hi: 1.2357 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 0.631, alarm_lo: 0.788, warn_lo: 0.985 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.821μ·alarm_lo 0.657μ·trip_lo 0.526μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r045, control: { mean: 1.2001, sigma: 0.0059254980777261055 } }
       - { tag_id: PD-C-1401, signal: discharge_pressure, unit: bar(g), description: "최종 토출 압력",
-          limits: { trip_lo: 12.3232, alarm_lo: 12.3661, warn_lo: 12.4089, warn_hi: 12.5803, alarm_hi: 12.6231, trip_hi: 12.666 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 13.5, alarm_hi: 14.1, trip_hi: 14.8 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.078μ·alarm_hi 1.131μ·trip_hi 1.187μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r046, control: { mean: 12.4946, sigma: 0.02856322743719376 } }
       - { tag_id: TS-C-1401, signal: suction_temp, unit: degC, description: "1단 흡입 온도",
-          limits: { trip_lo: 39.9482, alarm_lo: 40.2132, warn_lo: 40.4783, warn_hi: 41.5386, alarm_hi: 41.8037, trip_hi: 42.0687 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 55.4, alarm_hi: 65.6, trip_hi: 75.7 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.351μ·alarm_hi 1.599μ·trip_hi 1.847μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r047, control: { mean: 41.008449999999996, sigma: 0.1767121484527944 } }
       - { tag_id: TD-C-1401, signal: discharge_temp, unit: degC, description: "최종 토출 온도",
-          limits: { trip_lo: 114.8938, alarm_lo: 115.3384, warn_lo: 115.783, warn_hi: 117.5613, alarm_hi: 118.0059, trip_hi: 118.4505 }, limit_basis: "Nelson 관리한계 μ±3σ (μ 는 baselines.json, σ 는 계산 태그 정상 생성값 — 자료 σ 0.240191, 2026-11-19) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 144, alarm_hi: 157, trip_hi: 169 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.236μ·alarm_hi 1.343μ·trip_hi 1.451μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r048,
           derive: { formula: power, out_offset: 273.15, terms: [{ tag: TS-C-1401, offset: 273.15, exp: 1 }, { tag: PD-C-1401, offset: 1.01325, exp: 0.1193 }, { tag: PS-C-1401, offset: 1.01325, exp: -0.1193 }], noise_sigma: 0.0720572 }, control: { mean: 116.67214999999999, sigma: 0.296396 } }
       - { tag_id: FI-C-1401, signal: flow, unit: Nm3/h, description: "흡입 가스 표준 상태 체적 유량",
-          limits: { trip_lo: 41302.1979, alarm_lo: 41456.756, warn_lo: 41611.3141, warn_hi: 42229.5463, alarm_hi: 42384.1044, trip_hi: 42538.6625 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 22700, alarm_lo: 28400, warn_lo: 33000 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.788μ·alarm_lo 0.678μ·trip_lo 0.542μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r049, control: { mean: 41920.4302, sigma: 103.0387109254762 } }
       - { tag_id: SI-C-1401, signal: speed, unit: rpm, description: "축 회전속도",
-          limits: { trip_lo: 8175.1491, alarm_lo: 8180.8213, warn_lo: 8186.4934, warn_hi: 8209.1818, alarm_hi: 8214.8539, trip_hi: 8220.5261 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { alarm_lo: 7440, warn_lo: 7750, warn_hi: 8690, alarm_hi: 9030, trip_hi: 9390 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.06μ·alarm_hi 1.102μ·trip_hi 1.145μ·warn_lo 0.945μ·alarm_lo 0.907μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r050, control: { mean: 8197.837599999999, sigma: 3.781409943188472 } }
   # ---------------- UNIT-RFCC-06 습가스 압축 구동 ----------------
   - equip_id: T-1401
@@ -311,32 +315,32 @@ equipment:
     # operating: { speed_rpm: 8400 }
     tags:
       - { tag_id: VX-T-1401, signal: shaft_vibration, unit: um p-p, description: "구동측 X축 상대 진동",
-          limits: { trip_lo: 23.967, alarm_lo: 24.9787, warn_lo: 25.9904, warn_hi: 30.0374, alarm_hi: 31.0491, trip_hi: 32.0608 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 53, alarm_hi: 99.4, trip_hi: 146 }, limit_basis: "ISO 7919-3 영역 경계 A/B·B/C·C/D = 4800·9000·13200/√N µm p-p, N 8198 rpm (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r051, control: { mean: 28.0139, sigma: 0.6744915324986173 } }
       - { tag_id: VY-T-1401, signal: shaft_vibration, unit: um p-p, description: "구동측 Y축 상대 진동",
-          limits: { trip_lo: 20.9269, alarm_lo: 21.9026, warn_lo: 22.8782, warn_hi: 26.781, alarm_hi: 27.7566, trip_hi: 28.7323 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 53, alarm_hi: 99.4, trip_hi: 146 }, limit_basis: "ISO 7919-3 영역 경계 A/B·B/C·C/D = 4800·9000·13200/√N µm p-p, N 8198 rpm (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r052, control: { mean: 24.8296, sigma: 0.6504509132764539 } }
       - { tag_id: TI-T-1401, signal: bearing_temp, unit: degC, description: "구동측 저널 베어링 온도",
-          limits: { trip_lo: 77.754, alarm_lo: 78.0674, warn_lo: 78.3808, warn_hi: 79.6345, alarm_hi: 79.9479, trip_hi: 80.2613 }, limit_basis: "Nelson 관리한계 μ±3σ (μ 는 baselines.json, σ 는 계산 태그 정상 생성값 — 자료 σ 0.182339, 2026-11-19) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 85, alarm_hi: 95, trip_hi: 105 }, limit_basis: "터보기계 베어링 85/95/105 ℃(다른 공장 압축기에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r053,
           derive: { formula: power, out_offset: 273.15, terms: [{ tag: LOT-T-1401, offset: 273.15, exp: 1 }], noise_sigma: 0.0547017 }, control: { mean: 79.00765, sigma: 0.208942 } }
       - { tag_id: SI-T-1401, signal: speed, unit: rpm, description: "축 회전속도",
-          limits: { trip_lo: 8175.1491, alarm_lo: 8180.8213, warn_lo: 8186.4934, warn_hi: 8209.1818, alarm_hi: 8214.8539, trip_hi: 8220.5261 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { alarm_lo: 7440, warn_lo: 7750, warn_hi: 8690, alarm_hi: 9030, trip_hi: 9390 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.06μ·alarm_hi 1.102μ·trip_hi 1.145μ·warn_lo 0.945μ·alarm_lo 0.907μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r054, control: { mean: 8197.837599999999, sigma: 3.781409943188472 } }
       - { tag_id: LOP-T-1401, signal: oil_pressure, unit: bar(g), description: "윤활유 공급 압력",
-          limits: { trip_lo: 2.0943, alarm_lo: 2.1002, warn_lo: 2.1061, warn_hi: 2.1297, alarm_hi: 2.1356, trip_hi: 2.1415 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 1.04, alarm_lo: 1.26, warn_lo: 1.57 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.741μ·alarm_lo 0.593μ·trip_lo 0.493μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r055, control: { mean: 2.1179, sigma: 0.003935419685213443 } }
       - { tag_id: LOT-T-1401, signal: oil_temp, unit: degC, description: "윤활유 공급 온도",
-          limits: { trip_lo: 42.9047, alarm_lo: 43.18, warn_lo: 43.4553, warn_hi: 44.5566, alarm_hi: 44.8319, trip_hi: 45.1072 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 55.8, alarm_hi: 62.9, trip_hi: 73 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.267μ·alarm_hi 1.429μ·trip_hi 1.659μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r056, control: { mean: 44.00595, sigma: 0.18353894833065 } }
       - { tag_id: SP-T-1401, signal: steam_pressure, unit: bar(g), description: "입구 증기 압력",
-          limits: { trip_lo: 39.7492, alarm_lo: 39.8105, warn_lo: 39.8719, warn_hi: 40.1171, alarm_hi: 40.1785, trip_hi: 40.2398 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 32, alarm_lo: 34, warn_lo: 36, warn_hi: 44, alarm_hi: 46, trip_hi: 48 }, limit_basis: "설계값(μ) 비율: warn_hi 1.1μ·alarm_hi 1.15μ·trip_hi 1.2μ·warn_lo 0.9μ·alarm_lo 0.85μ·trip_lo 0.8μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r057, control: { mean: 39.9945, sigma: 0.04087842781503296 } }
       # 합성 추가 (2026-11-19): 자료에 없는 계산 태그. 값 = 그 시각 SP-T-1401 의 포화 온도(IAPWS-IF97) + 과열도 150 ℃ 가정
       # + 자체 잡음 σ 0.17 ℃(RFCC 온도 태그 σ 중앙값 0.18 에 가깝게). μ 는 SP μ(39.9945 bar(g))로 계산한 값,
       # σ 는 정상 생성값에서 잰 값. 한계값은 다른 RFCC 태그와 같이 μ±3σ.
       - { tag_id: STT-T-1401, signal: steam_temp, unit: degC, description: "입구 증기 온도 (synthetic)",
-          limits: { trip_lo: 400.7777, alarm_lo: 401.0426, warn_lo: 401.3075, warn_hi: 402.3671, alarm_hi: 402.632, trip_hi: 402.8969 }, limit_basis: "synthetic: μ±3σ (μ = 포화 온도 + 과열도 150 ℃ 가정) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 321, alarm_lo: 342, warn_lo: 362, warn_hi: 442, alarm_hi: 462, trip_hi: 482 }, limit_basis: "설계값(μ) 비율: warn_hi 1.1μ·alarm_hi 1.15μ·trip_hi 1.2μ·warn_lo 0.9μ·alarm_lo 0.85μ·trip_lo 0.8μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r082,
           derive: { formula: steam_saturation_temp, inputs: [SP-T-1401], atm: 1.01325, offset: 150, noise_sigma: 0.17 },
           control: { mean: 401.8373, sigma: 0.1766 } }
@@ -347,22 +351,22 @@ equipment:
     unit_id: UNIT-RFCC-07
     tags:
       - { tag_id: VI-P-1402A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
-          limits: { trip_lo: 0.8423, alarm_lo: 0.9114, warn_lo: 0.9806, warn_hi: 1.2573, alarm_hi: 1.3265, trip_hi: 1.3956 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 }, limit_basis: "펌프 진동 3.0/4.5/7.1 mm/s(API 610 선호운전영역·ISO 20816-3 경계, 다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r058, control: { mean: 1.11895, sigma: 0.04611556504987875 } }
       - { tag_id: TI-P-1402A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
-          limits: { trip_lo: 60.9063, alarm_lo: 61.1773, warn_lo: 61.4482, warn_hi: 62.532, alarm_hi: 62.8029, trip_hi: 63.0739 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, limit_basis: "펌프 베어링 80/90/100 ℃(다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r059, control: { mean: 61.9901, sigma: 0.1806271196048046 } }
       - { tag_id: PS-P-1402A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
-          limits: { trip_lo: 7.1514, alarm_lo: 7.1635, warn_lo: 7.1757, warn_hi: 7.2243, alarm_hi: 7.2365, trip_hi: 7.2486 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 3, alarm_lo: 3.76, warn_lo: 4.69 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.652μ·alarm_lo 0.522μ·trip_lo 0.417μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r060, control: { mean: 7.2, sigma: 0.008105117860202756 } }
       - { tag_id: PD-P-1402A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
-          limits: { trip_lo: 16.8568, alarm_lo: 16.896, warn_lo: 16.9353, warn_hi: 17.0921, alarm_hi: 17.1314, trip_hi: 17.1706 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { alarm_lo: 9.92, warn_lo: 12.3, warn_hi: 21.5, alarm_hi: 22.6, trip_hi: 23.6 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.264μ·alarm_hi 1.328μ·trip_hi 1.39μ·warn_lo 0.724μ·alarm_lo 0.583μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r061, control: { mean: 17.0137, sigma: 0.026148703161653422 } }
       - { tag_id: FI-P-1402A, signal: flow, unit: m3/h, description: "액체 체적 유량",
-          limits: { trip_lo: 92.9321, alarm_lo: 93.3958, warn_lo: 93.8595, warn_hi: 95.7142, alarm_hi: 96.1779, trip_hi: 96.6416 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 49.9, alarm_lo: 62.5, warn_lo: 72.6 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.766μ·alarm_lo 0.659μ·trip_lo 0.526μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r062, control: { mean: 94.78685, sigma: 0.30912143049759894 } }
       - { tag_id: II-P-1402A, signal: current, unit: A, description: "구동 모터 전류",
-          limits: { trip_lo: 50.152, alarm_lo: 50.5906, warn_lo: 51.0293, warn_hi: 52.7837, alarm_hi: 53.2224, trip_hi: 53.661 }, limit_basis: "Nelson 관리한계 μ±3σ (μ 는 baselines.json, σ 는 계산 태그 정상 생성값 — 자료 σ 0.127529, 2026-11-19) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 66.4, alarm_hi: 70.5, trip_hi: 76 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.28μ·alarm_hi 1.359μ·trip_hi 1.464μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r063,
           derive: { formula: power, terms: [{ tag: FI-P-1402A, exp: 1 }, { tag: PD-P-1402A, minus: PS-P-1402A, exp: 1 }], noise_sigma: 0.0382586 }, control: { mean: 51.906499999999994, sigma: 0.292414 } }
   - equip_id: P-1403A
@@ -371,22 +375,22 @@ equipment:
     unit_id: UNIT-RFCC-07
     tags:
       - { tag_id: VI-P-1403A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
-          limits: { trip_lo: 0.6329, alarm_lo: 0.7199, warn_lo: 0.8069, warn_hi: 1.1547, alarm_hi: 1.2417, trip_hi: 1.3287 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 }, limit_basis: "펌프 진동 3.0/4.5/7.1 mm/s(API 610 선호운전영역·ISO 20816-3 경계, 다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r064, control: { mean: 0.9808, sigma: 0.057983056131660424 } }
       - { tag_id: TI-P-1403A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
-          limits: { trip_lo: 56.9009, alarm_lo: 57.1766, warn_lo: 57.4523, warn_hi: 58.5552, alarm_hi: 58.8309, trip_hi: 59.1066 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, limit_basis: "펌프 베어링 80/90/100 ℃(다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r065, control: { mean: 58.00375, sigma: 0.18380253177852163 } }
       - { tag_id: PS-P-1403A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
-          limits: { trip_lo: 9.9555, alarm_lo: 9.9666, warn_lo: 9.9776, warn_hi: 10.022, alarm_hi: 10.033, trip_hi: 10.0441 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 4.17, alarm_lo: 5.22, warn_lo: 6.52 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.652μ·alarm_lo 0.522μ·trip_lo 0.417μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r066, control: { mean: 9.9998, sigma: 0.00738380758112382 } }
       - { tag_id: PD-P-1403A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
-          limits: { trip_lo: 17.8445, alarm_lo: 17.8837, warn_lo: 17.9229, warn_hi: 18.0798, alarm_hi: 18.119, trip_hi: 18.1582 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { alarm_lo: 10.5, warn_lo: 13, warn_hi: 22.8, alarm_hi: 23.9, trip_hi: 25 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.264μ·alarm_hi 1.328μ·trip_hi 1.39μ·warn_lo 0.724μ·alarm_lo 0.583μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r067, control: { mean: 18.001350000000002, sigma: 0.026147576084754477 } }
       - { tag_id: FI-P-1403A, signal: flow, unit: m3/h, description: "액체 체적 유량",
-          limits: { trip_lo: 80.7728, alarm_lo: 81.0685, warn_lo: 81.3642, warn_hi: 82.547, alarm_hi: 82.8427, trip_hi: 83.1384 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 43.1, alarm_lo: 54, warn_lo: 62.8 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.766μ·alarm_lo 0.659μ·trip_lo 0.526μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r068, control: { mean: 81.9556, sigma: 0.19713943810174883 } }
       - { tag_id: II-P-1403A, signal: current, unit: A, description: "구동 모터 전류",
-          limits: { trip_lo: 47.354, alarm_lo: 47.7578, warn_lo: 48.1616, warn_hi: 49.7767, alarm_hi: 50.1805, trip_hi: 50.5843 }, limit_basis: "Nelson 관리한계 μ±3σ (μ 는 baselines.json, σ 는 계산 태그 정상 생성값 — 자료 σ 0.0883864, 2026-11-19) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 62.7, alarm_hi: 66.5, trip_hi: 71.7 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.28μ·alarm_hi 1.359μ·trip_hi 1.464μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r069,
           derive: { formula: power, terms: [{ tag: FI-P-1403A, exp: 1 }, { tag: PD-P-1403A, minus: PS-P-1403A, exp: 1 }], noise_sigma: 0.0265159 }, control: { mean: 48.96915, sigma: 0.269192 } }
   # ---------------- UNIT-RFCC-08 LPG·가솔린 처리 ----------------
@@ -396,22 +400,22 @@ equipment:
     unit_id: UNIT-RFCC-08
     tags:
       - { tag_id: VI-P-1501A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
-          limits: { trip_lo: 0.6932, alarm_lo: 0.789, warn_lo: 0.8848, warn_hi: 1.2678, alarm_hi: 1.3636, trip_hi: 1.4594 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 }, limit_basis: "펌프 진동 3.0/4.5/7.1 mm/s(API 610 선호운전영역·ISO 20816-3 경계, 다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r070, control: { mean: 1.0763, sigma: 0.06384438819843212 } }
       - { tag_id: TI-P-1501A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
-          limits: { trip_lo: 52.9688, alarm_lo: 53.2286, warn_lo: 53.4884, warn_hi: 54.5276, alarm_hi: 54.7874, trip_hi: 55.0472 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, limit_basis: "펌프 베어링 80/90/100 ℃(다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r071, control: { mean: 54.008, sigma: 0.17319828710318821 } }
       - { tag_id: PS-P-1501A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
-          limits: { trip_lo: 11.9517, alarm_lo: 11.9637, warn_lo: 11.9758, warn_hi: 12.024, alarm_hi: 12.0361, trip_hi: 12.0481 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 5, alarm_lo: 6.26, warn_lo: 7.82 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.652μ·alarm_lo 0.522μ·trip_lo 0.417μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r072, control: { mean: 11.9999, sigma: 0.008034290706697282 } }
       - { tag_id: PD-P-1501A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
-          limits: { trip_lo: 19.8475, alarm_lo: 19.8864, warn_lo: 19.9253, warn_hi: 20.0808, alarm_hi: 20.1197, trip_hi: 20.1586 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { alarm_lo: 11.7, warn_lo: 14.5, warn_hi: 25.3, alarm_hi: 26.6, trip_hi: 27.8 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.264μ·alarm_hi 1.328μ·trip_hi 1.39μ·warn_lo 0.724μ·alarm_lo 0.583μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r073, control: { mean: 20.00305, sigma: 0.025932541742893514 } }
       - { tag_id: FI-P-1501A, signal: flow, unit: m3/h, description: "액체 체적 유량",
-          limits: { trip_lo: 63.7608, alarm_lo: 64.0624, warn_lo: 64.3641, warn_hi: 65.5705, alarm_hi: 65.8722, trip_hi: 66.1738 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 34.2, alarm_lo: 42.8, warn_lo: 49.8 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.766μ·alarm_lo 0.659μ·trip_lo 0.526μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r074, control: { mean: 64.9673, sigma: 0.2010782137765018 } }
       - { tag_id: II-P-1501A, signal: current, unit: A, description: "구동 모터 전류",
-          limits: { trip_lo: 42.3807, alarm_lo: 42.7806, warn_lo: 43.1805, warn_hi: 44.7799, alarm_hi: 45.1798, trip_hi: 45.5797 }, limit_basis: "Nelson 관리한계 μ±3σ (μ 는 baselines.json, σ 는 계산 태그 정상 생성값 — 자료 σ 0.106414, 2026-11-19) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 56.3, alarm_hi: 59.8, trip_hi: 64.4 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.28μ·alarm_hi 1.359μ·trip_hi 1.464μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r075,
           derive: { formula: power, terms: [{ tag: FI-P-1501A, exp: 1 }, { tag: PD-P-1501A, minus: PS-P-1501A, exp: 1 }], noise_sigma: 0.0319241 }, control: { mean: 43.980199999999996, sigma: 0.266583 } }
   - equip_id: P-1502A
@@ -420,21 +424,21 @@ equipment:
     unit_id: UNIT-RFCC-08
     tags:
       - { tag_id: VI-P-1502A, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
-          limits: { trip_lo: 0.8363, alarm_lo: 0.9245, warn_lo: 1.0128, warn_hi: 1.3659, alarm_hi: 1.4542, trip_hi: 1.5424 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 }, limit_basis: "펌프 진동 3.0/4.5/7.1 mm/s(API 610 선호운전영역·ISO 20816-3 경계, 다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r076, control: { mean: 1.1893500000000001, sigma: 0.0588449521542525 } }
       - { tag_id: TI-P-1502A, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
-          limits: { trip_lo: 54.8883, alarm_lo: 55.1647, warn_lo: 55.441, warn_hi: 56.5466, alarm_hi: 56.8229, trip_hi: 57.0993 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, limit_basis: "펌프 베어링 80/90/100 ℃(다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 10, decimals: 4, seed_key: r077, control: { mean: 55.99379999999999, sigma: 0.18425127170754815 } }
       - { tag_id: PS-P-1502A, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
-          limits: { trip_lo: 2.0508, alarm_lo: 2.0634, warn_lo: 2.0759, warn_hi: 2.1259, alarm_hi: 2.1384, trip_hi: 2.151 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 0.876, alarm_lo: 1.1, warn_lo: 1.37 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.652μ·alarm_lo 0.522μ·trip_lo 0.417μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r078, control: { mean: 2.1009, sigma: 0.008343288076222678 } }
       - { tag_id: PD-P-1502A, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
-          limits: { trip_lo: 8.3571, alarm_lo: 8.3938, warn_lo: 8.4305, warn_hi: 8.5775, alarm_hi: 8.6142, trip_hi: 8.6509 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { alarm_lo: 4.96, warn_lo: 6.16, warn_hi: 10.7, alarm_hi: 11.3, trip_hi: 11.8 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.264μ·alarm_hi 1.328μ·trip_hi 1.39μ·warn_lo 0.724μ·alarm_lo 0.583μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r079, control: { mean: 8.504, sigma: 0.024483926698744753 } }
       - { tag_id: FI-P-1502A, signal: flow, unit: m3/h, description: "액체 체적 유량",
-          limits: { trip_lo: 118.068, alarm_lo: 118.5051, warn_lo: 118.9421, warn_hi: 120.6904, alarm_hi: 121.1274, trip_hi: 121.5645 }, limit_basis: "Nelson 관리한계 μ±3σ (baselines.json) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { trip_lo: 63, alarm_lo: 79, warn_lo: 91.8 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.766μ·alarm_lo 0.659μ·trip_lo 0.526μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r080, control: { mean: 119.81625, sigma: 0.29137631876174724 } }
       - { tag_id: II-P-1502A, signal: current, unit: A, description: "구동 모터 전류",
-          limits: { trip_lo: 57.7048, alarm_lo: 58.2608, warn_lo: 58.8168, warn_hi: 61.0407, alarm_hi: 61.5967, trip_hi: 62.1527 }, limit_basis: "Nelson 관리한계 μ±3σ (μ 는 baselines.json, σ 는 계산 태그 정상 생성값 — 자료 σ 0.108421, 2026-11-19) · 알람 μ±4.5σ·정지 μ±6σ (synthetic, 2026-11-19)",
+          limits: { warn_hi: 76.7, alarm_hi: 81.4, trip_hi: 87.7 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.28μ·alarm_hi 1.359μ·trip_hi 1.464μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r081,
           derive: { formula: power, terms: [{ tag: FI-P-1502A, exp: 1 }, { tag: PD-P-1502A, minus: PS-P-1502A, exp: 1 }], noise_sigma: 0.0325262 }, control: { mean: 59.92875, sigma: 0.370659 } }
