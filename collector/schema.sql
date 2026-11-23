@@ -61,9 +61,10 @@ CREATE TABLE IF NOT EXISTS job_state (name TEXT PRIMARY KEY, last_bucket_end TEX
 -- 이상 사건 장부 = 정답지. 주입한 고장 모드(config/fault_modes.yaml)만 적는다 (정상 운전에는 사건이 없다).
 -- kind·cause·action 은 고장 모드의 정답 분류, expect 는 평가용 기대값 JSON(없으면 NULL),
 -- plan 은 주입 당시의 단계({id,name,at_sec,nelson_quiet})·태그별 효과 시작({equip_id,tag_id,stage,start_sec})·unobserved(태그가 없어 못 만든 신호) JSON.
--- stop_requested_at 은 멈춤 시각(멈추지 않았으면 NULL).
+-- stop_requested_at 은 멈춤 시각(멈추지 않았으면 NULL), repair_requested_at 은 손상 수리 시각(안 고쳤으면 NULL).
+-- repair_requested_at 은 v5 에 나중에 더한 열이라 기존 파일에는 Storage 가 ALTER TABLE 로 붙인다 (데이터 보존).
 CREATE TABLE IF NOT EXISTS anomaly_event (
     event_id TEXT PRIMARY KEY, equip_id TEXT NOT NULL, mode TEXT NOT NULL,
     kind TEXT NOT NULL, cause TEXT NOT NULL, action TEXT NOT NULL, expect TEXT, plan TEXT NOT NULL,
-    start_at TEXT NOT NULL, stop_requested_at TEXT
+    start_at TEXT NOT NULL, stop_requested_at TEXT, repair_requested_at TEXT
 );

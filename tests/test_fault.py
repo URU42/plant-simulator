@@ -202,3 +202,32 @@ def test_downstream_effect_validation():
         FaultMode.model_validate({"id": "X", "name": "x", "equip_types": ["PM"], "label": {"kind": "k", "cause": "c", "action": "a"},
                                   "stages": [{"id": "S1", "name": "s", "at_sec": 0, "propagate": {"process": [
                                       {"signal": "flow", "shape": "step", "z": -1}]}}]})
+
+
+def test_damage_stage_holds_after_stop_until_repair():
+    """손상 단계의 ramp 는 멈춘 시각의 크기로 남고, 수리 뒤 회복 시간 동안 0 이 된다. spike 는 남지 않는다."""
+    tp = plan_one(_mode([
+        {"id": "S1", "name": "a", "at_sec": 0, "effects": [{"signal": "flow", "shape": "ramp", "z": 2, "rise_sec": 10}]},
+        {"id": "S2", "name": "b", "at_sec": 20, "damage": True, "effects": [
+            {"signal": "flow", "shape": "ramp", "z": 4, "rise_sec": 20},
+            {"signal": "flow", "shape": "spike", "z": 9, "rise_sec": 1, "decay_sec": 100}]}]))
+    stop = 30                                                       # S2 ramp 절반(2) 에서 멈춤, S1 은 2
+    held = 2.0
+    spike = 9 * (1 - 39 / 100)                                      # 60초의 spike (시작 20 + 상승 1, 39초 가라앉음)
+    assert tag_effect(tp, stop + RECOVERY_SEC / 2, stop)[0] == pytest.approx(held + 1.0 + spike / 2)  # S1·spike 는 절반 회복, 손상은 그대로
+    assert tag_effect(tp, stop + 10_000, stop)[0] == pytest.approx(held)                     # 안 고치면 손상 ramp 만 계속 남는다
+    repair = 500
+    assert tag_effect(tp, repair + RECOVERY_SEC / 2, stop, repair=repair)[0] == pytest.approx(held / 2)
+    assert tag_effect(tp, repair + RECOVERY_SEC, stop, repair=repair)[0] == 0.0
+
+
+def test_holds_damage_only_if_damage_started_before_stop():
+    from simulator.fault import FaultEvent, holds_damage
+    m = _mode([{"id": "S1", "name": "a", "at_sec": 0, "effects": [{"signal": "flow", "shape": "ramp", "z": 2, "rise_sec": 10}]},
+               {"id": "S2", "name": "b", "at_sec": 100, "damage": True,
+                "effects": [{"signal": "flow", "shape": "ramp", "z": 4, "rise_sec": 20}]}])
+    tags = {("P-8101A", "FI-8101A"): plan_one(m)}
+    assert not holds_damage(tags, FaultEvent("e", "P-8101A", m, 1000.0))                    # 안 멈췄다
+    assert not holds_damage(tags, FaultEvent("e", "P-8101A", m, 1000.0, stop=1100.0))        # 손상 단계 시작 시각에 멈췄다
+    assert holds_damage(tags, FaultEvent("e", "P-8101A", m, 1000.0, stop=1101.0))
+    assert holds_damage(tags, FaultEvent("e", "P-8101A", m, 1000.0, stop=1011.0, speed=10))  # ×10 이면 S2 는 10초에 시작

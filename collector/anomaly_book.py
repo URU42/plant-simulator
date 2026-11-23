@@ -3,7 +3,8 @@
 고장 모드 사건은 API 로 주입한 것뿐이며 이 테이블이 정답지다. 계측 이상(켰을 때)은 생성기와 같은 일정을 다시 계산해 정답지에 함께 싣는다.
 정답지 코드(code): 1 정상(정상 운전 변화), 0 비정상(설비 고장), 2 계측 이상. 사건이 없는 구간은 정상(1)이다. 주입할 때 태그별 적용(단계·효과 시작)을
 plan JSON 으로 함께 적어, 나중에 fault_modes.yaml 이 바뀌어도 정답지는 주입 당시 그대로 남는다.
-재시작하면 테이블에서 다시 읽어 안 멈춘 사건을 이어 간다. 생성기 워커 스레드와 요청 핸들러가 함께 부르므로 자체 락으로 지킨다.
+손상 단계가 있는 고장 모드는 멈춘 뒤에도 손상 효과가 남고, repair 로 수리해야 회복한다 (정답지 damage_remains·repair_requested_at).
+재시작하면 테이블에서 다시 읽어 안 멈춘 사건과 안 고친 손상을 이어 간다. 생성기 워커 스레드와 요청 핸들러가 함께 부르므로 자체 락으로 지킨다.
 생성기가 이미 물어본 구간 끝(high-water)보다 앞선 주입·멈춤은 그 끝으로 미뤄 이미 만든 표본을 건드리지 않는다.
 """
 from __future__ import annotations
@@ -18,7 +19,8 @@ from datetime import datetime, timezone
 from collector.storage import Storage
 from common.config_models import PlantConfig
 from common.timefmt import from_db, to_db
-from simulator.fault import MAX_RECOVERY_SEC, RECOVERY_SEC, SPEEDS, FaultEvent, FaultMode, effect_start, plan
+from simulator.fault import (MAX_RECOVERY_SEC, RECOVERY_SEC, SPEEDS, FaultEvent, FaultMode, effect_start, holds_damage,
+                             plan)
 from simulator import instrument as im
 
 log = logging.getLogger("collector.anomaly_book")
@@ -51,14 +53,19 @@ class AnomalyBook:
         self.control = plant.control_by_key()
         self._lock = threading.RLock()
         self._events: dict[str, FaultEvent] = {}
+        self._tags: dict[str, dict] = {}        # event_id → 태그별 적용 (손상이 남았는지 볼 때)
         self._high = -math.inf                  # 생성기가 external 로 물어본 구간 끝의 최대 (그 앞 표본은 이미 만들었다)
         for r in storage.query_dicts("SELECT * FROM anomaly_event ORDER BY start_at"):
             mode = modes.get(r["mode"])
             if mode is None:        # 파일에서 빠진 고장 모드: 정답지에는 남고 생성에는 더 쓰지 않는다
                 log.warning("anomaly_event %s: unknown fault mode %s, not generated", r["event_id"], r["mode"])
                 continue
+            p = json.loads(r["plan"])
             self._events[r["event_id"]] = FaultEvent(r["event_id"], r["equip_id"], mode, _epoch(r["start_at"]),
-                                                     _epoch(r["stop_requested_at"]), json.loads(r["plan"]).get("speed", 1))
+                                                     _epoch(r["stop_requested_at"]), p.get("speed", 1),
+                                                     _epoch(r["repair_requested_at"]))
+            if not all("damage" in st for st in p["stages"]):
+                self._tags[r["event_id"]] = {}      # 손상 단계가 생기기 전(2026-11-23 전)에 주입한 사건: 손상이 남지 않는다
 
     def applicable(self, equip_id: str) -> list[FaultMode]:
         """그 설비에 걸 수 있는 고장 모드 (효과가 걸리는 태그가 하나라도 있는 것)."""
@@ -70,7 +77,14 @@ class AnomalyBook:
         with self._lock:
             self._high = max(self._high, end)
             return [e for e in self._events.values()
-                    if e.start < end and (e.stop is None or e.stop + MAX_RECOVERY_SEC > start)]
+                    if e.start < end and (e.stop is None or e.stop + MAX_RECOVERY_SEC > start
+                                          or (e.repair is None or e.repair + MAX_RECOVERY_SEC > start) and self._held(e))]
+
+    def _held(self, e: FaultEvent) -> bool:
+        """멈춘 사건에 수리 전까지 남는 손상 효과가 있는가 (고친 뒤에도 True)."""
+        if e.event_id not in self._tags:
+            self._tags[e.event_id] = plan(self.plant, e.mode, e.equip_id, self.control)
+        return holds_damage(self._tags[e.event_id], e)
 
     # --- 주입·멈춤 -------------------------------------------------------------
     def inject(self, equip_id: str, mode_id: str, at: float, speed: int = 1) -> FaultEvent:
@@ -91,8 +105,10 @@ class AnomalyBook:
                 raise Busy(equip_id)
             n = 1 + self.storage.query("SELECT COUNT(*) FROM anomaly_event")[0][0]
             event = FaultEvent(f"FM-{self.plant_id}-{n:04d}", equip_id, mode, at, speed=speed)
-            stages = [{"id": s.id, "name": s.name, "at_sec": s.at_sec, "nelson_quiet": s.nelson_quiet} for s in mode.stages]
-            applied = [{"equip_id": k[0], "tag_id": k[1], "stage": a.stage, "start_sec": a.start, "via": tp.via, "hop": tp.hop}
+            stages = [{"id": s.id, "name": s.name, "at_sec": s.at_sec, "nelson_quiet": s.nelson_quiet, "damage": s.damage}
+                      for s in mode.stages]
+            applied = [{"equip_id": k[0], "tag_id": k[1], "stage": a.stage, "start_sec": a.start, "via": tp.via, "hop": tp.hop,
+                        "damage": a.damage}
                        for k, tp in tags.items() for a in tp.applied]
             self.storage.execute(
                 "INSERT INTO anomaly_event (event_id, equip_id, mode, kind, cause, action, expect, plan, start_at, stop_requested_at) "
@@ -103,6 +119,7 @@ class AnomalyBook:
                              "speed": speed},
                             ensure_ascii=False), _db(at)))
             self._events[event.event_id] = event
+            self._tags[event.event_id] = tags
             return event
 
     def stop(self, equip_id: str | None, at: float) -> tuple[float, list[str]]:
@@ -116,6 +133,25 @@ class AnomalyBook:
                 self._events[event_id] = replace(self._events[event_id], stop=at)
             return at, ids
 
+    def repair(self, equip_id: str, at: float) -> tuple[float, list[str]]:
+        """그 설비의 멈췄지만 손상이 남은(안 고친) 사건을 고친다. 수리 시각은 at(이미 만든 구간 끝이나 멈춤보다 앞서면 그쪽)이며
+        (수리 시각, 고친 event_id 목록)을 돌려준다. 안 멈춘 사건은 건드리지 않는다 (먼저 멈춘다)."""
+        with self._lock:
+            at = max(at, self._high)
+            ids = [e.event_id for e in self.damaged() if e.equip_id == equip_id]
+            for event_id in ids:
+                at = max(at, self._events[event_id].stop)
+            for event_id in ids:
+                self.storage.execute("UPDATE anomaly_event SET repair_requested_at = ? WHERE event_id = ?", (_db(at), event_id))
+                self._events[event_id] = replace(self._events[event_id], repair=at)
+            return at, ids
+
+    def damaged(self) -> list[FaultEvent]:
+        """멈췄지만 손상이 남아 아직 안 고친 사건 (시작 순). 화면이 수리 버튼을 보일 때 쓴다."""
+        with self._lock:
+            return sorted((e for e in self._events.values() if e.stop is not None and e.repair is None and self._held(e)),
+                          key=lambda e: (e.start, e.event_id))
+
     def active(self) -> list[FaultEvent]:
         """안 멈춘 사건 (시작 순). 화면이 설비마다 적용/해제를 고를 때 쓴다."""
         with self._lock:
@@ -124,7 +160,7 @@ class AnomalyBook:
     # --- 정답지 ---------------------------------------------------------------
     def answer_key(self, equip_id: str | None, from_: str | None, to: str | None) -> list[dict]:
         """사건 목록(시작 순). from/to(UTC ISO 문자열)는 구간과 겹치는 사건: 시작 < to 이고 끝이 없거나 끝 ≥ from.
-        끝(end_at)은 멈춤 + 회복. 단계·태그별 효과 시작은 절대 시각으로 펼치고, 멈추기 전에 시작하지 못한 것은 뺀다.
+        끝(end_at)은 멈춤 + 회복. 손상이 남은 사건(damage_remains)은 수리 + 회복이고, 안 고쳤으면 없다(null). 단계·태그별 효과 시작은 절대 시각으로 펼치고, 멈추기 전에 시작하지 못한 것은 뺀다.
         시작 전이나 시작 시각에 멈춘 사건(표본에 나온 적 없다)은 싣지 않는다.
         계측 이상은 수집 서버에 데이터가 있는 구간(가장 이른 측정 ~ sim_now)과 겹치는 것만 싣는다."""
         where, params = ["1=1"], []
@@ -138,7 +174,7 @@ class AnomalyBook:
                                         params)
         out = []
         for r in rows:
-            start, stop = _epoch(r["start_at"]), _epoch(r["stop_requested_at"])
+            start, stop, repair = _epoch(r["start_at"]), _epoch(r["stop_requested_at"]), _epoch(r["repair_requested_at"])
             if stop is not None and stop <= start:
                 continue
             p = json.loads(r["plan"])
@@ -151,19 +187,24 @@ class AnomalyBook:
             stages = [{"id": s["id"], "name": s["name"], "start_at": _db(start + s["at_sec"] / speed), "nelson_quiet": s["nelson_quiet"]}
                       for s in p["stages"] if started(s["at_sec"])]
             tags = [{"equip_id": t["equip_id"], "tag_id": t["tag_id"], "stage": t["stage"], "start_at": _db(start + sec),
-                     "via": t.get("via"), "hop": t.get("hop")}   # 2026-11-20 전 사건은 없음(null)
+                     "via": t.get("via"), "hop": t.get("hop"), "damage": t.get("damage", False)}   # via·hop: 2026-11-20 전 사건은 null
                     for t in p["tags"]
                     for sec in [effect_start(t["start_sec"], t["start_sec"] - stage_at[t["stage"]], speed)]
                     if stop is None or start + sec < stop]
             hop = max((t["hop"] or 0 for t in tags), default=0)      # 멈추기 전에 시작한 하류 효과 중 가장 먼 단계: 회복이 (k+1)배
             end_at = None if stop is None else _db(stop + RECOVERY_SEC * (hop + 1))
+            held = stop is not None and any(t["damage"] for t in tags)
+            if held:        # 손상 효과는 수리 뒤 회복이 끝나야 사라진다
+                dhop = max(t["hop"] or 0 for t in tags if t["damage"])
+                end_at = None if repair is None else max(end_at, _db(repair + RECOVERY_SEC * (dhop + 1)))
             if from_ and end_at is not None and end_at < from_:
                 continue
             out.append({"event_id": r["event_id"], "equip_id": r["equip_id"], "mode": r["mode"],
                         "kind": r["kind"], "cause": r["cause"], "action": r["action"],
                         "expect": None if r["expect"] is None else json.loads(r["expect"]),
                         "code": p.get("code", 0), "speed": speed, "stages": stages, "response_tags": tags, "unobserved": p.get("unobserved", []),
-                        "start_at": r["start_at"], "stop_requested_at": r["stop_requested_at"], "end_at": end_at})
+                        "start_at": r["start_at"], "stop_requested_at": r["stop_requested_at"],
+                        "damage_remains": held, "repair_requested_at": r["repair_requested_at"], "end_at": end_at})
         out += self._instrument_key(equip_id, from_, to)
         return sorted(out, key=lambda e: (e["start_at"], e["event_id"]))
 
@@ -184,5 +225,6 @@ class AnomalyBook:
                         "action": action, "expect": None, "code": im.CODE, "stages": [],
                         "response_tags": [{"equip_id": ev.equip_id, "tag_id": t, "stage": None, "start_at": _db(ev.start)}
                                           for t in ev.tag_ids],
-                        "unobserved": [], "start_at": _db(ev.start), "stop_requested_at": None, "end_at": _db(ev.end)})
+                        "unobserved": [], "start_at": _db(ev.start), "stop_requested_at": None,
+                        "damage_remains": False, "repair_requested_at": None, "end_at": _db(ev.end)})
         return out

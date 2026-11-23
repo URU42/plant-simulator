@@ -1,5 +1,5 @@
 <!-- 공장 목록 아래의 고장 설정 (collector.app._snippet 이 __PAGE_DATA__ 를 채워 넣는다). 의존성 없음.
-     적용 중인지는 서버(/{공장}/anomalies/active)에서 읽으므로 다른 화면에 갔다 와도, 다른 사람이 바꿔도 맞게 보인다. -->
+     적용 중·손상 남음은 서버(/{공장}/anomalies/active·damaged)에서 읽으므로 다른 화면에 갔다 와도, 다른 사람이 바꿔도 맞게 보인다. -->
 <style>
   #fault-panel { margin-top: 28px; max-width: 960px; }
   #fault-panel h2 { font-size: 16px; margin: 0 0 8px; }
@@ -8,6 +8,8 @@
   #fault-panel select { max-width: 100%; }
   #fault-panel button { min-width: 72px; cursor: pointer; }
   #fault-panel button.stop { color: #fff; background: #c0392b; border: 1px solid #a93226; border-radius: 4px; }
+  #fault-panel button.repair { color: #fff; background: #1e7d4f; border: 1px solid #186841; border-radius: 4px; }
+  #fault-panel button[hidden] { display: none; }
   #fault-panel .muted { color: #6b6b6b; }
 </style>
 <section id="fault-panel">
@@ -19,26 +21,30 @@
       <option value="1">×1 (실제)</option><option value="3">×3</option><option value="5">×5</option><option value="10">×10</option>
     </select></label>
     <button id="fp-btn" type="button" disabled>적용</button>
+    <button id="fp-repair" type="button" class="repair" hidden>수리</button>
     <span id="fp-msg" class="muted" role="status"></span>
   </div>
   <div class="fp-row">
     <label>토큰 <input id="fp-token" type="password" autocomplete="off" placeholder="X-Ingest-Token"></label>
     <span class="muted">적용·해제에 필요합니다. 이 브라우저에만 저장합니다.</span>
   </div>
-  <p class="muted">진행 속도는 단계가 넘어가는 시각과 서서히 오르는 효과를 빠르게 합니다. 응답 지연, 순간 충격·진동의 모양, 해제 뒤 회복(60초)은 실제 시간 그대로입니다.</p>
+  <p class="muted">진행 속도는 단계가 넘어가는 시각과 서서히 오르는 효과를 빠르게 합니다. 응답 지연, 순간 충격·진동의 모양, 해제 뒤 회복(60초)은 실제 시간 그대로입니다.
+    "손상 남음"으로 표시된 고장은 해제해도 손상(진동·온도 상승 등)이 남고, 수리를 눌러야 회복합니다.</p>
   <p id="fp-active" class="muted">적용 중: 불러오는 중</p>
+  <p id="fp-damaged" class="muted">손상 남음: 불러오는 중</p>
 </section>
 <script>
 (function () {
   const DATA = __PAGE_DATA__;
   const $ = (id) => document.getElementById(id);
-  const equipSel = $("fp-equip"), modeSel = $("fp-mode"), speedSel = $("fp-speed"), btn = $("fp-btn"), msg = $("fp-msg"), tokenIn = $("fp-token");
+  const equipSel = $("fp-equip"), modeSel = $("fp-mode"), speedSel = $("fp-speed"), btn = $("fp-btn"), repairBtn = $("fp-repair"), msg = $("fp-msg"), tokenIn = $("fp-token");
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
   };
-  const modes = new Map();      // "공장|설비" → [{mode, name}]
+  const modes = new Map();      // "공장|설비" → [{mode, name, damage}]
   let active = new Map();       // "공장|설비" → {event_id, mode, start_at}
+  let damaged = new Map();      // "공장|설비" → [{event_id, mode, stop_requested_at}] 해제했지만 안 고친 손상
   const url = (key, path) => `${DATA.root}/${encodeURIComponent(key)}/${path}`;
   const getJSON = (u) => fetch(u, { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(`${u} ${r.status}`); return r.json(); });
   const kst = (iso) => iso ? new Date(iso).toLocaleString("sv-SE", { timeZone: "Asia/Seoul" }) : "—";
@@ -52,7 +58,8 @@
       const group = document.createElement("optgroup");
       group.label = `${p.name} (${p.plant_id})`;
       for (const e of equipment) {
-        const list = fms.filter((m) => m.equip_ids.includes(e.equip_id)).map((m) => ({ mode: m.mode, name: m.name }));
+        const list = fms.filter((m) => m.equip_ids.includes(e.equip_id))
+          .map((m) => ({ mode: m.mode, name: m.name, damage: m.stages.some((s) => s.damage) }));
         if (!list.length) continue;
         const v = `${p.key}|${e.equip_id}`;
         modes.set(v, list);
@@ -70,13 +77,22 @@
   }
 
   async function refresh() {
-    const next = new Map();
+    const next = new Map(), hurt = new Map();
     for (const p of DATA.plants) {
-      for (const a of await getJSON(url(p.key, "anomalies/active"))) next.set(`${p.key}|${a.equip_id}`, a);
+      const [act, dmg] = await Promise.all([getJSON(url(p.key, "anomalies/active")), getJSON(url(p.key, "anomalies/damaged"))]);
+      for (const a of act) next.set(`${p.key}|${a.equip_id}`, a);
+      for (const d of dmg) {
+        const k = `${p.key}|${d.equip_id}`;
+        hurt.set(k, [...(hurt.get(k) || []), d]);
+      }
     }
     active = next;
+    damaged = hurt;
     $("fp-active").textContent = "적용 중: " + (active.size
       ? [...active.entries()].map(([k, a]) => `${k.split("|")[1]} ${a.mode} ×${a.speed} (${kst(a.start_at)}부터)`).join(", ")
+      : "없음");
+    $("fp-damaged").textContent = "손상 남음: " + (damaged.size
+      ? [...damaged.entries()].map(([k, ds]) => ds.map((d) => `${k.split("|")[1]} ${d.mode} (${kst(d.stop_requested_at)} 해제)`).join(", ")).join(", ")
       : "없음");
   }
 
@@ -85,7 +101,7 @@
     modeSel.replaceChildren(...list.map((m) => {
       const o = document.createElement("option");
       o.value = m.mode;
-      o.textContent = `${m.name} (${m.mode})`;
+      o.textContent = `${m.name} (${m.mode})${m.damage ? " · 해제 후 손상 남음" : ""}`;
       return o;
     }));
     if (a) { modeSel.value = a.mode; speedSel.value = String(a.speed); }
@@ -94,23 +110,45 @@
     btn.disabled = !v;
     btn.textContent = a ? "해제" : "적용";
     btn.classList.toggle("stop", !!a);
+    repairBtn.hidden = !damaged.has(v);
+    repairBtn.disabled = false;
   }
 
   equipSel.addEventListener("change", () => { store.set("plant-sim:equip", equipSel.value); msg.textContent = ""; render(); });
 
+  const headers = () => {
+    const h = { "Content-Type": "application/json" };
+    if (tokenIn.value) h["X-Ingest-Token"] = tokenIn.value;
+    return h;
+  };
+  const failed = (r, body) => `실패 ${r.status}: ${typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail)}`;
+
+  repairBtn.addEventListener("click", async () => {
+    const [key, equip] = equipSel.value.split("|");
+    repairBtn.disabled = true;
+    msg.textContent = "수리하는 중…";
+    try {
+      const r = await fetch(url(key, `anomalies/${encodeURIComponent(equip)}/repair`), { method: "POST", headers: headers() });
+      const body = await r.json().catch(() => ({}));
+      msg.textContent = r.ok ? `수리했습니다 (${body.repaired.join(", ")}, ${kst(body.repair_requested_at)}부터 회복)` : failed(r, body);
+    } catch (e) {
+      msg.textContent = "실패: " + e;
+    }
+    await refresh().catch(() => {});
+    render();
+  });
+
   btn.addEventListener("click", async () => {
-    const [key, equip] = equipSel.value.split("|"), a = active.get(equipSel.value);
-    const headers = { "Content-Type": "application/json" };
-    if (tokenIn.value) headers["X-Ingest-Token"] = tokenIn.value;
+    const [key, equip] = equipSel.value.split("|"), a = active.get(equipSel.value), h = headers();
     btn.disabled = true;
     msg.textContent = a ? "해제하는 중…" : "적용하는 중…";
     try {
       const r = a
-        ? await fetch(url(key, `anomalies/${encodeURIComponent(equip)}/stop`), { method: "POST", headers })
-        : await fetch(url(key, "anomalies"), { method: "POST", headers, body: JSON.stringify({ equip_id: equip, mode: modeSel.value, speed: Number(speedSel.value) }) });
+        ? await fetch(url(key, `anomalies/${encodeURIComponent(equip)}/stop`), { method: "POST", headers: h })
+        : await fetch(url(key, "anomalies"), { method: "POST", headers: h, body: JSON.stringify({ equip_id: equip, mode: modeSel.value, speed: Number(speedSel.value) }) });
       const body = await r.json().catch(() => ({}));
       if (r.ok) msg.textContent = a ? `해제했습니다 (${kst(body.stop_requested_at)})` : `적용했습니다 (${body.event_id} ×${body.speed}, ${kst(body.start_at)}부터)`;
-      else msg.textContent = `실패 ${r.status}: ${typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail)}`;
+      else msg.textContent = failed(r, body);
     } catch (e) {
       msg.textContent = "실패: " + e;
     }

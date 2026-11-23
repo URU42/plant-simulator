@@ -135,3 +135,40 @@ def test_speed_is_stored_and_scales_answer_key(book, tmp_path):
     assert AnomalyBook(st, plant, modes).active()[0].speed == 10
     with pytest.raises(NotApplicable):
         b.inject("P-3101", "PM-SUCTION-LOSS", at=t0, speed=7)
+
+
+def test_repair_clears_damage_left_after_stop(book):
+    """기어박스 윤활 불량: S2(치면 마모, 900초) 뒤에 멈추면 손상이 남아 수리 전까지 생성에 쓰이고, 고치면 회복 뒤 빠진다."""
+    b, st, plant, modes = book
+    e = b.inject("GB-3101", "GB-LUBE-WEAR", at=0.0)
+    assert b.repair("GB-3101", at=10.0)[1] == []                        # 안 멈춘 사건은 고치지 않는다
+    b.stop("GB-3101", at=1200.0)                                        # 베어링 온도(S2 + 120초)까지 시작한 뒤
+    assert [x.event_id for x in b.damaged()] == [e.event_id]
+    assert [x.event_id for x in b.external(50_000, 50_010)] == [e.event_id]     # 멈춘 뒤 오래 지나도 손상은 남는다 (high-water 50 010)
+    row = b.answer_key(None, None, None)[0]
+    assert row["damage_remains"] and row["repair_requested_at"] is None and row["end_at"] is None
+    assert {t["tag_id"] for t in row["response_tags"] if t["damage"]} >= {"VI-I-GB3101", "TI-B-GB3101"}
+    assert AnomalyBook(st, plant, modes).damaged()[0].event_id == e.event_id     # 다시 열어도 남는다
+    at, ids = b.repair("GB-3101", at=60_000.0)
+    assert (at, ids) == (60_000.0, [e.event_id]) and b.damaged() == [] and b.repair("GB-3101", at=60_100.0)[1] == []
+    row = b.answer_key(None, None, None)[0]
+    assert row["repair_requested_at"] == _utc(60_000.0) and row["end_at"] == _utc(60_000.0 + RECOVERY_SEC)  # 손상은 기어박스·피구동 압축기(hop 0)
+    assert b.external(60_000.0 + MAX_RECOVERY_SEC, 99_999) == []
+    assert AnomalyBook(st, plant, modes).external(60_000.0 + MAX_RECOVERY_SEC, 99_999) == []
+
+
+def test_stop_before_damage_stage_leaves_nothing(book):
+    b = book[0]
+    b.inject("GB-3101", "GB-LUBE-WEAR", at=0.0)
+    b.stop("GB-3101", at=500.0)                                         # S2 전
+    row = b.answer_key(None, None, None)[0]
+    assert b.damaged() == [] and not row["damage_remains"] and row["end_at"] == _utc(500.0 + RECOVERY_SEC)
+
+
+def test_legacy_event_without_damage_flags_holds_no_damage(book):
+    """손상 단계가 생기기 전에 주입한 사건(plan 에 damage 없음)은 지금 고장 모드에 손상 단계가 있어도 손상이 남지 않는다."""
+    b, st, plant, modes = book
+    e = b.inject("GB-3101", "GB-LUBE-WEAR", at=0.0)
+    b.stop("GB-3101", at=1000.0)
+    st.execute("UPDATE anomaly_event SET plan = json_remove(json_remove(plan, '$.stages[0].damage'), '$.stages[1].damage')")
+    assert AnomalyBook(st, plant, modes).damaged() == [] and e.event_id
