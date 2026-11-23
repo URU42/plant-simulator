@@ -136,13 +136,15 @@ fault_modes:
           - { signal: vibration, shape: ramp, to_limit: warn_hi, margin: 0.1, z: 6, rise_sec: 300 }
           - { signal: flow, shape: ramp, to_limit: warn_lo, margin: 0.05, z: -6, rise_sec: 300 }
           - { signal: discharge_pressure, shape: ramp, z: -8, rise_sec: 300 }
+          - { signal: oil_pressure, shape: ramp, z: -6, rise_sec: 300 }       # 윤활유 펌프(P-2501)의 송출 = 윤활유 압력 (경고 한계 없음)
         # 공정 흐름 하류 (2026-11-20, synthetic). 1단계 크기·지연이며 2단계는 크기 ×0.7, lag·rise ×2, 회복 시간도 단계만큼 늘어난다
         propagate:
           process:                                  # 송출량 감소 → 하류 처리량 감소 (전류는 계산 태그라 유량을 따라 움직인다)
             - { signal: flow, shape: ramp, z: -1.0, lag_sec: 60, rise_sec: 300 }
-          utility:                                  # 윤활유 펌프(HOU P-2501) → 압축기 베어링 온도. 정지(trip)는 모의하지 않아 거기서 멈춘다
-            - { signal: oil_pressure, shape: ramp, z: -2.0, lag_sec: 10, rise_sec: 120 }
-            - { signal: bearing_temp, shape: ramp, z: 2.0, lag_sec: 60, rise_sec: 600 }
+          # 윤활유 펌프(HOU P-2501) → 압축기 C-2301 베어링 온도. 윤활유 상실은 압축기 보호 항목이라 한계까지 올린다(사용자 확정 2026-11-23,
+          # 수치 synthetic). 펌프 단계를 따라 경고 → 경보 → 정지 한계. 압축기 정지(trip) 연동은 모의하지 않는다
+          utility:
+            - { signal: bearing_temp, shape: ramp, to_limit: warn_hi, margin: 0.1, z: 2.0, lag_sec: 60, rise_sec: 600 }
       - &pm_s3
         id: S3
         name: 이상 심화
@@ -152,6 +154,10 @@ fault_modes:
           - { signal: vibration, shape: ramp, to_limit: alarm_hi, margin: 0.05, z: 6, rise_sec: 600 }
           - { signal: flow, shape: ramp, to_limit: alarm_lo, margin: 0.05, z: -6, rise_sec: 600 }
           - { signal: bearing_temp, shape: ramp, z: 10, lag_sec: 120, rise_sec: 900 }
+          - { signal: oil_pressure, shape: ramp, to_limit: alarm_lo, margin: 0.05, z: -6, rise_sec: 600 }
+        propagate:
+          utility:
+            - { signal: bearing_temp, shape: ramp, to_limit: alarm_hi, margin: 0.05, z: 4.0, lag_sec: 60, rise_sec: 600 }
       - &pm_s4
         id: S4
         name: 정지 한계 도달 — 심한 캐비테이션
@@ -159,6 +165,10 @@ fault_modes:
         effects:                                    # 정지 한계가 있는 태그만 (없으면 건너뛴다)
           - { signal: vibration, shape: ramp, to_limit: trip_hi, margin: 0.05, rise_sec: 300 }
           - { signal: flow, shape: ramp, to_limit: trip_lo, margin: 0.05, rise_sec: 300 }
+          - { signal: oil_pressure, shape: ramp, to_limit: trip_lo, margin: 0.05, rise_sec: 300 }
+        propagate:
+          utility:
+            - { signal: bearing_temp, shape: ramp, to_limit: trip_hi, margin: 0.05, z: 4.0, lag_sec: 60, rise_sec: 300 }
     expect:
       stages:
         S1: { setpoint: warn_lo, nelson: [1, 2], ml_plant: high }
@@ -167,6 +177,7 @@ fault_modes:
         S4: { setpoint: trip, nelson: [1, 2], ml_plant: high }
       alarms:
         - { equip: self, count: 1, opens_in: S1, upgrades_in: S3, trips_in: S4 }
+        - { equip: utility, only: [P-2501], count: 1, opens_in: S2, upgrades_in: S3, trips_in: S4, related_to: self }   # 윤활유 → C-2301 베어링 온도
 
   # 흡입 악화에 유체 온도 상승이 겹친 경우 (2026-11-23). PM-SUCTION-LOSS 와 같은 단계에 S1 에서 유체 온도를 +15 ℃ 올린다(synthetic,
   # 세 펌프 모두 경고 한계 아래). 교호작용으로 진동·유량 효과가 ×1.45 까지 커진다. 같은 펌프의 PM-SUCTION-LOSS 와 비교하는 용도.

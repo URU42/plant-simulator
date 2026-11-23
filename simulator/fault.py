@@ -61,13 +61,16 @@ class Effect(StrictModel):
 class Propagation(StrictModel):
     driven: list[Effect] = []           # 축으로 이어진 아래쪽 설비(driven_by 사슬)에 주는 효과. speed 는 생성기가 구동기 값을 그대로 넘긴다
     process: list[Effect] = []          # 공정 흐름으로 닿은 하류 설비 (1단계 기준. 단계마다 줄인다)
-    utility: list[Effect] = []          # 보조 계통 간선으로 바로 닿은 설비 (윤활유·보충 수소). 거기서 멈춘다
+    utility: list[Effect] = []          # 보조 계통 간선으로 바로 닿은 설비 (윤활유·보충 수소). 거기서 멈춘다. to_limit 가능
 
     @model_validator(mode="after")
     def _downstream(self) -> "Propagation":
         for e in self.process + self.utility:
-            if e.z is None or e.to_limit is not None or e.shape not in ("ramp", "wobble"):
-                raise ValueError("process/utility effects need z (no to_limit) and shape ramp or wobble")
+            if e.z is None or e.shape not in ("ramp", "wobble"):
+                raise ValueError("process/utility effects need z and shape ramp or wobble")
+        # 공정 하류는 완만한 감쇠(σ 배수)만, 보조 계통은 한계 목표도 허용 (윤활유 상실 → 압축기 베어링, 사용자 확정 2026-11-23)
+        if any(e.to_limit is not None for e in self.process):
+            raise ValueError("process effects cannot use to_limit")
         return self
 
 
