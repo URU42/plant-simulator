@@ -108,15 +108,16 @@ class AnomalyBook:
             stages = [{"id": s.id, "name": s.name, "at_sec": s.at_sec, "nelson_quiet": s.nelson_quiet, "damage": s.damage}
                       for s in mode.stages]
             applied = [{"equip_id": k[0], "tag_id": k[1], "stage": a.stage, "start_sec": a.start, "via": tp.via, "hop": tp.hop,
-                        "damage": a.damage}
+                        "damage": a.damage, "boost_by": tp.boost and tp.boost.by[1]}
                        for k, tp in tags.items() for a in tp.applied]
+            boost = mode.boost and mode.boost.model_dump()
             self.storage.execute(
                 "INSERT INTO anomaly_event (event_id, equip_id, mode, kind, cause, action, expect, plan, start_at, stop_requested_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
                 (event.event_id, equip_id, mode.id, mode.label.kind, mode.label.cause, mode.label.action,
                  None if mode.expect is None else json.dumps(mode.expect, ensure_ascii=False),
                  json.dumps({"stages": stages, "tags": applied, "unobserved": mode.unobserved, "code": mode.label.code,
-                             "speed": speed},
+                             "speed": speed, "boost": boost},
                             ensure_ascii=False), _db(at)))
             self._events[event.event_id] = event
             self._tags[event.event_id] = tags
@@ -187,7 +188,8 @@ class AnomalyBook:
             stages = [{"id": s["id"], "name": s["name"], "start_at": _db(start + s["at_sec"] / speed), "nelson_quiet": s["nelson_quiet"]}
                       for s in p["stages"] if started(s["at_sec"])]
             tags = [{"equip_id": t["equip_id"], "tag_id": t["tag_id"], "stage": t["stage"], "start_at": _db(start + sec),
-                     "via": t.get("via"), "hop": t.get("hop"), "damage": t.get("damage", False)}   # via·hop: 2026-11-20 전 사건은 null
+                     "via": t.get("via"), "hop": t.get("hop"), "damage": t.get("damage", False),   # via·hop: 2026-11-20 전 사건은 null
+                     "boost_by": t.get("boost_by")}             # 교호작용으로 키운 효과면 그 by 태그 (2026-11-23)
                     for t in p["tags"]
                     for sec in [effect_start(t["start_sec"], t["start_sec"] - stage_at[t["stage"]], speed)]
                     if stop is None or start + sec < stop]
@@ -202,7 +204,7 @@ class AnomalyBook:
             out.append({"event_id": r["event_id"], "equip_id": r["equip_id"], "mode": r["mode"],
                         "kind": r["kind"], "cause": r["cause"], "action": r["action"],
                         "expect": None if r["expect"] is None else json.loads(r["expect"]),
-                        "code": p.get("code", 0), "speed": speed, "stages": stages, "response_tags": tags, "unobserved": p.get("unobserved", []),
+                        "code": p.get("code", 0), "speed": speed, "boost": p.get("boost"), "stages": stages, "response_tags": tags, "unobserved": p.get("unobserved", []),
                         "start_at": r["start_at"], "stop_requested_at": r["stop_requested_at"],
                         "damage_remains": held, "repair_requested_at": r["repair_requested_at"], "end_at": end_at})
         out += self._instrument_key(equip_id, from_, to)
@@ -222,7 +224,7 @@ class AnomalyBook:
                 continue
             mode, cause, action = im.LABEL[ev.kind]
             out.append({"event_id": ev.event_id, "equip_id": ev.equip_id, "mode": mode, "kind": im.KIND, "cause": cause,
-                        "action": action, "expect": None, "code": im.CODE, "stages": [],
+                        "action": action, "expect": None, "code": im.CODE, "boost": None, "stages": [],
                         "response_tags": [{"equip_id": ev.equip_id, "tag_id": t, "stage": None, "start_at": _db(ev.start)}
                                           for t in ev.tag_ids],
                         "unobserved": [], "start_at": _db(ev.start), "stop_requested_at": None,

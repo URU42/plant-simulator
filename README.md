@@ -213,8 +213,10 @@ flow:
 | `signal` | 태그가 아니라 신호 종류로 지정한다. 그 설비의 같은 신호 태그가 모두 움직인다 |
 | `shape` | `step`(바로) · `ramp`(`rise_sec` 동안 0→z 뒤 유지) · `spike`(`rise_sec` 동안 0→z, `decay_sec` 동안 z→0) · `wobble`(진폭 z, 주기 `period_sec`) |
 | `z` | 크기(관리 기준 σ 배수). 앞 효과에 더한다 |
+| `delta` | 크기(태그 단위, 예: +15 ℃). z = delta/σ 로 바꿔 쓴다. σ 가 설비마다 달라도 같은 물리량만큼 움직인다 |
 | `to_limit`, `margin` | 그 태그의 효과 합을 한계값(`warn_hi`·`alarm_lo` …)까지, (한계 − μ)의 `margin` 만큼 더. 앞 단계 step·ramp 가 남긴 수준을 빼고 그만큼만 움직인다. 태그에 그 한계가 없으면 `z`, 둘 다 없으면 그 태그는 건너뛴다 |
 | `lag_sec` | 단계 시작 뒤 지연 |
+| `boost` (모드) | 교호작용 `{by, signals, per_unit, max_gain}`: 주입 설비의 `by` 신호 태그가 사건으로 오른 만큼(ΔT, 태그 단위, 정상 잡음 제외) `signals` 효과를 배율 `min(max_gain, 1 + per_unit × ΔT)` 로 키운다. 하류·축 전파 효과는 키우지 않는다. `hold_below_alarm: true` 면 그 태그의 경보 한계 목표 효과가 시작되기 전에는 키운 효과가 경보 한계 3σ 안쪽에 머물고(경고 구간 보장), 그 효과의 상승 시간 동안 서서히 풀린다 |
 | `propagate.driven` | 축으로 이어진 아래쪽 설비(`driven_by` 사슬) 전부에 주는 효과. 피구동 설비 `speed` 는 늘 구동기 값을 그대로 쓴다 |
 | `propagate.process` | 공정 흐름 그래프(`flow`)로 닿은 하류 설비에 주는 효과(1단계 기준). `z` 만 쓰고(`to_limit` 불가) 모양은 `ramp`·`wobble` |
 | `propagate.utility` | 보조 계통 간선으로 바로 닿은 설비(윤활유 펌프 → 압축기, 보충 수소 → 순환 압축기)에 주는 효과. 그 설비에서 멈춘다 |
@@ -241,7 +243,7 @@ flow:
     `PI-2201C`·`PI-I-C3102`·`PI-I-C4102` 단간 압력 = √(흡입·토출 절대압) (2단·단별 압력비 같음 가정, 한계값 없음). σ 는 정상 생성값에서 잰 값.
   - 억제 표집은 자체 잡음만 다시 뽑으므로 계산 태그는 정상에서도 규칙 위반(하루 약 0.26 %)과 한계 넘음(0.004 %, RFCC 펌프 전류)이 가끔 난다.
     실제 공장처럼 정상에도 넘는 일이 있다는 것을 받아들인 것이며, 정상 여부는 정답지로 가린다. 나머지 태그의 규칙 위반은 0 이다.
-- 지금 들어 있는 모드 9개 — 다섯 공장 42대 모두 하나 이상 걸 수 있다(테스트로 지킨다). 수치·지연은 모두 synthetic 이며 공정·설비 검토 전이다.
+- 지금 들어 있는 모드 10개 — 다섯 공장 42대 모두 하나 이상 걸 수 있다(테스트로 지킨다). 수치·지연은 모두 synthetic 이며 공정·설비 검토 전이다.
 
   | 모드 | 대상 | 시나리오 |
   | --- | --- | --- |
@@ -250,6 +252,7 @@ flow:
   | `RC-VALVE-LEAK` | 왕복동 압축기 `C-2201`·`C-3102`·`C-4102` | 밸브 누설 → 재압축 손실 → 토출 온도 상승·유량 저하 |
   | `RC-LIQUID-INGRESS` | 왕복동 압축기 3대 | 액체 유입 → 액체 충격 → 밸브·피스톤·로드 손상 후보 → 파손(S4, 25분부터 정지 한계) |
   | `PM-SUCTION-LOSS` | 펌프 24대 | 흡입 압력 저하 → 진동 증가·유량 저하 → 이상 심화 → 심한 캐비테이션(S4, 30분부터 정지 한계) |
+  | `PM-SUCTION-HOT` | 흡입 유체 온도 태그가 있는 펌프 `P-3102`·`P-4102`·`P-2701`·`P-8301A`·`P-8303A` | 위와 같은 단계에 S1 유체 온도 +15 ℃. 교호작용(`boost`)으로 진동·유량 효과 ×1.45(계수 0.03/℃, 상한 ×2.0, 경고 구간 보장). 경고 단계는 남고 경보·정지가 이르다 |
   | `FN-IMPELLER-FOULING` | 팬 4대 | 임펠러 오염 → 불균형 진동 → 베어링 온도 상승 |
   | `EX-CATALYST-EROSION` | 팽창 터빈 `E-1202` | 촉매 미립자 부착·침식 → 회수 동력 감소(피구동 `B-1201` 유량) → 블레이드 손상 위험 |
   | `GB-LUBE-WEAR` | 기어박스 `GB-3101` | 윤활 불량 → 치면 마모. 피구동 `C-3101` 진동으로 전파 (기어박스는 한계값이 없다) |
@@ -266,7 +269,7 @@ flow:
 | `POST /{공장}/anomalies/{equip_id}/repair` | 그 설비의 멈췄지만 손상이 남은 사건을 `ceil(sim_now)+3`초에 고친다(손상 효과 회복). 200 + `{"repaired": [event_id…], "repair_requested_at"}`. 고칠 손상이 없으면(안 멈춘 사건 포함) 404 |
 | `GET /{공장}/anomalies/damaged` | 멈췄지만 손상이 남아 안 고친 사건 `[{event_id, equip_id, mode, start_at, stop_requested_at}]` (화면의 수리 버튼용) |
 | `GET /{공장}/anomalies/active` | 안 멈춘 고장 모드 사건 `[{event_id, equip_id, mode, start_at}]`. 정답 분류는 싣지 않는다 (화면의 적용/해제 상태용) |
-| `GET /{공장}/anomalies?equip_id=&from=&to=` | 정답지: `event_id`, `equip_id`, `mode`, `code`, `kind`, `cause`, `action`, `expect`, `stages`(단계별 시작), `response_tags`(태그·단계별 효과 시작, `via`: self·driven·process·utility, `hop`: 흐름 단계 — 2026-11-20 전 사건은 null), `unobserved`, `start_at`, `stop_requested_at`, `damage_remains`(멈춘 뒤 손상이 남았는가), `repair_requested_at`, `end_at`. `response_tags` 의 `damage` 는 수리 전까지 남는 효과. 고장 모드와 계측 이상(켰을 때)을 시작 순으로 함께 싣는다 |
+| `GET /{공장}/anomalies?equip_id=&from=&to=` | 정답지: `event_id`, `equip_id`, `mode`, `code`, `kind`, `cause`, `action`, `expect`, `stages`(단계별 시작), `response_tags`(태그·단계별 효과 시작, `via`: self·driven·process·utility, `hop`: 흐름 단계 — 2026-11-20 전 사건은 null), `unobserved`, `start_at`, `stop_requested_at`, `damage_remains`(멈춘 뒤 손상이 남았는가), `repair_requested_at`, `end_at`. `response_tags` 의 `damage` 는 수리 전까지 남는 효과. `boost` 는 교호작용 규칙(없으면 null), `response_tags[].boost_by` 는 교호작용으로 키운 효과의 by 태그. 고장 모드와 계측 이상(켰을 때)을 시작 순으로 함께 싣는다 |
 
 생성기가 이미 `ceil(sim_now)+3` 보다 뒤까지 표본을 만들었으면 그 끝으로 미룬다(이미 만든 표본은 바뀌지 않는다). 응답의 `start_at`·`stop_requested_at` 이 실제 시각이다.
 `POST` 는 `/ingest` 와 같은 토큰 규칙(`INGEST_TOKEN` 이 있으면 `X-Ingest-Token`, 통합 실행인데 토큰이 없으면 403)이다. 그 밖의 오류: 분리 실행 409(`embedded only`), 생성기가 죽었으면 503(`simulator stopped…`),
