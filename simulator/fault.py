@@ -103,6 +103,9 @@ class Boost(StrictModel):
     per_unit: float | None = Field(default=None, gt=0)    # 선형: by 태그 단위 1 당 배율 증가 (예: ℃ 당 0.03)
     exponent: float | None = Field(default=None, gt=0)    # 비율 거듭제곱의 지수 (예: 2)
     max_gain: float = Field(gt=1)
+    # 적용할 설비 (비우면 by 태그가 있는 모든 설비). by 태그의 뜻이 설비마다 다를 때 좁힌다
+    # (예: process_temp 가 흡입 유체 온도인 펌프만 — 2026-11-23 사용자 확정)
+    equip_ids: list[str] = []
     # 경고 구간 보장: 그 태그의 경보 한계 목표(to_limit alarm_*) 효과가 시작되기 전에는 키운 효과가 경보 한계 HOLD_MARGIN_Z 안쪽에 머문다.
     # 경고와 경보가 거의 같이 나지 않게 경고 단계를 남긴다. 경보 단계부터는 그대로 키운다 (사용자 확정 2026-11-23)
     hold_below_alarm: bool = False
@@ -279,7 +282,8 @@ def plan(plant: PlantConfig, mode: FaultMode, equip_id: str,
             if inherited:
                 found.setdefault((e.equip_id, t.tag_id), []).extend(inherited)
     boost: dict[TagKey, TagBoost] = {}
-    src = next((t for t in by_id[equip_id].tags if mode.boost and t.signal == mode.boost.by), None)
+    src = next((t for t in by_id[equip_id].tags if mode.boost and t.signal == mode.boost.by
+                and (not mode.boost.equip_ids or equip_id in mode.boost.equip_ids)), None)
     if src is not None:
         b, by = mode.boost, (equip_id, src.tag_id)
         for t in by_id[equip_id].tags:

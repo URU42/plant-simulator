@@ -180,7 +180,7 @@ def test_answer_key_records_boost(book):
     b.inject("P-3102", "PM-SUCTION-HOT", at=0.0)
     row = b.answer_key(None, None, None)[0]
     assert row["boost"] == {"by": "process_temp", "signals": ["vibration", "flow"], "per_unit": 0.03, "max_gain": 2.0,
-                            "hold_below_alarm": True}
+                            "hold_below_alarm": True, "equip_ids": ["P-3102", "P-4102", "P-8303A"]}
     boosted = {t["tag_id"] for t in row["response_tags"] if t["boost_by"]}
     assert boosted == {"VI-A-P3102", "FI-P3102"}
     assert {t["boost_by"] for t in row["response_tags"] if t["boost_by"]} == {"TI-F-P3102"}

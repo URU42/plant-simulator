@@ -14,7 +14,8 @@ def test_rfcc_plant_matches_sample_package(rfcc_plant_path):
     assert all(t.interval_sec == 1 for t in tags if t.signal not in TEMPS)
     by_key = plant.tag_by_key()
     # 공학 기준값 (2026-11-23, synthetic): 펌프 진동 절대값, 축 진동 ISO 7919-3 회전수 식, 유량 비율, 대기압 가까운 입구는 따로
-    lim = lambda e, t: by_key[(e, t)].limits
+    def lim(e, t):
+        return by_key[(e, t)].limits
     assert (lim("P-1101A", "VI-P-1101A").warn_hi, lim("P-1101A", "VI-P-1101A").alarm_hi, lim("P-1101A", "VI-P-1101A").trip_hi) == (3.0, 4.5, 7.1)
     rpm = by_key[("C-1401", "SI-C-1401")].control.mean
     assert lim("C-1401", "VX-C-1401").alarm_hi == float(f"{9000 / rpm ** 0.5:.3g}")
