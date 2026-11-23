@@ -469,6 +469,7 @@ class RuntimeConfig(StrictModel):
     collector_url: str = "http://localhost:8000"
     raw_retention_days: int = Field(default=7, ge=1)
     instrument_faults: InstrumentFaults = InstrumentFaults()
+    physics: Path | None = None  # 선택형 물리 회로 설정 파일
     # 정상 잡음을 Nelson 규칙 1~3 위반 없이 고른다(억제 표집, D3). false 면 거르지 않는다 — 학습·오탐률 평가용 (2026-11-20)
     quiet_normal: bool = True
 
@@ -503,7 +504,10 @@ def load_plant(path: str | Path) -> PlantConfig:
 
 
 def load_runtime(path: str | Path) -> RuntimeConfig:
-    return RuntimeConfig.model_validate(load_yaml(path))
+    runtime = RuntimeConfig.model_validate(load_yaml(path))
+    if runtime.physics is not None:
+        runtime.physics = Path(path).parent / runtime.physics
+    return runtime
 
 
 # 용도별 실행 설정 (2026-11-23 사용자 확정). demo: 실행 설정 파일 그대로(시연용, 조용한 정상).

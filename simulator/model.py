@@ -25,8 +25,9 @@ import numpy as np
 from common.config_models import Derive, PlantConfig, RuntimeConfig, TagKey
 from common.message import Sample
 from common.nelson import NelsonState, zscore
-from simulator.fault import MAX_RECOVERY_SEC, FaultEvent, TagPlan, boosted, plan, tag_effect
+from simulator.fault import MAX_RECOVERY_SEC, FaultEvent, TagPlan, boosted, event_tag_effect, plan
 from simulator.instrument import InstrumentEvent, InstrumentSchedule
+from simulator.physics_adapter import PhysicsAdapter
 
 RHO = 0.12                  # 개별 잡음 AR(1) 계수
 RHO_TEMP = 0.25             # 온도 신호의 AR(1) 계수
@@ -100,6 +101,7 @@ class PlantGenerator:
         self.plant = plant
         self.runtime = runtime
         self.source = source or NoEvents()
+        self.physics = PhysicsAdapter(plant, runtime.physics) if runtime.physics is not None else None
         self.equipment = plant.equipment_for_units(runtime.units)
         self.control = plant.control_by_key()
         by_id = plant.equipment_by_id()
@@ -138,8 +140,12 @@ class PlantGenerator:
         for t in self.tags:
             values = last_values.get(t.key)
             if values:
-                zs = [zscore(v, t.mu, t.sigma) for v in values]
-                t.nelson, t.ep = NelsonState(zs), zs[-1]
+                if self.physics is not None and t.key in self.physics.tag_keys:
+                    # 과거 계측값에는 유압 상태가 섞여 있으므로 잡음 상태로 복원하지 않는다.
+                    t.nelson, t.ep = NelsonState(), 0.0
+                else:
+                    zs = [zscore(v, t.mu, t.sigma) for v in values]
+                    t.nelson, t.ep = NelsonState(zs), zs[-1]
                 self._sent[t.key] = values[-1]
             t.day = None
         self._restore = (None, 0)
@@ -159,20 +165,28 @@ class PlantGenerator:
             if t.interval not in positions:
                 positions[t.interval] = [i for i, ep in enumerate(epochs) if ep % t.interval == 0]
 
-        active = self._active(s0, s1)
+        events = self.source.external(s0 - MAX_RECOVERY_SEC, s1)
+        active = self._active(events)
+        centers: dict[TagKey, dict[int, float]] = {}
+        if self.physics is not None and self.physics.tag_keys.intersection(t.key for t in self.tags):
+            plans = self.physics.parameter_plans(events)
+            centers = {key: {} for key in self.physics.tag_keys}
+            for ep in epochs:
+                for key, center in self.physics.sensor_centers(self.physics.state(ep, plans)).items():
+                    centers[key][ep] = center
         values: dict[TagKey, dict[int, float]] = {k: {} for k in self._recorded}    # 구동기 speed·계산 입력의 시각별 값
         columns: dict[TagKey, list[Sample]] = {}
         for t in self._order:
             if t.derive is not None:
                 columns[t.key] = self._derived(t, positions[t.interval], epochs, stamps, active.get(t.key, ()), active,
-                                               [values[k] for k in t.inputs], values.get(t.key))
+                                               [values[k] for k in t.inputs], values.get(t.key), centers.get(t.key))
                 continue
             copy = None
             if t.driver:
                 dmu, dsg = self.control[t.driver]
                 copy = {ep: (v - dmu) / dsg for ep, v in values[t.driver].items()}
             columns[t.key] = self._series(t, positions[t.interval], epochs, stamps, active.get(t.key, ()), active, copy,
-                                          values.get(t.key))
+                                          values.get(t.key), centers.get(t.key))
 
         measure = self._measure(s0, s1)
         rows: list[list[Sample]] = [[] for _ in epochs]     # 측정 시각 위치별, 구성안 순
@@ -210,20 +224,24 @@ class PlantGenerator:
             return s if v == s.value else Sample.model_construct(equip_id=s.equip_id, tag_id=s.tag_id, ts=s.ts, value=v)
         return apply
 
-    def _active(self, s0: int, s1: int) -> dict[TagKey, list[tuple[FaultEvent, TagPlan]]]:
+    def _active(self, events: list[FaultEvent]) -> dict[TagKey, list[tuple[FaultEvent, TagPlan]]]:
         """이 창에 효과가 있을 수 있는 사건의 태그별 적용 목록 (이 프로세스가 맡은 태그만)."""
         out: dict[TagKey, list[tuple[FaultEvent, TagPlan]]] = {}
         mine = {t.key for t in self.tags}
-        for ev in self.source.external(s0 - MAX_RECOVERY_SEC, s1):
+        for ev in events:
+            if ev.mode.physics_only and self.physics is None:
+                continue
             if ev.event_id not in self._plans:
-                self._plans[ev.event_id] = plan(self.plant, ev.mode, ev.equip_id, self.control)
+                self._plans[ev.event_id] = (self.physics.tag_plan(ev.mode, ev.equip_id) if self.physics
+                                           else plan(self.plant, ev.mode, ev.equip_id, self.control))
             for key, tp in self._plans[ev.event_id].items():
-                if key in mine:
+                if key in mine and tp.via != "physics":
                     out.setdefault(key, []).append((ev, tp))
         return out
 
     def _series(self, t: _Tag, pos: list[int], epochs: range, stamps: list[datetime], active, everything,
-                copy: dict[int, float] | None, record: dict[int, float] | None) -> list[Sample]:
+                copy: dict[int, float] | None, record: dict[int, float] | None,
+                centers: dict[int, float] | None = None) -> list[Sample]:
         """한 태그의 이 창 표본. active 는 이 태그, everything 은 모든 태그의 사건 적용(교호작용의 by 태그를 볼 때). copy 는 구동기 speed 의 시각별 z, record 는 이 태그 값을 시각별로 적어 둘 곳(구동기·계산 입력)."""
         mu, sg, d, rho, scale, load, own = t.mu, t.sigma, t.decimals, t.rho, t.scale, t.load, t.own
         safe, bounds, push, normal = self._safe(t), t.nelson.bounds, t.nelson.push, t.normal
@@ -236,11 +254,12 @@ class PlantGenerator:
         for i in pos:
             ep = epochs[i]
             day = self._day(t, ep)
+            center = centers[ep] if centers is not None else mu
             fx, quiet = _effect(active, ep, everything)
             if copy is not None and ep in copy:
                 z = copy[ep]
                 v = round(mu + sg * z, d)
-                zq = (v - mu) / sg
+                zq = (v - center) / sg
                 push(zq)
             else:
                 if load and day != fday:
@@ -251,8 +270,8 @@ class PlantGenerator:
                 for _ in range(TRIES):
                     e = base + scale * normal()
                     zn = common + own * e
-                    v = round(mu + sg * (zn + fx), d)
-                    zq = (v - mu) / sg
+                    v = round(center + sg * (zn + fx), d)
+                    zq = (v - center) / sg
                     zc = zq if total else zn
                     if safe(zc):
                         break
@@ -263,8 +282,8 @@ class PlantGenerator:
                     zc = min(max(zc, lo + q), hi - q) if hi - lo > 2 * q else (lo + hi) / 2
                     zn = zc - fx if total else zc
                     e = (zn - common) / own
-                    v = round(mu + sg * (zn + fx), d)
-                    zq = (v - mu) / sg
+                    v = round(center + sg * (zn + fx), d)
+                    zq = (v - center) / sg
                     zc = zq if total else zn
                 push(zc)
                 ep_prev = e
@@ -275,7 +294,8 @@ class PlantGenerator:
         return out
 
     def _derived(self, t: _Tag, pos: list[int], epochs: range, stamps: list[datetime], active, everything,
-                 ins: list[dict[int, float]], record: dict[int, float] | None) -> list[Sample]:
+                 ins: list[dict[int, float]], record: dict[int, float] | None,
+                 centers: dict[int, float] | None = None) -> list[Sample]:
         """계산 태그의 이 창 표본: 그 시각 입력 값의 계산식 + 자체 잡음(iid) + 효과. 자체 잡음만 TRIES 번 다시 뽑고,
         못 찾으면 마지막 값을 쓴다 (입력이 정한 몫은 바꿀 수 없어 위반 0 을 보장하지 않는다)."""
         mu, sg, d, noise, value = t.mu, t.sigma, t.decimals, t.derive.noise_sigma, t.derive.value
@@ -287,12 +307,13 @@ class PlantGenerator:
             ep = epochs[i]
             self._day(t, ep)
             fx, quiet = _effect(active, ep, everything)
-            base = value([x[ep] for x in ins], ref, ref_out)
+            base = centers[ep] if centers is not None else value([x[ep] for x in ins], ref, ref_out)
+            center = base if centers is not None else mu
             total = fx == 0.0 or quiet
             for _ in range(TRIES):
                 n = noise * normal()
                 v = round(base + n + sg * fx, d)
-                zc = (v - mu) / sg if total else (base + n - mu) / sg
+                zc = (v - center) / sg if total else (base + n - center) / sg
                 if safe(zc):
                     break
             push(zc)
@@ -324,8 +345,7 @@ def _effect(active, ep: int, everything=None) -> tuple[float, bool]:
     정상 잡음 제외)로 배율을 정한다. by 태그에는 교호작용이 없어 한 단계로 끝난다."""
     fx, quiet = 0.0, False
     for ev, tp in active:
-        z, q = tag_effect(tp, ep - ev.start, None if ev.stop is None else ev.stop - ev.start, ev.speed,
-                          None if ev.repair is None else ev.repair - ev.start)
+        z, q = event_tag_effect(tp, ev, ep)
         if tp.boost is not None and z:
             z = boosted(tp.boost, z, _effect((everything or {}).get(tp.boost.by, ()), ep)[0], ep - ev.start, ev.speed)
         fx += z

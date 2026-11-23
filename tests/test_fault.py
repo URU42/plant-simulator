@@ -21,6 +21,8 @@ def test_repo_fault_modes_load_and_apply(modes, config_dir):
     """저장소의 고장 모드는 모두 읽히고, 각각 적어도 한 공장의 설비 하나에 효과가 걸린다."""
     plants = [load_plant(config_dir / f"plant_{k}.yaml") for k in ("rfcc", "cdu", "hou", "rhds", "vrds")]
     for m in modes.values():
+        if m.physics_only:  # 물리 전용 모드는 결합 회로 테스트에서 확인한다.
+            continue
         assert any(plan(p, m, e.equip_id, p.control_by_key()) for p in plants for e in p.equipment if m.applies_to(e)), m.id
 
 

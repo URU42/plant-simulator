@@ -25,11 +25,14 @@ class Broadcaster:
                 q.get_nowait()
             q.put_nowait(message)
 
-    async def subscribe(self) -> AsyncIterator[str]:
+    async def subscribe(self, heartbeat: float | None = None) -> AsyncIterator[str]:
         q: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_SIZE)
         self._subscribers.add(q)
         try:
             while True:
-                yield await q.get()
+                try:
+                    yield await asyncio.wait_for(q.get(), heartbeat) if heartbeat else await q.get()
+                except TimeoutError:
+                    yield ": keepalive\n\n"
         finally:
             self._subscribers.discard(q)

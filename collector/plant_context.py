@@ -21,7 +21,9 @@ from collector.storage import Storage
 from collector.stream import Broadcaster
 from common.config_models import ConfigError, PlantConfig, RuntimeConfig, TagKey, apply_profile, load_plant, load_runtime
 from common.message import Sample
+from common.sim_clock import ControlledClock
 from simulator.fault import FaultMode
+from simulator.physics_adapter import PhysicsAdapter
 from simulator.instrument import InstrumentSchedule
 from common.timefmt import from_db, to_db
 
@@ -41,6 +43,9 @@ class PlantContext:
     book: AnomalyBook                         # 고장 모드 사건 장부 (통합 실행 생성기의 EventSource, 정답지)
     live: bool = False                        # 생성기가 실시간(또는 가속)으로 시계를 따라잡았는가. 백필·밀린 구간 재생 중이면 False
     catch_up_task: asyncio.Task | None = field(default=None)
+    simulation_clock: ControlledClock | None = None
+    control_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    control_receipts: dict = field(default_factory=dict)
     simulator_error: str | None = field(default=None)               # 통합 실행의 생성기 태스크가 예외로 끝났을 때
     # 저장·배치 전진은 워커 스레드에서도 돌 수 있다(통합 실행). 한 공장의 SQLite 트랜잭션이 겹치지 않도록 락으로 직렬화한다.
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -56,6 +61,7 @@ class PlantContext:
         reset_db 면 스키마 버전이 다른 DB 파일을 지우고 새로 만든다. profile 은 실행 용도(demo·eval)로 DB 마다 하나로 고정된다."""
         plant = load_plant(entry.plant)
         runtime = apply_profile(load_runtime(entry.runtime), profile)
+        physics = PhysicsAdapter(plant, runtime.physics) if runtime.physics is not None else None
         Path(entry.db).parent.mkdir(parents=True, exist_ok=True) if entry.db != ":memory:" else None
         storage = Storage(entry.db, reset_on_schema_change=reset_db)
         _pin_profile(storage, entry.db, profile)
@@ -66,7 +72,7 @@ class PlantContext:
             loop = None
         return cls(key=entry.key, plant=plant, runtime=runtime, storage=storage, jobs=JobRunner(storage, plant, runtime),
                    broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime), tag_keys=storage.tag_keys(),
-                   loop=loop, book=AnomalyBook(storage, plant, modes, _instrument(plant, runtime)),
+                   loop=loop, book=AnomalyBook(storage, plant, modes, _instrument(plant, runtime), physics),
                    data_stream=DataStream.from_url(redis_url, entry.key) if redis_url else None)
 
     def set_live(self, at: float) -> None:

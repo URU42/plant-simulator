@@ -54,6 +54,7 @@ cover/
 
 # Translations
 *.mo
+!/models/modelica/*.mo
 *.pot
 
 # Django stuff:
@@ -232,3 +233,7 @@ rfcc-20261109/
 cdu-sample/
 hou-plant-sample/
 RHDS_VRDS_v3/
+
+# 로컬 생성 합성 계측·정답 및 시뮬레이션 산출물
+/examples/cdu-physics/
+/models/modelica/results/

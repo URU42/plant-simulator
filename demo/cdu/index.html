@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CDU 원유 공급 펌프 · 계측 재생</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #173440; background: #e4edf0; font: 16px system-ui, sans-serif; }
+    header, main { width: min(1250px, 100%); margin: auto; padding: 24px clamp(16px, 4vw, 48px); }
+    header { padding-bottom: 12px; }
+    h1 { margin: 6px 0; font-size: clamp(24px, 4vw, 38px); letter-spacing: -.035em; }
+    header p, small { color: #486470; }
+    header p { margin: 0; }
+    main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, .45fr); gap: 18px; }
+    figure, section { min-width: 0; margin: 0; border: 1px solid #b7cbd2; background: #f7fbfc; }
+    #model { height: clamp(280px, 48vh, 500px); background: #112c3a; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+    figcaption, section { padding: 16px; }
+    figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+    h2 { font-size: 16px; margin: 0 0 12px; }
+    table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+    th, td { border-bottom: 1px solid #cedde1; text-align: left; padding: 10px 5px; }
+    td { text-align: right; white-space: nowrap; }
+    label, output { display: block; margin-top: 12px; }
+    input { width: 100%; accent-color: #006c64; }
+    button { min-height: 42px; padding: 6px 16px; font: inherit; color: white; background: #00625a; border: 0; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    a { color: #00625a; }
+    #status { min-height: 1.5em; color: #6d4704; }
+    @media (max-width: 700px) { main { grid-template-columns: minmax(0, 1fr); } }
+  </style>
+</head>
+<body>
+  <header>
+    <p id="unit">PL-CDU</p>
+    <h1>원유 공급 펌프 · 계측 재생</h1>
+    <p>합성 데모 · synthetic assumption</p>
+  </header>
+  <main>
+    <figure>
+      <div id="model" aria-label="펌프와 탈염기 방향 배관의 3D 모형"></div>
+      <figcaption><span id="route"></span><a href="./cdu.glb" download>GLB 다운로드</a></figcaption>
+    </figure>
+    <section aria-labelledby="measurements">
+      <h2 id="measurements">수신 계측값</h2>
+      <table><tbody id="readings"></tbody></table>
+      <label for="timeline">수신 시각 (KST)</label>
+      <input id="timeline" type="range" min="0" value="0" disabled>
+      <output id="at" for="timeline"></output>
+      <p><small id="sample-time"></small></p>
+      <button id="play" type="button" disabled>재생</button>
+      <p id="status" role="status">자료 불러오는 중</p>
+    </section>
+  </main>
+  <script type="module" src="./replay.js"></script>
+</body>
+</html>

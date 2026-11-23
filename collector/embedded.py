@@ -13,7 +13,7 @@ import logging
 from collector.plant_context import PlantContext
 from collector.plants import PlantEntry
 from collector.settings import Settings
-from simulator.main import run_mode
+from simulator.main import Simulator, restore_from_collector, run_mode
 from simulator.sender import LocalSender
 
 log = logging.getLogger("collector.embedded")
@@ -34,5 +34,10 @@ async def run_plant_simulator(ctx: PlantContext, entry: PlantEntry, settings: Se
         runtime = runtime.model_validate(runtime.model_dump() | overrides)
     log.info("plant %s: embedded simulator %s", entry.key, runtime.time_mode)
     sender = LocalSender(ctx.receive_local, ctx.storage.sim_now, limiter, recent_values=ctx.storage.recent_values)
+    if ctx.simulation_clock is not None:
+        sim = Simulator(ctx.plant, runtime, sender, ctx.simulation_clock, ctx.book)
+        await restore_from_collector(sim, sender)
+        await sim.run(on_live=lambda t: ctx.set_live(t.timestamp()))
+        return
     await run_mode(ctx.plant, runtime, sender, source=ctx.book, window_sec=EMBEDDED_BACKFILL_WINDOW_SEC,
                    on_live=lambda t: ctx.set_live(t.timestamp()))

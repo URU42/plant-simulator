@@ -1,0 +1,188 @@
+import asyncio
+import csv
+import json
+from datetime import datetime, timedelta
+
+import pytest
+from fastapi.testclient import TestClient
+
+from collector.anomaly_book import AnomalyBook, NotApplicable
+from collector.app import create_single_app
+from collector.seed_master import seed_master
+from collector.settings import Settings
+from collector.storage import Storage
+from common.config_models import load_plant, load_runtime
+from common.message import IngestBatch, Sample
+from common.sim_clock import KST
+from simulator.fault import load_fault_modes
+from simulator.instrument import InstrumentEvent
+from simulator.model import PlantGenerator
+from simulator.physics_adapter import PhysicsAdapter
+from simulator.physics_scenario import write_example
+
+START = datetime(2026, 11, 24, tzinfo=KST)
+EPOCH = int(START.timestamp())
+FLOW = ("P-8101A", "FI-8101A")
+PRODUCT = ("P-8401A", "FI-8401A")
+SUCTION = ("P-8101A", "PI-8101A")
+HEADER = ("P-8101A", "PI-8101B")
+
+
+@pytest.fixture
+def coupled(config_dir):
+    plant = load_plant(config_dir / "plant_cdu.yaml")
+    runtime = load_runtime(config_dir / "runtime_cdu.yaml").model_copy(update={
+        "physics": config_dir / "physics_cdu_integrated.yaml", "units": ["UNIT-CDU-01", "UNIT-CDU-07"],
+    })
+    modes = load_fault_modes(config_dir / "fault_modes.yaml")
+    storage = Storage(":memory:")
+    seed_master(storage, plant)
+    physics = PhysicsAdapter(plant, runtime.physics)
+    try:
+        yield plant, runtime, physics, AnomalyBook(storage, plant, modes, physics=physics)
+    finally:
+        storage.close()
+
+
+def _samples(generator, start=0, end=151):
+    return generator.generate(START + timedelta(seconds=start), START + timedelta(seconds=end))
+
+
+def _values(samples, second):
+    return {(s.equip_id, s.tag_id): s.value for s in samples if s.ts.timestamp() == EPOCH + second}
+
+
+def test_clog_normal_recovery_and_noise_without_double_fault(coupled):
+    plant, runtime, physics, book = coupled
+    event = book.inject("P-8101A", "PM-SUCTION-LOSS", EPOCH + 10, 10)
+    book.stop("P-8101A", EPOCH + 80)
+    baseline = _samples(PlantGenerator(plant, runtime))
+    generator = PlantGenerator(plant, runtime, book)
+    samples = _samples(generator)
+    assert samples == _samples(PlantGenerator(plant, runtime, book))
+    split = PlantGenerator(plant, runtime, book)
+    assert samples == _samples(split, 0, 59) + _samples(split, 59, 151)
+    plans = physics.parameter_plans(book.external(EPOCH, EPOCH + 151))
+
+    for second in (5, 55, 75, 105, 145):
+        state = physics.state(EPOCH + second, plans)
+        centers = physics.sensor_centers(state)
+        reference = physics.sensor_centers(physics.solve(0, 0, 0))
+        assert abs(state.mass_residual_kg_s) < 1e-9
+        assert all(abs(b.pressure_residual_pa) < 1e-6 for b in state.branches)
+        observed, nominal = _values(samples, second), _values(baseline, second)
+        for key in (FLOW, SUCTION, HEADER, PRODUCT):
+            assert observed[key] - nominal[key] == pytest.approx(centers[key] - reference[key], abs=0.00011)
+        if second in (5, 145):
+            assert centers == reference
+        else:
+            assert all(centers[k] < reference[k] for k in (FLOW, SUCTION, HEADER, PRODUCT))
+    assert all(s.ts.second % 10 == 0 for s in samples if s.tag_id.startswith("TI-"))
+    assert sum(s.tag_id == "TI-8101A" for s in samples) == 16
+    assert sum(s.tag_id == "FI-8101A" for s in samples) == 151
+    assert _values(samples, 70)[("P-8101A", "VI-8101A")] > _values(baseline, 70)[("P-8101A", "VI-8101A")]
+    assert all(set(s.model_dump()) == {"equip_id", "tag_id", "ts", "value"} for s in samples)
+    truth = book.answer_key(None, None, None)[0]
+    assert truth["event_id"] == event.event_id and truth["expect"] is None
+    assert truth["physical_parameters"] == [
+        {"stage": "S1", "parameter": "strainer_blockage", "amount": 0.45, "rise_sec": 600},
+    ]
+    assert {(t["equip_id"], t["tag_id"]) for t in truth["response_tags"] if t["via"] == "physics"} == physics.tag_keys
+
+
+def test_wear_holds_until_repair_and_valve_redistributes(coupled):
+    plant, runtime, physics, book = coupled
+    original = physics.solve(0, 0, 0)
+    wear = book.inject("P-8101A", "PM-IMPELLER-WEAR", EPOCH + 10, 10)
+    book.stop("P-8101A", EPOCH + 50)
+    assert [e.event_id for e in book.damaged()] == [wear.event_id]
+    assert book.external(EPOCH + 90, EPOCH + 99)
+    assert book.repair("P-8101A", EPOCH + 100)[1] == [wear.event_id]
+    plans = physics.parameter_plans(book.external(EPOCH, EPOCH + 170))
+    worn = physics.state(EPOCH + 60, plans)
+    assert worn == physics.state(EPOCH + 99, plans)
+    assert worn.pump_head_m < original.pump_head_m
+    assert worn.hydraulic_w / worn.shaft_w < original.hydraulic_w / original.shaft_w
+    assert physics.state(EPOCH + 130, plans).pump_flow_m3_s > worn.pump_flow_m3_s
+    assert physics.state(EPOCH + 160, plans) == original
+    sensor = _samples(PlantGenerator(plant, runtime, book), end=161)
+    assert _values(sensor, 80)[FLOW] < _values(sensor, 160)[FLOW] - 10
+
+    event = book.inject("P-8101A", "PM-DISCHARGE-VALVE-RESTRICTION", EPOCH + 180, 10)
+    plans = physics.parameter_plans([event])
+    valve = physics.state(EPOCH + 210, plans)
+    assert valve.branches[1].flow_m3_s < original.branches[1].flow_m3_s
+    assert valve.branches[0].flow_m3_s > original.branches[0].flow_m3_s
+    assert valve.discharge_abs_pa > original.discharge_abs_pa
+    assert valve.suction_abs_pa == original.suction_abs_pa
+
+
+def test_existing_instrument_dropout_only_changes_observations(coupled):
+    plant, runtime, physics, book = coupled
+    source = PlantGenerator(plant, runtime, book)
+    baseline = _samples(source, end=5)
+    generator = PlantGenerator(plant, runtime, book)
+    generator.instrument = type("FixedSchedule", (), {"events": lambda self, start, end: [
+        InstrumentEvent("evaluation-only", "dropout", FLOW[0], (FLOW[1],), EPOCH + 1, EPOCH + 3),
+    ]})()
+    measured = _samples(generator, end=5)
+    assert measured == [s for s in baseline if (s.equip_id, s.tag_id) != FLOW or s.ts.second not in (1, 2)]
+    assert physics.state(EPOCH + 2, []) == physics.solve(0, 0, 0)
+
+
+def test_opt_in_api_preserves_measurements_and_gates_scenario_truth(coupled, config_dir, tmp_path):
+    plant, runtime, _, _ = coupled
+    path = tmp_path / "runtime.yaml"
+    path.write_text(runtime.model_dump_json(), encoding="utf-8")
+    app = create_single_app(config_dir / "plant_cdu.yaml", path, ":memory:",
+                            settings=Settings(with_simulators=False, ingest_token="evaluation"))
+    token = {"X-Ingest-Token": "evaluation"}
+    with TestClient(app) as client:
+        ctx = app.state.plants["plant"]
+        assert {m["mode"] for m in client.get("/plant/fault-modes").json()} >= {
+            "PM-IMPELLER-WEAR", "PM-DISCHARGE-VALVE-RESTRICTION",
+        }
+        now = datetime.now(KST).replace(microsecond=0)
+        ctx.book.inject(FLOW[0], "PM-SUCTION-LOSS", now.timestamp() - 1)
+        samples = PlantGenerator(plant, runtime, ctx.book).generate(now, now + timedelta(seconds=1))
+        batch = IngestBatch(source_id=runtime.source_id, batch_id="physics-test", sent_at=now, samples=samples)
+        stream = ctx.broadcaster.subscribe()
+        future = client.portal.start_task_soon(anext, stream)
+
+        async def subscribed():
+            async with asyncio.timeout(2):
+                while not ctx.broadcaster.has_subscribers():
+                    await asyncio.sleep(0)
+
+        client.portal.call(subscribed)
+        result = client.post("/plant/ingest", json=batch.model_dump(mode="json"), headers=token)
+        event = future.result(timeout=2)
+        client.portal.call(stream.aclose)
+        name, payload = event.splitlines()[:2]
+        assert name == "event: samples"
+        assert json.loads(payload.removeprefix("data: ")) == [s.model_dump(mode="json") for s in samples]
+        assert result.status_code == 200 and result.json()["stored"] == len(samples)
+        row = client.get(f"/plant/equipment/{FLOW[0]}/tags/{FLOW[1]}/current").json()
+        assert row["value"] == next(s.value for s in samples if (s.equip_id, s.tag_id) == FLOW)
+        assert "PM-SUCTION-LOSS" not in str(row) and "event_id" not in row
+        for path in ("anomalies", "anomalies/active", "anomalies/damaged"):
+            assert client.get(f"/plant/{path}").status_code == 403
+            assert client.get(f"/plant/{path}", headers=token).status_code == 200
+
+    disabled = AnomalyBook(Storage(":memory:"), plant, load_fault_modes(config_dir / "fault_modes.yaml"))
+    try:
+        with pytest.raises(NotApplicable):
+            disabled.inject(FLOW[0], "PM-IMPELLER-WEAR", EPOCH)
+    finally:
+        disabled.storage.close()
+
+
+def test_example_exports_observations_and_evaluation_separately(config_dir, tmp_path):
+    output = tmp_path / "example"
+    write_example(output, config_dir)
+    with (output / "observations" / "measurements.csv").open(encoding="utf-8") as file:
+        samples = [Sample.model_validate(row) for row in csv.DictReader(file)]
+    truth = json.loads((output / "evaluation" / "truth.json").read_text(encoding="utf-8"))
+    assert {event["mode"] for event in truth["events"]} == {"PM-SUCTION-LOSS", "PM-IMPELLER-WEAR"}
+    assert len({s.ts for s in samples}) == len(truth["states"])
+    assert truth["states"][0]["pump_flow_m3_s"] == truth["states"][-1]["pump_flow_m3_s"]

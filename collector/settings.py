@@ -22,6 +22,7 @@ class Settings:
     cors_origins: list[str] = field(default_factory=list)
     ingest_token: str | None = None
     with_simulators: bool = False
+    simulation_control: bool = False
     redis_url: str | None = None
     reset_db_on_schema_change: bool = False
     time_mode: str | None = None          # 통합 실행에서 각 공장 runtime 의 time_mode 를 덮어쓴다
@@ -37,6 +38,7 @@ class Settings:
             cors_origins=[o.strip() for o in env.get("CORS_ORIGINS", "").split(",") if o.strip()],
             ingest_token=env.get("INGEST_TOKEN") or None,
             with_simulators=env.get("WITH_SIMULATORS", "").strip().lower() in TRUE_VALUES,
+            simulation_control=env.get("SIMULATION_CONTROL", "").strip().lower() in TRUE_VALUES,
             redis_url=env.get("REDIS_URL") or None,
             reset_db_on_schema_change=env.get("RESET_DB_ON_SCHEMA_CHANGE", "").strip().lower() in TRUE_VALUES,
             profile=env.get("DATA_PROFILE", "").strip() or "demo",

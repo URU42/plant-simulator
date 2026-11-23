@@ -74,6 +74,15 @@ class Propagation(StrictModel):
         return self
 
 
+HydraulicParameter = Literal["strainer_blockage", "impeller_wear", "valve_restriction"]
+
+
+class HydraulicEffect(StrictModel):
+    parameter: HydraulicParameter
+    amount: float = Field(gt=0, le=1)
+    rise_sec: float = Field(gt=0, allow_inf_nan=False)
+
+
 class Stage(StrictModel):
     id: str
     name: str
@@ -82,6 +91,7 @@ class Stage(StrictModel):
     damage: bool = False                # 손상 단계: step·ramp 효과가 멈춘 뒤에도 수리 전까지 남는다 (대상 단계 사용자 확정 2026-11-23)
     effects: list[Effect] = []
     propagate: Propagation = Propagation()
+    hydraulic: list[HydraulicEffect] = []
 
 
 class Label(StrictModel):
@@ -130,6 +140,7 @@ class FaultMode(StrictModel):
     expect: dict[str, Any] | None = None    # 평가용 기대값 (자유 형식, 정답지에 그대로 싣는다)
     # 실제 고장이면 보일 신호지만 마스터에 태그가 없어 만들지 않는 것 (예: 증기 온도). 기록용이며 생성에는 쓰지 않는다
     unobserved: list[str] = []
+    physics_only: bool = False
     boost: Boost | None = None          # 교호작용 (주입 설비의 효과만 키운다. 하류·축 전파 효과는 그대로)
 
     @model_validator(mode="after")
@@ -377,6 +388,24 @@ def tag_effect(tp: TagPlan, t: float, stop: float | None, speed: int = 1,
             z += _shape(a, t - s, speed) * fade
     quiet = not stopped and any(lo / speed <= t < hi / speed for lo, hi in tp.quiet)
     return z, quiet
+
+
+def hydraulic_plan(mode: FaultMode) -> dict[HydraulicParameter, TagPlan]:
+    """물리 파라미터에도 기존 ramp·손상·수리 시간 함수를 적용한다."""
+    effects: dict[HydraulicParameter, list[Applied]] = {}
+    for stage in mode.stages:
+        for change in stage.hydraulic:
+            effect = Effect(signal=change.parameter, shape="ramp", z=change.amount, rise_sec=change.rise_sec)
+            effects.setdefault(change.parameter, []).append(
+                Applied(stage.id, stage.at_sec, effect, change.amount, stage.damage)
+            )
+    return {key: TagPlan(tuple(changes), (), via="physics") for key, changes in effects.items()}
+
+
+def event_tag_effect(tp: TagPlan, event: FaultEvent, epoch: float) -> tuple[float, bool]:
+    """절대 시각의 사건 효과. 태그와 물리 파라미터가 같은 수명 주기를 쓴다."""
+    return tag_effect(tp, epoch - event.start, None if event.stop is None else event.stop - event.start,
+                      event.speed, None if event.repair is None else event.repair - event.start)
 
 
 def holds_damage(tags: dict[TagKey, TagPlan], ev: FaultEvent) -> bool:

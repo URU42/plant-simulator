@@ -16,14 +16,14 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Literal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from collector.anomaly_book import Busy, NotApplicable
 from collector.ingest import RawBatch, schema_supported, validate_samples
@@ -33,6 +33,7 @@ from collector.settings import Settings
 from collector.stream import QUEUE_SIZE
 from common.config_models import ConfigError
 from simulator.fault import load_fault_modes
+from common.sim_clock import ControlledClock, KST, align_down
 from common.timefmt import from_db, parse_iso, to_db
 
 STATIC_DIR = Path(__file__).with_name("static")     # 디버깅 화면
@@ -245,30 +246,117 @@ async def repair_anomaly(equip_id: str, request: Request, ctx: PlantContext = De
     return {"repaired": repaired, "repair_requested_at": _utc(at)}
 
 
+def _require_physics_evaluation_token(request: Request, ctx: PlantContext) -> None:
+    if ctx.runtime.physics is None:
+        return
+    token = request.app.state.settings.ingest_token
+    if not token or not hmac.compare_digest(request.headers.get("X-Ingest-Token", ""), token):
+        raise HTTPException(403, "physics scenario records require the evaluation operator token")
+
+
 @router.get("/anomalies/damaged")
-def damaged_anomalies(ctx: PlantContext = Depends(context)):
+def damaged_anomalies(request: Request, ctx: PlantContext = Depends(context)):
     """멈췄지만 손상이 남아 아직 안 고친 사건 (화면의 수리 버튼용). 정답 분류는 싣지 않는다."""
+    _require_physics_evaluation_token(request, ctx)
     return [{"event_id": e.event_id, "equip_id": e.equip_id, "mode": e.mode.id, "start_at": _utc(e.start), "stop_requested_at": _utc(e.stop)}
             for e in ctx.book.damaged()]
 
 
 @router.get("/anomalies/active")
-def active_anomalies(ctx: PlantContext = Depends(context)):
+def active_anomalies(request: Request, ctx: PlantContext = Depends(context)):
     """안 멈춘 고장 모드 사건: event_id·설비·모드·시작. 정답 분류는 싣지 않는다 (화면의 적용/해제 상태용)."""
+    _require_physics_evaluation_token(request, ctx)
     return [{"event_id": e.event_id, "equip_id": e.equip_id, "mode": e.mode.id, "speed": e.speed, "start_at": _utc(e.start)}
             for e in ctx.book.active()]
 
 
 @router.get("/anomalies")
-def answer_key(equip_id: str | None = None, from_: str | None = Query(default=None, alias="from"), to: str | None = None,
+def answer_key(request: Request, equip_id: str | None = None, from_: str | None = Query(default=None, alias="from"), to: str | None = None,
                ctx: PlantContext = Depends(context)):
     """정답지: 사건마다 고장 모드·분류·기대값·단계와 태그별 효과 시작·시작·멈춤·끝(멈춤 + 회복). from/to 는 구간과 겹치는 사건."""
+    _require_physics_evaluation_token(request, ctx)
     return ctx.book.answer_key(equip_id, query_time("from", from_) if from_ else None, query_time("to", to) if to else None)
+
+
+class SimulationAction(BaseModel):
+    model_config = {"extra": "forbid"}
+    command_id: str = Field(min_length=1, max_length=64)
+    action: Literal["start", "pause", "resume", "speed", "normal", "inject"]
+    rate: Literal[1, 5, 10, 30, 60] | None = None
+    mode: str | None = Field(default=None, max_length=80)
+    equip_id: str | None = Field(default=None, max_length=80)
+    scenario_speed: Literal[1, 3, 5, 10] = 1
+
+
+def _simulation_state(ctx: PlantContext) -> dict:
+    clock = ctx.simulation_clock
+    if clock is None:
+        raise HTTPException(404, "simulation control disabled")
+    if ctx.simulator_error:
+        raise HTTPException(503, "simulator unavailable")
+    return {"phase": clock.phase, "rate": clock.rate, "sim_time": _utc(clock.now().timestamp())}
+
+
+@router.get("/simulation")
+def simulation_state(ctx: PlantContext = Depends(context)):
+    return _simulation_state(ctx)
+
+
+@router.post("/simulation/control")
+async def simulation_control(body: SimulationAction, request: Request, ctx: PlantContext = Depends(context)):
+    require_ingest_token(request)
+    _simulation_state(ctx)
+    clock = ctx.simulation_clock
+    assert clock is not None
+    async with ctx.control_lock:
+        previous = ctx.control_receipts.get(body.command_id)
+        if previous is not None:
+            payload, state = previous
+            if payload != body:
+                raise HTTPException(409, "command_id already used for another command")
+            return state
+        if body.action in ("start", "resume"):
+            clock.update(phase="running")
+        elif body.action == "pause":
+            if clock.phase == "ready":
+                raise HTTPException(409, "simulation has not started")
+            clock.update(phase="paused")
+        elif body.action == "speed":
+            if body.rate is None:
+                raise HTTPException(422, "rate required")
+            clock.update(rate=body.rate)
+        elif body.action == "normal":
+            at = clock.now().timestamp() + START_DELAY_SEC
+
+            def restore():
+                ctx.book.stop(None, at)
+                for equip_id in {event.equip_id for event in ctx.book.damaged()}:
+                    ctx.book.repair(equip_id, at)
+
+            await asyncio.to_thread(restore)
+        elif body.action == "inject":
+            if clock.phase != "running":
+                raise HTTPException(409, "simulation must be running")
+            if not body.equip_id or not body.mode:
+                raise HTTPException(422, "equipment and mode required")
+            _require_equipment(ctx, body.equip_id)
+            try:
+                await asyncio.to_thread(ctx.book.inject, body.equip_id, body.mode,
+                                        clock.now().timestamp() + START_DELAY_SEC, body.scenario_speed)
+            except Busy as exc:
+                raise HTTPException(409, "equipment already has an active scenario") from exc
+            except NotApplicable as exc:
+                raise HTTPException(422, str(exc)) from exc
+        state = _simulation_state(ctx)
+        ctx.control_receipts[body.command_id] = (body, state)
+        if len(ctx.control_receipts) > 1024:
+            ctx.control_receipts.pop(next(iter(ctx.control_receipts)))
+        return state
 
 
 @router.get("/stream")
 async def stream(ctx: PlantContext = Depends(context)):
-    return StreamingResponse(ctx.broadcaster.subscribe(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+    return StreamingResponse(ctx.broadcaster.subscribe(heartbeat=10), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
 # --- 앱 ----------------------------------------------------------------------
@@ -290,6 +378,12 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
             limiter = asyncio.Semaphore(EMBEDDED_CONCURRENCY)
             for entry in plants.plants:
                 ctx = app.state.plants[entry.key]
+                if settings.simulation_control and entry.key == "cdu" and ctx.runtime.physics is not None:
+                    stored = ctx.storage.sim_now()
+                    anchor = align_down(datetime.now(KST), ctx.runtime.send_interval_sec)
+                    if stored:
+                        anchor = max(anchor, from_db(stored).astimezone(KST) + timedelta(seconds=ctx.runtime.sample_interval_sec))
+                    ctx.simulation_clock = ControlledClock(anchor)
                 task = asyncio.create_task(run_plant_simulator(ctx, entry, settings, limiter), name=f"sim-{entry.key}")
                 task.add_done_callback(lambda t, ctx=ctx: _simulator_done(t, ctx))
                 tasks.append(task)

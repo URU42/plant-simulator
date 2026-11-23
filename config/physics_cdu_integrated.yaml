@@ -1,0 +1,48 @@
+# synthetic assumption: 토출 헤더부터 제품 이송 펌프까지 단상 수력 등가회로.
+plant_id: PL-CDU
+unit_id: UNIT-CDU-01
+equip_id: P-8101A
+suction_node: virtual:suction-boundary
+discharge_node: virtual:discharge-header
+provenance: synthetic assumption
+downstream_path: [P-8101A, DS, HX, HT, AT, P-8401A]
+downstream_branch: virtual:product-branch
+control_valve: virtual:feed-valve
+atmospheric_pa: 101325
+max_strainer_resistance_pa_s2_m6: 14000000
+max_impeller_head_loss: 0.10
+max_impeller_efficiency_loss: 0.20
+max_valve_opening_loss: 0.60
+network:
+  density_kg_m3: 850
+  pump:
+    reference_speed_rpm: 3600
+    rated_flow_m3_s: 0.11148554
+    shutoff_head_m: 371.895
+    rated_head_m: 294.27
+    efficiency: 0.75
+  branches:
+    - branch_id: virtual:other-products-branch
+      outlet_node: virtual:other-products-boundary
+      outlet_abs_pa: 2400000
+      pipes:
+        virtual:other-products-pipe: { length_m: 60, diameter_m: 0.10, darcy_factor: 0.025, minor_loss_k: 7.061 }
+    - branch_id: virtual:product-branch
+      outlet_node: virtual:diesel-delivery-boundary
+      outlet_abs_pa: 900000
+      pipes:
+        virtual:cdu-process-equivalent: { length_m: 120, diameter_m: 0.10, darcy_factor: 0.025, minor_loss_k: 71.395 }
+      valves:
+        virtual:feed-valve: { diameter_m: 0.10, full_open_k: 5 }
+      booster:
+        speed_rpm: 3600
+        pump:
+          reference_speed_rpm: 3600
+          rated_flow_m3_s: 0.05836
+          shutoff_head_m: 140
+          rated_head_m: 95
+          efficiency: 0.74
+        discharge_pipe: { length_m: 55, diameter_m: 0.13, darcy_factor: 0.025, minor_loss_k: 16.661 }
+default_point:
+  suction_abs_pa: 375990
+  speed_rpm: 3600

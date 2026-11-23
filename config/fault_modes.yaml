@@ -126,6 +126,7 @@ fault_modes:
       - id: S1
         name: 흡입 압력 저하
         at_sec: 0
+        hydraulic: [{parameter: strainer_blockage, amount: 0.45, rise_sec: 600}]
         effects:
           - { signal: suction_pressure, shape: ramp, to_limit: warn_lo, margin: 0.1, z: -6, rise_sec: 600 }
       - &pm_s2
@@ -149,6 +150,7 @@ fault_modes:
         id: S3
         name: 이상 심화
         at_sec: 900
+        hydraulic: [{parameter: strainer_blockage, amount: 0.55, rise_sec: 600}]
         effects:
           - { signal: suction_pressure, shape: ramp, to_limit: alarm_lo, margin: 0.05, z: -6, rise_sec: 600 }
           - { signal: vibration, shape: ramp, to_limit: alarm_hi, margin: 0.05, z: 6, rise_sec: 600 }
@@ -263,6 +265,7 @@ fault_modes:
       - id: S1
         name: 공급 유량 하향
         at_sec: 0
+        hydraulic: [{parameter: valve_restriction, amount: 0.2, rise_sec: 300}]
         effects:
           - { signal: flow, shape: ramp, z: -1.5, rise_sec: 300 }
           - { signal: discharge_pressure, shape: ramp, z: -1.0, rise_sec: 300 }
@@ -274,6 +277,33 @@ fault_modes:
         S1: { setpoint: none, nelson: [2], ml_plant: high }
       alarms:
         - { equip: self, kind: 정상 운전 변화 }
+
+  # CDU 결합 회로 전용 합성 시나리오. 진동·온도는 경험적 반응이다.
+  - id: PM-IMPELLER-WEAR
+    name: 임펠러 마모
+    equip_ids: [P-8101A]
+    physics_only: true
+    label: {kind: 공정·기계 이상, cause: 합성 임펠러 마모로 양정과 효율 감소, action: 정지 후 임펠러 점검·수리}
+    stages:
+      - id: S1
+        name: 임펠러 마모 진행
+        at_sec: 0
+        damage: true
+        hydraulic: [{parameter: impeller_wear, amount: 1, rise_sec: 300}]
+        effects:
+          - {signal: vibration, shape: ramp, z: 5, rise_sec: 300}
+          - {signal: bearing_temp, shape: ramp, z: 3, lag_sec: 30, rise_sec: 300}
+
+  - id: PM-DISCHARGE-VALVE-RESTRICTION
+    name: 토출 제어밸브 개도 이상
+    equip_ids: [P-8101A]
+    physics_only: true
+    label: {kind: 공정·기계 이상, cause: 합성 제어밸브 개도 저하, action: 밸브 작동과 지시 개도 확인}
+    stages:
+      - id: S1
+        name: 밸브 개도 저하
+        at_sec: 0
+        hydraulic: [{parameter: valve_restriction, amount: 1, rise_sec: 300}]
 
   - id: FN-IMPELLER-FOULING
     name: 팬 임펠러 오염·불균형

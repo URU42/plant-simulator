@@ -22,6 +22,7 @@ from common.timefmt import from_db, to_db
 from simulator.fault import (MAX_RECOVERY_SEC, RECOVERY_SEC, SPEEDS, FaultEvent, FaultMode, effect_start, holds_damage,
                              plan)
 from simulator import instrument as im
+from simulator.physics_adapter import PhysicsAdapter
 
 log = logging.getLogger("collector.anomaly_book")
 
@@ -44,19 +45,21 @@ def _epoch(s: str | None) -> float | None:
 
 class AnomalyBook:
     def __init__(self, storage: Storage, plant: PlantConfig, modes: dict[str, FaultMode],
-                 instrument: im.InstrumentSchedule | None = None) -> None:
+                 instrument: im.InstrumentSchedule | None = None, physics: PhysicsAdapter | None = None) -> None:
         self.storage = storage
         self.instrument = instrument
         self.plant = plant
         self.plant_id = plant.plant.plant_id
-        self.modes = modes
+        self.physics = physics
+        self.modes = {key: mode for key, mode in modes.items()
+                      if not mode.physics_only or (physics is not None and mode.applies_to(plant.equipment_by_id()[physics.primary]))}
         self.control = plant.control_by_key()
         self._lock = threading.RLock()
         self._events: dict[str, FaultEvent] = {}
         self._tags: dict[str, dict] = {}        # event_id → 태그별 적용 (손상이 남았는지 볼 때)
         self._high = -math.inf                  # 생성기가 external 로 물어본 구간 끝의 최대 (그 앞 표본은 이미 만들었다)
         for r in storage.query_dicts("SELECT * FROM anomaly_event ORDER BY start_at"):
-            mode = modes.get(r["mode"])
+            mode = self.modes.get(r["mode"])
             if mode is None:        # 파일에서 빠진 고장 모드: 정답지에는 남고 생성에는 더 쓰지 않는다
                 log.warning("anomaly_event %s: unknown fault mode %s, not generated", r["event_id"], r["mode"])
                 continue
@@ -70,7 +73,11 @@ class AnomalyBook:
     def applicable(self, equip_id: str) -> list[FaultMode]:
         """그 설비에 걸 수 있는 고장 모드 (효과가 걸리는 태그가 하나라도 있는 것)."""
         e = self.plant.equipment_by_id()[equip_id]
-        return [m for m in self.modes.values() if m.applies_to(e) and plan(self.plant, m, equip_id, self.control)]
+        return [m for m in self.modes.values() if m.applies_to(e) and self._plan(m, equip_id)]
+
+    def _plan(self, mode: FaultMode, equip_id: str):
+        return (self.physics.tag_plan(mode, equip_id) if self.physics
+                else plan(self.plant, mode, equip_id, self.control))
 
     # --- EventSource ---------------------------------------------------------
     def external(self, start: float, end: float) -> list[FaultEvent]:
@@ -83,7 +90,7 @@ class AnomalyBook:
     def _held(self, e: FaultEvent) -> bool:
         """멈춘 사건에 수리 전까지 남는 손상 효과가 있는가 (고친 뒤에도 True)."""
         if e.event_id not in self._tags:
-            self._tags[e.event_id] = plan(self.plant, e.mode, e.equip_id, self.control)
+            self._tags[e.event_id] = self._plan(e.mode, e.equip_id)
         return holds_damage(self._tags[e.event_id], e)
 
     # --- 주입·멈춤 -------------------------------------------------------------
@@ -96,7 +103,7 @@ class AnomalyBook:
             raise NotApplicable(f"unknown fault mode {mode_id}")
         if not mode.applies_to(self.plant.equipment_by_id()[equip_id]):
             raise NotApplicable(f"fault mode {mode_id} does not apply to {equip_id}")
-        tags = plan(self.plant, mode, equip_id, self.control)
+        tags = self._plan(mode, equip_id)
         if not tags:
             raise NotApplicable(f"fault mode {mode_id} has no tag to move on {equip_id}")
         with self._lock:
@@ -111,14 +118,19 @@ class AnomalyBook:
                         "damage": a.damage, "boost_by": tp.boost and tp.boost.by[1]}
                        for k, tp in tags.items() for a in tp.applied]
             boost = mode.boost and mode.boost.model_dump(exclude_none=True)
+            physical = any(tp.via == "physics" for tp in tags.values())
+            recorded = {"stages": stages, "tags": applied, "unobserved": mode.unobserved,
+                        "code": mode.label.code, "speed": speed, "boost": boost}
+            if physical:
+                recorded["physical_parameters"] = [
+                    {"stage": stage.id, **change.model_dump()} for stage in mode.stages for change in stage.hydraulic
+                ]
             self.storage.execute(
                 "INSERT INTO anomaly_event (event_id, equip_id, mode, kind, cause, action, expect, plan, start_at, stop_requested_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
                 (event.event_id, equip_id, mode.id, mode.label.kind, mode.label.cause, mode.label.action,
-                 None if mode.expect is None else json.dumps(mode.expect, ensure_ascii=False),
-                 json.dumps({"stages": stages, "tags": applied, "unobserved": mode.unobserved, "code": mode.label.code,
-                             "speed": speed, "boost": boost},
-                            ensure_ascii=False), _db(at)))
+                 None if physical or mode.expect is None else json.dumps(mode.expect, ensure_ascii=False),
+                 json.dumps(recorded, ensure_ascii=False), _db(at)))
             self._events[event.event_id] = event
             self._tags[event.event_id] = tags
             return event
@@ -207,6 +219,8 @@ class AnomalyBook:
                         "code": p.get("code", 0), "speed": speed, "boost": p.get("boost"), "stages": stages, "response_tags": tags, "unobserved": p.get("unobserved", []),
                         "start_at": r["start_at"], "stop_requested_at": r["stop_requested_at"],
                         "damage_remains": held, "repair_requested_at": r["repair_requested_at"], "end_at": end_at})
+            if "physical_parameters" in p:
+                out[-1]["physical_parameters"] = [x for x in p["physical_parameters"] if started(stage_at[x["stage"]])]
         out += self._instrument_key(equip_id, from_, to)
         return sorted(out, key=lambda e: (e["start_at"], e["event_id"]))
 

@@ -38,6 +38,8 @@ Skadi 앞단 데이터 생성기. 가상 공장 다섯 곳의 설비 센서 값�
 | 실시간 화면 갱신 | SSE (`GET /{공장}/stream`). 디버깅용 현재값 페이지 `GET /{공장}/` 는 의존성 없는 HTML 한 장 |
 | 실행 | 스크립트, Docker Compose, k8s(`deploy/k8s`, 파드 하나 500m/1Gi) |
 
+PL-CDU 소규모 물리 모델과 Three.js·GLB 계측 재생은 [CDU 물리 재생 안내](docs/cdu-physics.md)에서 실행할 수 있다.
+
 ## 빠른 시작
 
 ```bash
