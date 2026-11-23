@@ -253,6 +253,9 @@ def test_boost_only_on_injected_pump_with_temp_tag(modes, config_dir):
     assert boost_gain(b, 10 / ctrl[by][1]) == pytest.approx(1.3)          # +10 ℃ → ×1.3
     assert boost_gain(b, 60 / ctrl[by][1]) == 2.0 and boost_gain(b, -5.0) == 1.0   # 상한, 내려가면 키우지 않는다
     assert not any(tp.boost for tp in plan(plant, modes["PM-SUCTION-LOSS"], "P-3101", ctrl).values())   # 온도 태그 없는 펌프
+    hou = load_plant(config_dir / "plant_hou.yaml")                      # 온도 태그가 있어도 흡입 유체 온도가 아니면 제외 (대상 3대)
+    assert not any(tp.boost for tp in plan(hou, modes["PM-SUCTION-LOSS"], "P-2701", hou.control_by_key()).values())
+    assert modes["PM-SUCTION-HOT"].equip_ids == modes["PM-SUCTION-LOSS"].boost.equip_ids == ["P-3102", "P-4102", "P-8303A"]
     assert "PM-SUCTION-HOT" not in {m.id for m in modes.values() if m.applies_to(plant.equipment_by_id()["P-3101"])}
 
 
