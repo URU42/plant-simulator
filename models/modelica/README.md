@@ -38,7 +38,7 @@ uv run --locked python -m models.modelica.verify \
   --output .cache/openmodelica/verification-docker
 ```
 
-자동화는 `omc --version`, `Smoke.mo`를 컴파일·적분한 값 `x(1) ≈ exp(-1)`, 정상·밸브·회전수·막힘의 다섯 회로를 확인한다. 결과 폴더에 생성된 Modelica 입력, 실행 스크립트, 컴파일러 로그, 원시 결과 CSV와 비교 CSV/JSON이 남는다.
+자동화는 `omc --version`, `Smoke.mo`를 컴파일·적분한 값 `x(1) ≈ exp(-1)`, 정상·밸브 제한·정상 처리량 감소·임펠러 마모·회전수 두 지점·막힘의 일곱 정상 운전점을 확인한다. 마모·처리량 감소를 추가하기 전의 결과는 REPORT.md에 기록돼 있다. 시간에 따른 고장 단계, 센서 잡음·지연·누락, 캐비테이션/NPSH는 이 비교 범위 밖이다. 결과 폴더에 생성된 Modelica 입력, 실행 스크립트, 컴파일러 로그, 원시 결과 CSV와 비교 CSV/JSON이 남는다.
 
 ## 합격 기준
 

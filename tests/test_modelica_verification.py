@@ -7,17 +7,22 @@ from models.modelica.verify import CoupledCase, comparison_row, models, read_fin
 def test_modelica_inputs_and_python_operating_points_share_yaml(config_dir):
     case = CoupledCase.model_validate(load_yaml(config_dir / "physics_cdu_integrated.yaml"))
     source, points = models(case)
-    assert len(points) == 5
+    assert len(points) == 7
     assert "source(p=375990)" in source
     assert "strainer(resistance=14000000)" in source
     assert points["SpeedLow"][0].speed_rpm == 3240
     assert points["SpeedHigh"][0].speed_rpm == pytest.approx(3960)
     assert points["ValveRestricted"][0].valve_openings[case.control_valve] == 0.4
     assert points["StrainerBlocked"][1] == case.max_strainer_resistance_pa_s2_m6
-    flow = {k: case.network.solve(*args).pump_flow_m3_s for k, args in points.items()}
+    assert points["ThroughputReduced"][0].valve_openings[case.control_valve] == pytest.approx(0.88)
+    assert points["ImpellerWorn"][2].efficiency == pytest.approx(0.6)
+    flow = {k: case.network.model_copy(update={"pump": pump}).solve(point, resistance).pump_flow_m3_s
+            for k, (point, resistance, pump) in points.items()}
     assert flow["SpeedLow"] < flow["Normal"] < flow["SpeedHigh"]
     assert flow["ValveRestricted"] < flow["Normal"]
     assert flow["StrainerBlocked"] < flow["Normal"]
+    assert flow["ImpellerWorn"] < flow["Normal"]
+    assert flow["ValveRestricted"] < flow["ThroughputReduced"] < flow["Normal"]
 
 
 def test_balance_requires_both_models_to_close():

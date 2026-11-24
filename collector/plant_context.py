@@ -71,7 +71,7 @@ class PlantContext:
         except RuntimeError:
             loop = None
         return cls(key=entry.key, plant=plant, runtime=runtime, storage=storage, jobs=JobRunner(storage, plant, runtime),
-                   broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime), tag_keys=storage.tag_keys(),
+                   broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime, physics), tag_keys=storage.tag_keys(),
                    loop=loop, book=AnomalyBook(storage, plant, modes, _instrument(plant, runtime), physics),
                    data_stream=DataStream.from_url(redis_url, entry.key) if redis_url else None)
 
@@ -190,7 +190,7 @@ class PlantContext:
         return row or {"equip_id": key[0], "tag_id": key[1], "ts": None, "value": None, "received_at": None}
 
 
-def equipment_listing(plant: PlantConfig, runtime: RuntimeConfig) -> list[dict]:
+def equipment_listing(plant: PlantConfig, runtime: RuntimeConfig, physics: PhysicsAdapter | None = None) -> list[dict]:
     """unit_groups → units → 설비(yaml 순서) 순으로 설비와 태그를 펼친다. 마스터 참고 필드와 한계값도 함께.
     control 은 운전점을 반영한 μ·σ (탐지 쪽 Nelson 기준)."""
     control = plant.control_by_key()
@@ -207,6 +207,9 @@ def equipment_listing(plant: PlantConfig, runtime: RuntimeConfig) -> list[dict]:
                     "tags": [{"tag_id": t.tag_id, "signal": t.signal, "unit": t.unit, "description": t.description,
                               "interval_sec": plant.tag_interval_sec((e.equip_id, t.tag_id), runtime.sample_interval_sec),
                               "decimals": t.decimals, "normal_ref": t.normal_ref, "limit_basis": t.limit_basis,
+                              **({"measurement_model": ("physical" if (e.equip_id, t.tag_id) in physics.tag_keys else "empirical"),
+                                  "hydraulic_role": {physics.primary: "source", physics.downstream: "downstream"}.get(e.equip_id)}
+                                 if physics is not None else {}),
                               "limits": t.limits.model_dump(exclude_none=True) if t.limits else None,
                               "control": dict(zip(("mean", "sigma"), control[(e.equip_id, t.tag_id)]))} for t in e.tags],
                 })

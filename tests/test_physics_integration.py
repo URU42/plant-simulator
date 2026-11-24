@@ -186,3 +186,69 @@ def test_example_exports_observations_and_evaluation_separately(config_dir, tmp_
     assert {event["mode"] for event in truth["events"]} == {"PM-SUCTION-LOSS", "PM-IMPELLER-WEAR"}
     assert len({s.ts for s in samples}) == len(truth["states"])
     assert truth["states"][0]["pump_flow_m3_s"] == truth["states"][-1]["pump_flow_m3_s"]
+
+
+@pytest.mark.parametrize(('mode', 'amount', 'fault', 'directions'), [
+    ('PM-SUCTION-LOSS', 1.0, True, (-1, -1, -1, -1, -1, -1, -1)),
+    ('PM-IMPELLER-WEAR', 1.0, True, (0, -1, -1, 1, -1, -1, -1)),
+    ('PM-DISCHARGE-VALVE-RESTRICTION', 1.0, True, (0, 1, -1, -1, -1, -1, -1)),
+    ('OP-THROUGHPUT-CHANGE', 0.2, False, (0, 1, -1, -1, -1, -1, -1)),
+])
+def test_all_cdu_operating_scenarios(coupled, mode, amount, fault, directions):
+    plant, runtime, physics, book = coupled
+    event = book.inject(physics.primary, mode, EPOCH + 10, 10)
+    assert (event.mode.label.code != 1) == fault
+    book.stop(physics.primary, EPOCH + 180)
+    wear = mode == 'PM-IMPELLER-WEAR'
+    if wear:
+        assert book.repair(physics.primary, EPOCH + 250)[1] == [event.event_id]
+    plans = physics.parameter_plans(book.external(EPOCH, EPOCH + 320))
+    normal = physics.solve(0, 0, 0)
+    shifted = physics.state(EPOCH + 165, plans)
+    assert shifted == physics.solve(amount if mode == 'PM-SUCTION-LOSS' else 0, amount if wear else 0,
+                                    amount if mode in {'OP-THROUGHPUT-CHANGE', 'PM-DISCHARGE-VALVE-RESTRICTION'} else 0)
+    assert abs(shifted.mass_residual_kg_s) < 1e-9
+    assert abs(shifted.pump_pressure_residual_pa) < 1e-6
+    assert physics.state(EPOCH + 20, plans) not in (normal, shifted)
+    assert (physics.state(EPOCH + 245, plans) == shifted) == wear
+    assert physics.state(EPOCH + 315, plans) == normal
+    tags = (SUCTION, HEADER, FLOW, ('P-8101A', 'II-8101A'), PRODUCT, ('P-8401A', 'PI-8401B'), ('P-8401A', 'II-8401A'))
+    nominal, generated = (_samples(PlantGenerator(plant, runtime, source), end=320) for source in (None, book))
+    samples = _values(generated, 165)
+    baseline = _values(nominal, 165)
+    expected = physics.sensor_centers(shifted)
+    reference = physics.sensor_centers(normal)
+    for tag, direction in zip(tags, directions, strict=True):
+        delta = expected[tag] - reference[tag]
+        assert delta == 0 if direction == 0 else delta * direction > 0
+        assert samples[tag] - baseline[tag] == pytest.approx(delta, abs=0.00011)
+        assert _values(generated, 315)[tag] == _values(nominal, 315)[tag]
+
+
+def test_simulation_observations_returns_only_bounded_observations(coupled, config_dir, tmp_path):
+    plant, runtime, _, _ = coupled
+    path = tmp_path / 'runtime.yaml'
+    path.write_text(runtime.model_dump_json(), encoding='utf-8')
+    settings = Settings(with_simulators=False, ingest_token='local-test')
+    app = create_single_app(config_dir / 'plant_cdu.yaml', path, ':memory:', settings=settings)
+    from common.sim_clock import ControlledClock
+    with TestClient(app) as client:
+        ctx = app.state.plants['plant']
+        ctx.simulation_clock = ControlledClock(START + timedelta(seconds=10))
+        samples = _samples(PlantGenerator(plant, runtime), start=8, end=13)
+        ctx.receive_local('observations-test', runtime.source_id, samples)
+        route = '/plant/simulation/observations'
+        params = {'equip_id': PRODUCT[0], 'from': (START + timedelta(seconds=9)).isoformat(),
+                  'to': (START + timedelta(seconds=12)).isoformat()}
+        assert client.get(route, params=params).status_code in (401, 403)
+        headers = {'X-Ingest-Token': 'local-test'}
+        response = client.get(route, params=params, headers=headers)
+        assert response.status_code == 200
+        rows = response.json()
+        assert rows and {row['equip_id'] for row in rows} == {PRODUCT[0]}
+        assert all(set(row) == {'equip_id', 'tag_id', 'ts', 'value', 'received_at'} for row in rows)
+        from datetime import timezone
+        assert {datetime.fromisoformat(row['ts']) for row in rows} == {
+            (START + timedelta(seconds=second)).astimezone(timezone.utc) for second in (9, 10)
+        }
+        assert sum(len(asset['tags']) for asset in client.get('/plant/equipment').json()) == 46

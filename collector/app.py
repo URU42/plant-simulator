@@ -281,7 +281,7 @@ def answer_key(request: Request, equip_id: str | None = None, from_: str | None 
 class SimulationAction(BaseModel):
     model_config = {"extra": "forbid"}
     command_id: str = Field(min_length=1, max_length=64)
-    action: Literal["start", "pause", "resume", "speed", "normal", "inject"]
+    action: Literal["start", "pause", "resume", "speed", "normal", "inject", "stop", "repair"]
     rate: Literal[1, 5, 10, 30, 60] | None = None
     mode: str | None = Field(default=None, max_length=80)
     equip_id: str | None = Field(default=None, max_length=80)
@@ -300,6 +300,28 @@ def _simulation_state(ctx: PlantContext) -> dict:
 @router.get("/simulation")
 def simulation_state(ctx: PlantContext = Depends(context)):
     return _simulation_state(ctx)
+
+
+@router.get("/simulation/observations")
+def simulation_observations(request: Request, equip_id: str | None = None,
+                            from_: str | None = Query(default=None, alias="from"), to: str | None = None,
+                            ctx: PlantContext = Depends(context)):
+    """관측 전용 원시 표본. 종료 시각은 현재 시뮬레이션 시각으로 제한한다."""
+    require_ingest_token(request)
+    _simulation_state(ctx)
+    if equip_id is not None:
+        _require_equipment(ctx, equip_id)
+    now = from_db(_simulation_state(ctx)["sim_time"])
+    end = min(from_db(query_time("to", to)), now) if to is not None else now
+    start = from_db(query_time("from", from_)) if from_ is not None else end - timedelta(seconds=30)
+    if not timedelta(0) <= end - start <= timedelta(minutes=5):
+        raise HTTPException(422, "observation range must be within five minutes and end at or before simulation time")
+    condition = " AND equip_id = ?" if equip_id is not None else ""
+    params = (to_db(start), to_db(end)) if equip_id is None else (to_db(start), to_db(end), equip_id)
+    return ctx.storage.query_dicts(
+        "SELECT equip_id, tag_id, ts, value, received_at FROM ts_raw "
+        "WHERE ts >= ? AND ts <= ? AND value IS NOT NULL" + condition + " ORDER BY ts, equip_id, tag_id", params,
+    )
 
 
 @router.post("/simulation/control")
@@ -334,6 +356,12 @@ async def simulation_control(body: SimulationAction, request: Request, ctx: Plan
                     ctx.book.repair(equip_id, at)
 
             await asyncio.to_thread(restore)
+        elif body.action in ("stop", "repair"):
+            if not body.equip_id:
+                raise HTTPException(422, "equipment required")
+            _require_equipment(ctx, body.equip_id)
+            operation = ctx.book.stop if body.action == "stop" else ctx.book.repair
+            await asyncio.to_thread(operation, body.equip_id, clock.now().timestamp() + START_DELAY_SEC)
         elif body.action == "inject":
             if clock.phase != "running":
                 raise HTTPException(409, "simulation must be running")

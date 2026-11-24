@@ -37,13 +37,16 @@ BALANCE_TOL = {
 class Scenario:
     name: str
     speed_ratio: float = 1.0
-    opening_ratio: float = 1.0
     blockage: float = 0.0
+    wear: float = 0.0
+    valve_restriction: float = 0.0
 
 
 SCENARIOS = (
     Scenario("Normal"),
-    Scenario("ValveRestricted", opening_ratio=0.4),
+    Scenario("ValveRestricted", valve_restriction=1.0),
+    Scenario("ThroughputReduced", valve_restriction=0.2),
+    Scenario("ImpellerWorn", wear=1.0),
     Scenario("SpeedLow", speed_ratio=0.9),
     Scenario("SpeedHigh", speed_ratio=1.1),
     Scenario("StrainerBlocked", blockage=1.0),
@@ -65,7 +68,7 @@ def pump_args(prefix: str, pump: Pump, speed: float) -> str:
                       ratedFlow=pump.rated_flow_m3_s, zeroHead=pump.shutoff_head_m, ratedHead=pump.rated_head_m)
 
 
-def models(case: CoupledCase) -> tuple[str, dict[str, tuple[OperatingPoint, float]]]:
+def models(case: CoupledCase) -> tuple[str, dict[str, tuple[OperatingPoint, float, Pump]]]:
     network = case.network
     product = next(b for b in network.branches if b.branch_id == case.downstream_branch)
     others = [b for b in network.branches if b is not product]
@@ -82,18 +85,24 @@ def models(case: CoupledCase) -> tuple[str, dict[str, tuple[OperatingPoint, floa
     lines = ["package CduScenarios"]
     for scenario in SCENARIOS:
         speed = default.speed_rpm * scenario.speed_ratio
-        opening = default.valve_openings.get(case.control_valve, 1) * scenario.opening_ratio
+        opening = default.valve_openings.get(case.control_valve, 1) * (1 - scenario.valve_restriction * case.max_valve_opening_loss)
+        head_factor = 1 - scenario.wear * case.max_impeller_head_loss
+        pump = network.pump.model_copy(update={
+            "shutoff_head_m": network.pump.shutoff_head_m * head_factor,
+            "rated_head_m": network.pump.rated_head_m * head_factor,
+            "efficiency": network.pump.efficiency * (1 - scenario.wear * case.max_impeller_efficiency_loss),
+        })
         resistance = case.max_strainer_resistance_pa_s2_m6 * scenario.blockage
         point = OperatingPoint(suction_abs_pa=default.suction_abs_pa, speed_rpm=speed,
                                valve_openings={case.control_valve: opening})
-        specs[scenario.name] = (point, resistance)
+        specs[scenario.name] = (point, resistance, pump)
         args = [
             f"rho={network.density_kg_m3:.17g}, g={GRAVITY_M_S2:.17g}",
             assignment("source", p=point.suction_abs_pa),
             assignment("otherSink", p=other.outlet_abs_pa),
             assignment("productSink", p=product.outlet_abs_pa),
             assignment("strainer", resistance=resistance),
-            pump_args("feed", network.pump, speed),
+            pump_args("feed", pump, speed),
             pipe_args("otherLine", next(iter(other.pipes.values())), other.elevation_change_m),
             pipe_args("processLine", next(iter(product.pipes.values())), product.elevation_change_m),
             assignment("valve", diameter=valve.diameter_m, fullK=valve.full_open_k, opening=opening),
@@ -189,8 +198,10 @@ def compare(config: Path, omc: str, output: Path) -> bool:
     (output / "cases.mos").write_text("\n".join(commands) + "\n", encoding="utf-8")
     run_omc(omc, output, "cases.mos", "cases.log")
     rows = []
-    for name, (point, resistance) in specs.items():
-        reference = python_outputs(case, point, case.network.solve(point, resistance))
+    for name, (point, resistance, pump) in specs.items():
+        network = case.network.model_copy(update={"pump": pump})
+        scenario_case = case.model_copy(update={"network": network})
+        reference = python_outputs(scenario_case, point, network.solve(point, resistance))
         actual = read_final_row(output / f"{name}_res.csv")
         rows.extend(comparison_row(name, field, expected, actual[field]) for field, expected in reference.items())
     with (output / "comparison.csv").open("x", encoding="utf-8", newline="") as file:
