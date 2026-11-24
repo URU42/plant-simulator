@@ -31,6 +31,10 @@ class Busy(Exception):
     """그 설비에 안 멈춘 주입 사건이 있다 (먼저 멈춰야 한다)."""
 
 
+class CircuitBusy(Busy):
+    """같은 수력 회로에 진행·회복·미수리 손상 중인 물리 사건이 있다. 물리 파라미터 조합은 검증하지 않았으므로 한 번에 하나만 연다."""
+
+
 class NotApplicable(Exception):
     """모르는 고장 모드이거나, 그 설비에 걸 수 없는 고장 모드다."""
 
@@ -52,7 +56,9 @@ class AnomalyBook:
         self.plant_id = plant.plant.plant_id
         self.physics = physics
         self.modes = {key: mode for key, mode in modes.items()
-                      if not mode.physics_only or (physics is not None and mode.applies_to(plant.equipment_by_id()[physics.primary]))}
+                      if not mode.physics_only or (physics is not None and any(
+                          mode.applies_to(plant.equipment_by_id()[eid]) and physics.physical_parameters(mode, eid)
+                          for eid in physics.roles))}
         self.control = plant.control_by_key()
         self._lock = threading.RLock()
         self._events: dict[str, FaultEvent] = {}
@@ -87,6 +93,14 @@ class AnomalyBook:
                     if e.start < end and (e.stop is None or e.stop + MAX_RECOVERY_SEC > start
                                           or (e.repair is None or e.repair + MAX_RECOVERY_SEC > start) and self._held(e))]
 
+    def _physical_effect_at(self, e: FaultEvent, at: float) -> bool:
+        """이 사건의 물리 파라미터가 at 에 아직 0 이 아닐 수 있는가 (진행 중·멈춘 뒤 회복 중·손상 미수리·수리 뒤 회복 중)."""
+        if not self.physics.physical_parameters(e.mode, e.equip_id):
+            return False
+        if e.stop is None or e.stop + RECOVERY_SEC > at:
+            return True
+        return self._held(e) and (e.repair is None or e.repair + RECOVERY_SEC > at)
+
     def _held(self, e: FaultEvent) -> bool:
         """멈춘 사건에 수리 전까지 남는 손상 효과가 있는가 (고친 뒤에도 True)."""
         if e.event_id not in self._tags:
@@ -110,6 +124,12 @@ class AnomalyBook:
             at = max(at, self._high)
             if any(e.equip_id == equip_id and (e.stop is None or e.stop > at) for e in self._events.values()):
                 raise Busy(equip_id)
+            if self.physics is not None and self.physics.physical_parameters(mode, equip_id):
+                circuit = self.physics.circuit_of(equip_id)
+                blocking = [e.event_id for e in self._events.values()
+                            if self.physics.circuit_of(e.equip_id) == circuit and self._physical_effect_at(e, at)]
+                if blocking:
+                    raise CircuitBusy(", ".join(blocking))
             n = 1 + self.storage.query("SELECT COUNT(*) FROM anomaly_event")[0][0]
             event = FaultEvent(f"FM-{self.plant_id}-{n:04d}", equip_id, mode, at, speed=speed)
             stages = [{"id": s.id, "name": s.name, "at_sec": s.at_sec, "nelson_quiet": s.nelson_quiet, "damage": s.damage}

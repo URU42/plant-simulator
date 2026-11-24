@@ -196,6 +196,8 @@ fault_modes:
       - id: S1
         name: 흡입 압력 저하 + 유체 온도 상승
         at_sec: 0
+        # 물리 결합 회로(CDU P-8303A)에서는 같은 600초 동안 흡입 유체 온도를 최대 +15 K(회로 설정) 올려 증기압·NPSHa 를 계산한다.
+        hydraulic: [{parameter: suction_temperature_rise, amount: 1, rise_sec: 600}]
         effects:
           - { signal: suction_pressure, shape: ramp, to_limit: warn_lo, margin: 0.1, z: -6, rise_sec: 600 }
           - { signal: process_temp, shape: ramp, delta: 15, rise_sec: 600 }
@@ -278,10 +280,11 @@ fault_modes:
       alarms:
         - { equip: self, kind: 정상 운전 변화 }
 
-  # CDU 결합 회로 전용 합성 시나리오. 진동·온도는 경험적 반응이다.
+  # 플랜트별 대표 수력 회로 전용 합성 시나리오 (물리 결합이 켜진 공장에서만 보인다). 진동·온도는 경험적 반응이다.
+  # 입력 펌프와 후속 펌프: CDU P-8101A·P-8401A, HOU P-2101·P-2701, RFCC P-1101A·P-1303A, RHDS P-3101·P-3102, VRDS P-4101·P-4102
   - id: PM-IMPELLER-WEAR
     name: 임펠러 마모
-    equip_ids: [P-8101A]
+    equip_ids: [P-8101A, P-8401A, P-8303A, P-2101, P-2701, P-1101A, P-1303A, P-3101, P-3102, P-4101, P-4102]
     physics_only: true
     label: {kind: 공정·기계 이상, cause: 합성 임펠러 마모로 양정과 효율 감소, action: 정지 후 임펠러 점검·수리}
     stages:
@@ -294,6 +297,7 @@ fault_modes:
           - {signal: vibration, shape: ramp, z: 5, rise_sec: 300}
           - {signal: bearing_temp, shape: ramp, z: 3, lag_sec: 30, rise_sec: 300}
 
+  # CDU 결합 회로 제품 분기 제어밸브 전용 (2026-11-24 D2-A: 다른 공장에는 밸브 설비·태그가 없어 적용하지 않는다)
   - id: PM-DISCHARGE-VALVE-RESTRICTION
     name: 토출 제어밸브 개도 이상
     equip_ids: [P-8101A]
@@ -324,6 +328,8 @@ fault_modes:
         name: 오염 퇴적 진행
         at_sec: 0
         damage: true
+        # 물리 결합 회로(CDU F-8201): 오염 퇴적으로 팬 압력 곡선·효율 저하 (S1 0.6 + S2 0.4 = 최대치, synthetic)
+        hydraulic: [{parameter: impeller_wear, amount: 0.6, rise_sec: 1200}]
         effects:
           - { signal: vibration, shape: ramp, to_limit: warn_hi, margin: 0.1, z: 8, rise_sec: 1200 }
           - { signal: flow, shape: ramp, z: -4, rise_sec: 1200 }
@@ -335,6 +341,7 @@ fault_modes:
         name: 불균형 심화
         at_sec: 1200
         damage: true
+        hydraulic: [{parameter: impeller_wear, amount: 0.4, rise_sec: 900}]
         effects:
           - { signal: vibration, shape: ramp, to_limit: alarm_hi, margin: 0.05, z: 15, rise_sec: 900 }
           - { signal: bearing_temp, shape: ramp, z: 10, lag_sec: 120, rise_sec: 900 }
@@ -344,6 +351,19 @@ fault_modes:
         S2: { setpoint: alarm, nelson: [1, 2], ml_plant: high }
       alarms:
         - { equip: self, count: 1, opens_in: S1, upgrades_in: S2 }
+
+  # CDU F-8201 팬 회로 전용 합성 시나리오 (2026-11-24). 흡입 필터·소음기·댐퍼 저항 증가로 풍량 저하. 진동·온도 효과는 넣지 않는다.
+  - id: FN-INLET-RESTRICTION
+    name: 팬 흡입 필터·댐퍼 막힘
+    equip_ids: [F-8201]
+    physics_only: true
+    unobserved: [흡입 필터 차압, 댐퍼 개도, 가열로 과잉 공기율·연소 상태]
+    label: {kind: 공정·기계 이상, cause: 합성 흡입 필터·댐퍼 막힘으로 연소 공기 풍량 저하, action: 흡입 필터 청소·교체와 댐퍼 개도 확인}
+    stages:
+      - id: S1
+        name: 흡입 저항 증가
+        at_sec: 0
+        hydraulic: [{parameter: strainer_blockage, amount: 1, rise_sec: 600}]
 
   - id: EX-CATALYST-EROSION
     name: 팽창 터빈 촉매 미립자 부착·침식

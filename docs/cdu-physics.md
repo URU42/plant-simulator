@@ -149,6 +149,8 @@ uv run python -m simulator.physics_scenario cdu-scenario-example
 
 ## D4 로컬 실시간 검수
 
+2026-11-24부터 `scripts/prepare_twin.py` 가 다섯 공장 설정을 만들고(`prepare_cdu_twin.py` 는 CDU 만), 브라우저 E2E 는 진단 저장소 `scripts/twin_browser_e2e.mjs` 를 쓴다. 다섯 공장 범위는 [plant-twin-d4.md](plant-twin-d4.md).
+
 `sk-clx-diag-agent`의 3D CDU 화면에서 운전·정상 전환·배속·막힘을 조작한다. 실제 배치 인증이나 고장 검출 정확도 검증에는 사용하지 않는다. 합성 관측·정답·검수 로그와 비밀번호는 Git에서 제외하며 프로젝트의 `.cache/d4`에만 보관한다. D2 예제 출력 `examples/cdu-physics`도 로컬 생성물이다.
 
 먼저 새 로컬 설정을 생성한다. 아래의 `D4_RUN`에는 출력된 **절대 경로**를 사용한다. 각 서비스는 별도 터미널에서 조작 없이 기동한다.

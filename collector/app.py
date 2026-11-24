@@ -25,7 +25,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 
-from collector.anomaly_book import Busy, NotApplicable
+from collector.twin_catalog import build_catalog, injectable
+from collector.anomaly_book import Busy, CircuitBusy, NotApplicable
 from collector.ingest import RawBatch, schema_supported, validate_samples
 from collector.plant_context import PlantContext
 from collector.plants import PlantEntry, PlantsConfig, load_plants
@@ -207,6 +208,8 @@ async def inject_anomaly(request: Request, ctx: PlantContext = Depends(context))
     _require_equipment(ctx, body.equip_id)
     try:
         event = await asyncio.to_thread(lambda: ctx.book.inject(body.equip_id, body.mode, event_time(ctx), body.speed))
+    except CircuitBusy as e:
+        raise HTTPException(409, f"hydraulic circuit busy ({e}): one physics scenario per circuit until it recovers")
     except Busy:
         raise HTTPException(409, f"{body.equip_id} has a live fault: stop it first")
     except NotApplicable as e:
@@ -302,6 +305,15 @@ def simulation_state(ctx: PlantContext = Depends(context)):
     return _simulation_state(ctx)
 
 
+@router.get("/simulation/catalog")
+def simulation_catalog(request: Request, ctx: PlantContext = Depends(context)):
+    """설비별 트윈 조작 지원 범위와 조작 상태. 운영자 토큰 필요. 정답 분류·기대값은 싣지 않는다."""
+    require_ingest_token(request)
+    state = _simulation_state(ctx)
+    return {"sim_time": state["sim_time"],
+            **build_catalog(ctx.plant, ctx.book, ctx.book.physics, from_db(state["sim_time"]).timestamp())}
+
+
 @router.get("/simulation/observations")
 def simulation_observations(request: Request, equip_id: str | None = None,
                             from_: str | None = Query(default=None, alias="from"), to: str | None = None,
@@ -361,16 +373,26 @@ async def simulation_control(body: SimulationAction, request: Request, ctx: Plan
                 raise HTTPException(422, "equipment required")
             _require_equipment(ctx, body.equip_id)
             operation = ctx.book.stop if body.action == "stop" else ctx.book.repair
-            await asyncio.to_thread(operation, body.equip_id, clock.now().timestamp() + START_DELAY_SEC)
+            _, changed = await asyncio.to_thread(operation, body.equip_id, clock.now().timestamp() + START_DELAY_SEC)
+            if not changed:
+                # 멈추거나 고칠 사건이 없는 요청을 성공으로 돌려주지 않는다.
+                raise HTTPException(409, f"no {'active scenario' if body.action == 'stop' else 'damage to repair'} on {body.equip_id}")
         elif body.action == "inject":
             if clock.phase != "running":
                 raise HTTPException(409, "simulation must be running")
             if not body.equip_id or not body.mode:
                 raise HTTPException(422, "equipment and mode required")
             _require_equipment(ctx, body.equip_id)
+            now = clock.now().timestamp()
+            catalog = await asyncio.to_thread(build_catalog, ctx.plant, ctx.book, ctx.book.physics, now)
+            status, reason = injectable(catalog, body.equip_id, body.mode)
+            if status != 200:
+                raise HTTPException(status, reason)
             try:
                 await asyncio.to_thread(ctx.book.inject, body.equip_id, body.mode,
-                                        clock.now().timestamp() + START_DELAY_SEC, body.scenario_speed)
+                                        now + START_DELAY_SEC, body.scenario_speed)
+            except CircuitBusy as exc:
+                raise HTTPException(409, f"hydraulic circuit busy: {exc}") from exc
             except Busy as exc:
                 raise HTTPException(409, "equipment already has an active scenario") from exc
             except NotApplicable as exc:
@@ -406,7 +428,8 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
             limiter = asyncio.Semaphore(EMBEDDED_CONCURRENCY)
             for entry in plants.plants:
                 ctx = app.state.plants[entry.key]
-                if settings.simulation_control and entry.key == "cdu" and ctx.runtime.physics is not None:
+                # 물리 회로가 켜진 공장마다 조작 시계를 둔다 (D0 CDU → D4 HOU·RFCC·RHDS·VRDS).
+                if settings.simulation_control and ctx.runtime.physics is not None:
                     stored = ctx.storage.sim_now()
                     anchor = align_down(datetime.now(KST), ctx.runtime.send_interval_sec)
                     if stored:
@@ -550,6 +573,9 @@ def _parse_args(argv=None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+GRACEFUL_SHUTDOWN_SEC = 5
+
+
 def main(argv=None) -> None:
     import uvicorn
 
@@ -562,7 +588,10 @@ def main(argv=None) -> None:
         check_plants(plants, settings.reset_db_on_schema_change, settings.profile)
     except ConfigError as e:
         sys.exit(f"error: {e}")
-    uvicorn.run(create_app(plants, settings), host=args.host, port=args.port, root_path=settings.root_path)
+    # SSE 구독(10초 heartbeat)은 스스로 끝나지 않는다. 시간 제한 없이 연결 종료를 기다리면 포트만 놓고 프로세스가 남아
+    # 내장 생성기가 같은 DB 에 계속 쓴다(D4 재시작 검사에서 확인). 제한 시간 뒤 연결을 끊고 lifespan 종료로 생성기를 멈춘다.
+    uvicorn.run(create_app(plants, settings), host=args.host, port=args.port, root_path=settings.root_path,
+                timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SEC)
 
 
 if __name__ == "__main__":

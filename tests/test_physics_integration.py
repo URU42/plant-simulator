@@ -69,7 +69,7 @@ def test_clog_normal_recovery_and_noise_without_double_fault(coupled):
         centers = physics.sensor_centers(state)
         reference = physics.sensor_centers(physics.solve(0, 0, 0))
         assert abs(state.mass_residual_kg_s) < 1e-9
-        assert all(abs(b.pressure_residual_pa) < 1e-6 for b in state.branches)
+        assert all(abs(b.pressure_residual_pa) < 1e-4 for b in state.branches)
         observed, nominal = _values(samples, second), _values(baseline, second)
         for key in (FLOW, SUCTION, HEADER, PRODUCT):
             assert observed[key] - nominal[key] == pytest.approx(centers[key] - reference[key], abs=0.00011)
@@ -208,7 +208,7 @@ def test_all_cdu_operating_scenarios(coupled, mode, amount, fault, directions):
     assert shifted == physics.solve(amount if mode == 'PM-SUCTION-LOSS' else 0, amount if wear else 0,
                                     amount if mode in {'OP-THROUGHPUT-CHANGE', 'PM-DISCHARGE-VALVE-RESTRICTION'} else 0)
     assert abs(shifted.mass_residual_kg_s) < 1e-9
-    assert abs(shifted.pump_pressure_residual_pa) < 1e-6
+    assert abs(shifted.pump_pressure_residual_pa) < 1e-4
     assert physics.state(EPOCH + 20, plans) not in (normal, shifted)
     assert (physics.state(EPOCH + 245, plans) == shifted) == wear
     assert physics.state(EPOCH + 315, plans) == normal

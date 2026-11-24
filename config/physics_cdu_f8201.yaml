@@ -1,0 +1,36 @@
+# synthetic assumption: PL-CDU F-8201 단일 팬 회로. scripts/calibrate_single.py 로 생성. 정상 해는 plant_cdu.yaml 운전점 μ 를 재현한다.
+# 물성·곡선·배관·경계압 은 합성 설계 선택이며 현장 자료가 아니다.
+#   inlet_air_temp_k: 298.15
+#   flow_target_nm3h: 82000
+plant_id: PL-CDU
+unit_id: UNIT-CDU-03
+equip_id: F-8201
+kind: fan
+provenance: synthetic assumption
+suction_node: virtual:ambient-air
+discharge_node: HT
+atmospheric_pa: 101325.0
+density_kg_m3: 1.1839251532625141
+flow_reference_density_kg_m3: 1.2931
+source_abs_pa: 101325.0
+outlet_abs_pa: 101226.9335
+machine:
+  reference_speed_rpm: 1187.9762
+  speed_rpm: 1187.9762
+  rated_flow_m3_s: 36.12715462512904
+  shutoff_rise_pa: 2262.9586502906245
+  rated_rise_pa: 1810.3669202324998
+  efficiency: 0.8
+suction_pipe:
+  length_m: 10.0
+  diameter_m: 2.8
+  darcy_factor: 0.018
+  minor_loss_k: 1.2
+discharge_pipe:
+  length_m: 40.0
+  diameter_m: 2.4
+  darcy_factor: 0.018
+  minor_loss_k: 49.56976012584773
+max_strainer_resistance_pa_s2_m6: 2.00574
+max_impeller_head_loss: 0.15
+max_impeller_efficiency_loss: 0.15

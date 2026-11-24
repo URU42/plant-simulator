@@ -74,7 +74,7 @@ class Propagation(StrictModel):
         return self
 
 
-HydraulicParameter = Literal["strainer_blockage", "impeller_wear", "valve_restriction"]
+HydraulicParameter = Literal["strainer_blockage", "impeller_wear", "valve_restriction", "suction_temperature_rise"]
 
 
 class HydraulicEffect(StrictModel):

@@ -39,6 +39,7 @@ Skadi 앞단 데이터 생성기. 가상 공장 다섯 곳의 설비 센서 값�
 | 실행 | 스크립트, Docker Compose, k8s(`deploy/k8s`, 파드 하나 500m/1Gi) |
 
 PL-CDU 소규모 물리 모델과 Three.js·GLB 계측 재생은 [CDU 물리 재생 안내](docs/cdu-physics.md)에서 실행할 수 있다.
+CDU 디지털 트윈 완성 기준선(D0: 결합 회로·NPSH·팬)은 [cdu-d0-twin.md](docs/cdu-d0-twin.md), 다섯 공장 회로·온톨로지 대조(D1)는 [twin-ontology-mapping.md](docs/twin-ontology-mapping.md), 생성기 연동·Modelica(D2)는 [plant-d2.md](docs/plant-d2.md), 설비별 지원 범위는 [지원 매트릭스](docs/twin-support-matrix.md). 이전 D4 기록은 [plant-twin-d4.md](docs/plant-twin-d4.md)(인정 보류).
 
 ## 빠른 시작
 

@@ -27,7 +27,7 @@ from common.message import Sample
 from common.nelson import NelsonState, zscore
 from simulator.fault import MAX_RECOVERY_SEC, FaultEvent, TagPlan, boosted, event_tag_effect, plan
 from simulator.instrument import InstrumentEvent, InstrumentSchedule
-from simulator.physics_adapter import PhysicsAdapter
+from simulator.physics_adapter import load_physics
 
 RHO = 0.12                  # 개별 잡음 AR(1) 계수
 RHO_TEMP = 0.25             # 온도 신호의 AR(1) 계수
@@ -101,7 +101,7 @@ class PlantGenerator:
         self.plant = plant
         self.runtime = runtime
         self.source = source or NoEvents()
-        self.physics = PhysicsAdapter(plant, runtime.physics) if runtime.physics is not None else None
+        self.physics = load_physics(plant, runtime.physics) if runtime.physics is not None else None
         self.equipment = plant.equipment_for_units(runtime.units)
         self.control = plant.control_by_key()
         by_id = plant.equipment_by_id()

@@ -23,7 +23,7 @@ from common.config_models import ConfigError, PlantConfig, RuntimeConfig, TagKey
 from common.message import Sample
 from common.sim_clock import ControlledClock
 from simulator.fault import FaultMode
-from simulator.physics_adapter import PhysicsAdapter
+from simulator.physics_adapter import PhysicsAdapter, PhysicsBundle, load_physics
 from simulator.instrument import InstrumentSchedule
 from common.timefmt import from_db, to_db
 
@@ -61,7 +61,7 @@ class PlantContext:
         reset_db 면 스키마 버전이 다른 DB 파일을 지우고 새로 만든다. profile 은 실행 용도(demo·eval)로 DB 마다 하나로 고정된다."""
         plant = load_plant(entry.plant)
         runtime = apply_profile(load_runtime(entry.runtime), profile)
-        physics = PhysicsAdapter(plant, runtime.physics) if runtime.physics is not None else None
+        physics = load_physics(plant, runtime.physics) if runtime.physics is not None else None
         Path(entry.db).parent.mkdir(parents=True, exist_ok=True) if entry.db != ":memory:" else None
         storage = Storage(entry.db, reset_on_schema_change=reset_db)
         _pin_profile(storage, entry.db, profile)
@@ -190,7 +190,7 @@ class PlantContext:
         return row or {"equip_id": key[0], "tag_id": key[1], "ts": None, "value": None, "received_at": None}
 
 
-def equipment_listing(plant: PlantConfig, runtime: RuntimeConfig, physics: PhysicsAdapter | None = None) -> list[dict]:
+def equipment_listing(plant: PlantConfig, runtime: RuntimeConfig, physics: PhysicsAdapter | PhysicsBundle | None = None) -> list[dict]:
     """unit_groups → units → 설비(yaml 순서) 순으로 설비와 태그를 펼친다. 마스터 참고 필드와 한계값도 함께.
     control 은 운전점을 반영한 μ·σ (탐지 쪽 Nelson 기준)."""
     control = plant.control_by_key()
@@ -208,7 +208,7 @@ def equipment_listing(plant: PlantConfig, runtime: RuntimeConfig, physics: Physi
                               "interval_sec": plant.tag_interval_sec((e.equip_id, t.tag_id), runtime.sample_interval_sec),
                               "decimals": t.decimals, "normal_ref": t.normal_ref, "limit_basis": t.limit_basis,
                               **({"measurement_model": ("physical" if (e.equip_id, t.tag_id) in physics.tag_keys else "empirical"),
-                                  "hydraulic_role": {physics.primary: "source", physics.downstream: "downstream"}.get(e.equip_id)}
+                                  "hydraulic_role": physics.roles.get(e.equip_id), "circuit_id": physics.circuit_of(e.equip_id)}
                                  if physics is not None else {}),
                               "limits": t.limits.model_dump(exclude_none=True) if t.limits else None,
                               "control": dict(zip(("mean", "sigma"), control[(e.equip_id, t.tag_id)]))} for t in e.tags],

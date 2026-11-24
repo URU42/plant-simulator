@@ -44,7 +44,23 @@ def main() -> None:
         print(json.dumps(model.model_json_schema(), ensure_ascii=False, indent=2))
         return
     try:
-        case = NetworkCase.model_validate(load_yaml(args.config))
+        data = load_yaml(args.config)
+        if "machine" in data:                       # 단일 펌프/팬 회로 (D0 CDU P-8303A·F-8201)
+            from dataclasses import asdict
+            from simulator.physics_single import SingleCase
+            if args.point:
+                parser.error("단일 회로 설정은 --point 를 받지 않습니다(설정의 정상 경계 조건을 푼다).")
+            case = SingleCase.model_validate(data)
+            print(json.dumps({"plant_id": case.plant_id, "unit_id": case.unit_id, "equip_id": case.equip_id,
+                              "kind": case.kind, "suction_node": case.suction_node, "discharge_node": case.discharge_node,
+                              "provenance": case.provenance, "result": asdict(case.solve())}, ensure_ascii=False, indent=2))
+            return
+        if "downstream_path" in data:                # 플랜트 결합 회로 (physics_<plant>_integrated.yaml)
+            from simulator.physics_adapter import CoupledCase
+            model = CoupledCase
+        else:
+            model = NetworkCase
+        case = model.model_validate(data)
         point = OperatingPoint.model_validate_json(args.point.read_bytes()) if args.point else case.default_point
         output = CaseResult(plant_id=case.plant_id, unit_id=case.unit_id, equip_id=case.equip_id,
                             suction_node=case.suction_node, discharge_node=case.discharge_node,

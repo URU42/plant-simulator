@@ -49,10 +49,11 @@ async def run(base: str, username: str, password: str) -> dict:
                 response.raise_for_status()
                 event = None
                 async for line in response.aiter_lines():
-                    if line.startswith("event: "):
-                        event = line[7:]
-                    if line.startswith("data: ") and event == "samples":
-                        data = json.loads(line[6:])
+                    # SSE 규격상 콜론 뒤 공백은 선택이다 (Backend SseEmitter 는 공백 없이 쓴다).
+                    if line.startswith("event:"):
+                        event = line[6:].strip()
+                    if line.startswith("data:") and event == "samples":
+                        data = json.loads(line[5:])
                         for sample in data:
                             assert set(sample) == {"equip_id", "tag_id", "ts", "value"}
                         if pending.full():
