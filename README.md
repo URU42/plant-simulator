@@ -389,6 +389,7 @@ v3 에서 `status`(Good/Bad)를 뺐다(사용자 확정 2026-11-19: 설비 상�
 | `GET /{공장}/current` | 모든 태그의 현재값(`ts`·`value`·`received_at`). 아직 값이 없는 태그는 `null` |
 | `GET /{공장}/equipment/{equip_id}/tags/{tag_id}/current` | 태그 현재값. 오래됐는지는 `ts` 로 본다 |
 | `GET /{공장}/timeseries?equip_id=&tag_id=&from=&to=&interval=1h` | 집계 시계열 (`10m` / `1h`) |
+| `GET /{공장}/sensor-series?equip_id=&tag_id=&from=&to=&aggregation=time_bucket&max_points=2000` | 설비 현황·트렌드용 측정 시계열 (`raw` / `time_bucket`). 기간은 양끝 포함, 최대 31일 |
 | `GET /{공장}/fault-modes` | 걸 수 있는 고장 모드와 대상 설비 |
 | `GET /{공장}/flow` | 공정 흐름 그래프(가상 공장): `{plant, nodes, equipment: [{equip_id, driven_by}], edges: [{from, to, label, stream}]}`. 3D 뷰어가 하류 영향 표시에 읽는다 |
 | `POST /{공장}/anomalies` | 설비에 고장 모드 주입 (토큰 필요, 통합 실행 전용) |
@@ -400,6 +401,8 @@ v3 에서 `status`(Good/Bad)를 뺐다(사용자 확정 2026-11-19: 설비 상�
 | `GET /stream` | 모든 공장의 초 단위 메시지를 연결 하나로 (이벤트 이름 = 공장 키, 데이터 = Redis Stream 의 `data` 와 같은 `{plant, plant_id, ts, samples}`). 공장마다 연결을 열면 HTTP/1.1 의 호스트당 연결 한도(6)를 거의 다 쓴다 |
 
 `from`/`to` 는 ISO 8601 이다. 쿼리 문자열의 `+` 는 공백이 되므로 `Z`(UTC) 를 쓰거나 오프셋을 `%2B09:00` 으로 인코딩한다. 읽지 못하면 400.
+
+`/sensor-series`의 `raw`는 원시값을 최대 20,000개 반환한다. 개수 한도를 넘거나 원시값이 만료된 기간의 집계가 있으면 413을 반환한다. `time_bucket`은 최대 4,000개 구간에 원시값을 집계하고, 원시 보관 기간 이전은 조회 범위에 완전히 포함된 10분 집계를 해당 시작 시각의 구간에 합산한다. 만료된 부분 구간에서는 통계를 복원할 수 없어 제외한다.
 
 Nelson 알람(`/alarms`, `nelson_alarm`)과 Redis Stream `plant-sim:alarms` 는 2026-11-19 에 지웠다. 이상 판정·알람은 탐지 파이프라인이 Redis Stream `plant-sim:data:{공장}`(위) 이나 이 API 의 값으로 한다.
 

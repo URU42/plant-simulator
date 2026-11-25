@@ -1,4 +1,6 @@
 """수집 서버 (기획서 6.2, 7.1, 9.2 4단계): /ingest, ts_raw·tag_current 저장, 설비 마스터 적재."""
+from datetime import datetime, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -52,6 +54,40 @@ def test_ingest_stores_rows_and_updates_current(client):
     cur = client.get("/plant/equipment/C-3101/tags/XI-X-C3101/current").json()
     assert cur["value"] == 2.36 and "status" not in cur
     assert cur["ts"] == "2026-11-08T08:23:20+00:00"   # 저장 시각은 UTC
+
+
+def test_sensor_series_uses_collected_samples_and_keeps_millisecond_bounds(client):
+    assert _post(client, _batch()).status_code == 200
+    params = {"equip_id": "C-3101", "tag_id": "XI-X-C3101", "from": "2026-11-08T17:23:10.001+09:00",
+              "to": "2026-11-08T08:23:20Z", "aggregation": "raw", "max_points": 1}
+    series = client.get("/plant/sensor-series", params=params)
+    at = int(datetime.fromisoformat("2026-11-08T08:23:20+00:00").timestamp() * 1000)
+    assert series.json() == {"aggregation": "raw", "source_rows": 1, "points": [{"timestamp": at, "value": 2.36}]}
+    params["from"] = "2026-11-08T08:23:10Z"
+    assert client.get("/plant/sensor-series", params=params).status_code == 413
+    body = client.get("/plant/sensor-series", params=params | {"aggregation": "time_bucket"}).json()
+    assert body["source_rows"] == 2
+    assert body["points"][0] == {"timestamp": at - 10_000, "count": 2, "valid_count": 2, "missing_count": 0,
+                                 "mean": pytest.approx(2.35), "min": 2.34, "max": 2.36}
+
+
+def test_sensor_series_combines_expired_rollups_with_recent_raw_data(client):
+    assert _post(client, _batch()).status_code == 200
+    ctx = client.app.state.plants["plant"]
+    ctx.storage.execute("INSERT INTO ts_10m VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        ("C-3101", "XI-X-C3101", "2026-11-08T08:10:00+00:00", 4.0, 2.0, 6.0, 1.0, 3))
+    cutover = datetime.fromisoformat("2026-11-08T08:20:00+00:00")
+    cursor = (cutover + timedelta(days=ctx.runtime.raw_retention_days)).isoformat()
+    ctx.storage.execute("INSERT OR REPLACE INTO job_state VALUES ('10m', ?)", (cursor,))
+    params = {"equip_id": "C-3101", "tag_id": "XI-X-C3101", "from": "2026-11-08T08:10:00Z",
+              "to": "2026-11-08T08:23:20Z", "max_points": 1}
+    assert client.get("/plant/sensor-series", params=params | {"aggregation": "raw"}).status_code == 413
+    body = client.get("/plant/sensor-series", params=params | {"max_points": 10}).json()
+    assert body["source_rows"] == 5
+    assert body["max_points"] == 1
+    assert body["points"][0]["mean"] == pytest.approx((12 + 2.34 + 2.36) / 5)
+    assert body["points"][0]["max"] == 6.0
+    assert client.get("/plant/sensor-series", params=params | {"tag_id": "unknown"}).status_code == 404
 
 
 def test_duplicate_batch_is_stored_once(client):

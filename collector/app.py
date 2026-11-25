@@ -16,7 +16,7 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Literal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 
@@ -141,6 +141,89 @@ def timeseries(equip_id: str, tag_id: str, from_: str = Query(alias="from"), to:
         "WHERE equip_id = ? AND tag_id = ? AND bucket_start >= ? AND bucket_start < ? ORDER BY bucket_start",
         (equip_id, tag_id, query_time("from", from_), query_time("to", to)),
     )
+
+
+@router.get("/sensor-series")
+def sensor_series(equip_id: str, tag_id: str, from_: str = Query(alias="from"), to: str = Query(),
+                  aggregation: Literal["raw", "time_bucket"] = "time_bucket",
+                  max_points: int = Query(2000, ge=1, le=20000), ctx: PlantContext = Depends(context)):
+    """측정 시각 기준 양끝 포함 조회. 만료된 원시 구간은 완전히 포함되는 10분 집계로 읽는다."""
+    if (equip_id, tag_id) not in ctx.tag_keys:
+        raise HTTPException(404, "unknown equipment tag")
+    try:
+        start, end = parse_iso(from_), parse_iso(to)
+        start_ms, end_ms = int(start.timestamp() * 1000), int(end.timestamp() * 1000)
+        lower, upper = to_db(start), to_db(end)
+        previous_rollup = to_db(start - timedelta(minutes=10))
+        if start.microsecond:
+            lower = to_db(start.replace(microsecond=0) + timedelta(seconds=1))
+    except (ValueError, OverflowError):
+        raise HTTPException(400, "invalid sensor series timestamp")
+    if start > end or end - start > timedelta(days=31) or (
+        aggregation == "time_bucket" and (start_ms == end_ms or max_points > 4000)
+    ):
+        raise HTTPException(400, "invalid sensor series range or point limit")
+
+    if aggregation == "raw":
+        # 오래된 범위를 raw로 일부만 반환하면 호출자가 전체 기간 통계로 해석할 수 있다.
+        # 만료된 범위에 실제 집계가 있으면 호출자가 time_bucket으로 재조회하도록 한다.
+        with ctx.lock:
+            if ctx.storage.query(
+                "SELECT 1 FROM ts_10m a JOIN job_state j ON j.name = '10m' "
+                "WHERE a.equip_id = ? AND a.tag_id = ? AND a.count > 0 "
+                "AND a.bucket_start BETWEEN ? AND ? AND unixepoch(a.bucket_start) * 1000 + 600000 > ? "
+                "AND unixepoch(a.bucket_start) < unixepoch(j.last_bucket_end) - ? LIMIT 1",
+                (equip_id, tag_id, previous_rollup, upper, start_ms,
+                 ctx.runtime.raw_retention_days * 86400),
+            ):
+                raise HTTPException(413, "raw retention exceeded; use time_bucket")
+            rows = ctx.storage.query_dicts(
+                "SELECT unixepoch(ts) * 1000 AS timestamp, value FROM ts_raw "
+                "WHERE equip_id = ? AND tag_id = ? AND ts BETWEEN ? AND ? ORDER BY ts LIMIT ?",
+                (equip_id, tag_id, lower, upper, max_points + 1),
+            )
+        if len(rows) > max_points:
+            raise HTTPException(413, "too many raw points")
+        log.info("sensor_series plant=%s equipment_id=%s tag_id=%s aggregation=raw source_rows=%d",
+                 ctx.key, equip_id, tag_id, len(rows))
+        return {"aggregation": "raw", "source_rows": len(rows), "points": rows}
+
+    # 10분 배치가 원시값을 삭제한 경계를 기준으로 두 테이블을 합쳐 중복 집계를 피한다.
+    rows = ctx.storage.query_dicts(
+        """WITH boundary AS (
+               SELECT COALESCE(unixepoch((SELECT last_bucket_end FROM job_state WHERE name = '10m')) - ?,
+                               unixepoch(?)) AS seconds
+           ), window AS (
+               SELECT seconds, CASE WHEN seconds * 1000 > ?
+                   THEN MIN(?, MAX(1, ? / 600000)) ELSE ? END AS point_limit FROM boundary
+           ), samples AS (
+               SELECT unixepoch(ts) * 1000 AS t, value AS mean, value AS low, value AS high,
+                      1 AS n, value IS NOT NULL AS valid
+               FROM ts_raw, window WHERE equip_id = ? AND tag_id = ?
+                   AND ts BETWEEN ? AND ? AND ts >= strftime('%Y-%m-%dT%H:%M:%S+00:00', seconds, 'unixepoch')
+               UNION ALL
+               SELECT unixepoch(bucket_start) * 1000, avg, min, max, count, count
+               FROM ts_10m, window WHERE equip_id = ? AND tag_id = ? AND count > 0
+                   AND bucket_start BETWEEN ? AND ? AND unixepoch(bucket_start) + 600 <= seconds
+                   AND unixepoch(bucket_start) * 1000 + 599000 <= ?
+           ), bins AS (
+               SELECT (t - ?) * point_limit / ? AS bin, mean, low, high, n, valid FROM samples, window
+           )
+           SELECT ? + ? * bin / point_limit AS timestamp, point_limit, SUM(n) AS count, SUM(valid) AS valid_count,
+                  SUM(n - valid) AS missing_count, SUM(mean * valid) / NULLIF(SUM(valid), 0) AS mean,
+                  MIN(low) AS min, MAX(high) AS max FROM bins, window GROUP BY bin ORDER BY bin""",
+        (ctx.runtime.raw_retention_days * 86400, lower, start_ms, max_points, end_ms - start_ms + 1, max_points,
+         equip_id, tag_id, lower, upper, equip_id, tag_id, lower, upper, end_ms, start_ms, end_ms - start_ms + 1,
+         start_ms, end_ms - start_ms + 1),
+    )
+    point_limit = max_points
+    for row in rows:
+        point_limit = row.pop("point_limit")
+    source_rows = sum(row["count"] for row in rows)
+    log.info("sensor_series plant=%s equipment_id=%s tag_id=%s aggregation=time_bucket source_rows=%d",
+             ctx.key, equip_id, tag_id, source_rows)
+    return {"aggregation": "time_bucket_finite_min_max_mean", "source_rows": source_rows, "points": rows,
+            "max_points": point_limit}
 
 
 # --- 고장 모드 사건: 주입·멈춤·정답지 ------------------------------------------
