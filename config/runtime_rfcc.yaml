@@ -17,4 +17,5 @@ instrument_faults:
   spike: { per_tag_per_day: 1.0, z_min: 4, z_max: 8 }               # 태그당 하루 평균 1회, 표본 하나가 4~8σ 튐
   stuck: { per_equipment_per_week: 1.0, min_sec: 300, max_sec: 1800 }   # 설비당 주 1회, 태그 하나가 5~30분 고정
   dropout: { per_plant_per_day: 3, min_sec: 10, max_sec: 300 }       # 공장당 하루 3회, 설비 하나의 모든 태그가 10초~5분 빠짐
-# physics: physics_rfcc_twin.yaml  # 물리 결합(대표 수력 회로 + 설비별 제외 사유)을 켜려면 주석을 해제한다.
+physics: physics_rfcc_twin.yaml   # 일반 모드도 같은 회로를 푼다 (PU-D5a, 2026-11-25)
+physics_general: true              # 회로가 계산하지 않는 경험 효과·흐름 그래프 전파는 유지. 트윈 아님

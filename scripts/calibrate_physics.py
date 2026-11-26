@@ -4,10 +4,12 @@
 1. 마스터(`config/plant_<key>.yaml`)의 설비·태그·공정 간선과 운전점 μ(`control_by_key`), 경고·경보·정지 하한.
 2. 아래 `DESIGN` 의 합성 설계 선택(밀도·회전수·효율·체절 비·배관 치수·분기 압력 비율). 모두 synthetic assumption 이다.
 
-출력 YAML 의 정상 운전 해는 마스터 μ(입력 펌프 흡입·토출압·유량, 후속 펌프 흡입·토출압·유량)를 재현한다.
+입력 펌프는 두 대다(RFCC 병렬, HOU·RHDS·VRDS 직렬. PU-D5a). 토출 라인 제원은 LINE_* 상수다.
+출력 YAML 의 정상 운전 해는 마스터 μ(첫 펌프 흡입압·펌프당 유량, 최종 토출압, 후속 펌프 흡입·토출압·유량)를 재현한다.
+직렬 1단 토출압은 입력이 아니라 같은 곡선 두 단으로 나눈 결과다(마스터 1단 토출 μ 는 그 값을 옮긴 것).
 고장 크기(스트레이너 막힘 저항·임펠러 양정 감소·밸브 저항 비중)는 해당 태그의 하한 기준을 넘는 지점으로 정한다.
 실행: `uv run --locked python -m scripts.calibrate_physics hou` (표준 출력으로 YAML). `--write` 는 config/ 에 쓴다.
-CDU 설정(`physics_cdu_integrated.yaml`)은 이 스크립트로 만들지 않는다(별도 D2-A 작성본, 후속 펌프 항목만 추가).
+CDU 설정(`physics_cdu_integrated.yaml`)은 이 스크립트로 만들지 않는다(별도 D2-A 작성본. PU-D5a 의 두 펌프 값도 그 파일 주석의 식으로 손 계산).
 """
 from __future__ import annotations
 
@@ -26,6 +28,7 @@ from simulator.physics_adapter import PRESSURE_PA, CoupledCase
 ROOT = Path(__file__).resolve().parents[1]
 ATM_PA = 101_325.0
 DARCY = 0.025              # 상용 강관 난류 영역의 고정 Darcy 계수 (synthetic)
+LINE_M, LINE_V, CHECK_K, GATE_K = 10.0, 2.0, 2.0, 0.2      # 펌프 토출 라인 (synthetic): 길이 m·설계 유속·스윙 체크밸브 K·게이트 전개 K
 MARGIN_FLOOR = 0.85        # 고장 최대치에서 허용하는 최소 NPSH 여유비 (캐비테이션 모델 유효 범위 안, D2-B)
 
 
@@ -33,6 +36,8 @@ MARGIN_FLOOR = 0.85        # 고장 최대치에서 허용하는 최소 NPSH 여
 class Design:
     """플랜트별 합성 설계 선택. 값의 근거는 공정 유체·펌프 형식에 대한 일반 범위이며 현장 자료가 아니다."""
     source: str
+    second: str
+    topology: str
     downstream: str
     density: float                 # kg/m³, 회로 전체 단일 밀도
     speed: float                   # 입력 펌프 rpm
@@ -56,29 +61,34 @@ class Design:
     booster_temp_k: float | None = None   # None 이면 후속 펌프 흡입·취급 유체 온도 태그 μ
     booster_npshr_m: float = 3.5
     booster_margin: float = 2.0
+    # 후속 펌프 흡입 드럼(탑·드럼 대용모델, 2026-11-26). 정상점은 직결 회로와 같고 고장 최대치는 드럼 회로로 역산한다.
+    drum: bool = False
 
+
+# 액위 조절 밸브 저항 비중: 다 열면 토출 총저항이 37.5 % 줄어든다(0.3 은 22.5 % 라 후속 고장 0.2 부터 포화, open-issues 104, 2026-11-26 사용자 결정).
+DRUM_VALVE_SHARE = 0.5
 
 DESIGN = {
     # HOU: VGO 원료 → 고압 반응부 → 분리·분별 → 미전환유 순환 펌프. 반응·분리 압력 강하를 등가 저항 하나로 본다.
-    "hou": Design("P-2101", "P-2701", density=900, speed=3580, booster_speed=3560, shutoff_ratio=1.18,
+    "hou": Design("P-2101", "P-2101-S2", "series", "P-2701", drum=True, density=900, speed=3580, booster_speed=3560, shutoff_ratio=1.18,
                   booster_shutoff_ratio=1.12, efficiency=0.68, booster_efficiency=0.70, product_length=260,
                   other_length=90, tail_length=60, velocity=2.2, other_outlet_fraction=0.12,
                   tail_drop_fraction=0.08, efficiency_loss=0.18, valve_opening_loss=0.55,
                    feed_temp_k=423.15, feed_npshr_m=6.5, feed_margin=3.0, booster_npshr_m=3.5, booster_margin=2.0),
     # RFCC: 상압잔사 원료 → 라이저 반응기 → 주 분류탑 → 탑정 환류 펌프. 분해·기화는 계산하지 않는다.
-    "rfcc": Design("P-1101A", "P-1303A", density=940, speed=3560, booster_speed=3560, shutoff_ratio=1.22,
+    "rfcc": Design("P-1101A", "P-1101B", "parallel", "P-1303A", drum=True, density=940, speed=3560, booster_speed=3560, shutoff_ratio=1.22,
                    booster_shutoff_ratio=1.18, efficiency=0.72, booster_efficiency=0.66, product_length=180,
                    other_length=70, tail_length=50, velocity=2.0, other_outlet_fraction=0.20,
                    tail_drop_fraction=0.15, efficiency_loss=0.20, valve_opening_loss=0.60,
                    feed_temp_k=473.15, feed_npshr_m=5.0, feed_margin=2.5, booster_temp_k=313.15, booster_npshr_m=3.0, booster_margin=2.2),
     # RHDS: 상압잔사 원료 → 고압 반응부 → 분리 → 분별탑 → 고온 잔사유 이송 펌프(4극 저속).
-    "rhds": Design("P-3101", "P-3102", density=950, speed=3570, booster_speed=1780, shutoff_ratio=1.20,
+    "rhds": Design("P-3101", "P-3101-S2", "series", "P-3102", density=950, speed=3570, booster_speed=1780, shutoff_ratio=1.20,
                    booster_shutoff_ratio=1.20, efficiency=0.70, booster_efficiency=0.68, product_length=240,
                    other_length=85, tail_length=45, velocity=2.1, other_outlet_fraction=0.10,
                    tail_drop_fraction=0.18, efficiency_loss=0.20, valve_opening_loss=0.60,
                    feed_temp_k=473.15, feed_npshr_m=6.0, feed_margin=2.8, booster_npshr_m=3.5, booster_margin=1.8),
     # VRDS: 감압잔사 원료(고점도는 고정 Darcy로 단순화) → 고압 반응부 → 분리 → 분별탑 → 고온 잔사유 이송 펌프.
-    "vrds": Design("P-4101", "P-4102", density=990, speed=3570, booster_speed=1780, shutoff_ratio=1.20,
+    "vrds": Design("P-4101", "P-4101-S2", "series", "P-4102", density=990, speed=3570, booster_speed=1780, shutoff_ratio=1.20,
                    booster_shutoff_ratio=1.18, efficiency=0.69, booster_efficiency=0.66, product_length=220,
                    other_length=80, tail_length=55, velocity=2.0, other_outlet_fraction=0.11,
                    tail_drop_fraction=0.14, efficiency_loss=0.22, valve_opening_loss=0.60,
@@ -87,9 +97,9 @@ DESIGN = {
 
 
 PATHS = {
-    "hou": ["P-2101", "MIX", "HX", "FURN", "REACT", "HX", "SEP", "STRIP", "FRAC", "P-2701"],
-    "rhds": ["P-3101", "MX", "HX", "HT", "RX", "HX", "SP", "FR", "P-3102"],
-    "vrds": ["P-4101", "MX", "HX", "HT", "RX", "HX", "SP", "FR", "P-4102"],
+    "hou": ["P-2101", "P-2101-S2", "MIX", "HX", "FURN", "REACT", "HX", "SEP", "STRIP", "FRAC", "P-2701"],
+    "rhds": ["P-3101", "P-3101-S2", "MX", "HX", "HT", "RX", "HX", "SP", "FR", "P-3102"],
+    "vrds": ["P-4101", "P-4101-S2", "MX", "HX", "HT", "RX", "HX", "SP", "FR", "P-4102"],
 }
 
 
@@ -155,7 +165,8 @@ def build(key: str) -> dict:
     plant = load_plant(ROOT / f"config/plant_{key}.yaml")
     control = plant.control_by_key()
     equipment = plant.equipment_by_id()
-    tags = {eid: {t.signal: t for t in equipment[eid].tags} for eid in (d.source, d.downstream)}
+    tags = {eid: {t.signal: t for t in equipment[eid].tags} for eid in (d.source, d.second, d.downstream)}
+    series = d.topology == "series"
 
     def mu(eid: str, signal: str) -> float:
         return control[(eid, tags[eid][signal].tag_id)][0]
@@ -165,18 +176,24 @@ def build(key: str) -> dict:
 
     rho = d.density
     rho_g = rho * GRAVITY_M_S2
-    ps1, pd1 = abs_pa(d.source, "suction_pressure"), abs_pa(d.source, "discharge_pressure")
+    ps1, pd1 = abs_pa(d.source, "suction_pressure"), abs_pa(d.second, "discharge_pressure")     # 묶음의 흡입·최종 토출
     ps2, pd2 = abs_pa(d.downstream, "suction_pressure"), abs_pa(d.downstream, "discharge_pressure")
-    q1, q2 = mu(d.source, "flow") / 3600, mu(d.downstream, "flow") / 3600
+    unit_q, q2 = mu(d.source, "flow") / 3600, mu(d.downstream, "flow") / 3600
+    q1 = unit_q if series else 2 * unit_q               # 헤더 전체 유량
+    d_line = round_diameter(unit_q, LINE_V)
+    line = {"line": {"length_m": LINE_M, "diameter_m": d_line, "darcy_factor": DARCY},
+            "check_valve": {"diameter_m": d_line, "forward_k": CHECK_K}, "valve": {"diameter_m": d_line, "full_open_k": GATE_K}}
+    line_dp = (DARCY * LINE_M / d_line + CHECK_K + GATE_K) * rho / (2 * area(d_line)**2) * unit_q**2
+    header = pd1 - line_dp
     if not (q2 < q1 and ps1 < pd1 and ps2 < pd1 and ps2 < pd2):
         raise ValueError(f"{key}: 단일 헤더·두 분기 회로로 표현할 수 없는 운전점입니다.")
     q_other = q1 - q2
 
-    head1, head2 = (pd1 - ps1) / rho_g, (pd2 - ps2) / rho_g
+    head1, head2 = ((pd1 - ps1 + line_dp) / 2 if series else pd1 - ps1) / rho_g, (pd2 - ps2) / rho_g      # 직렬 단 양정은 같다
     d_product, d_other, d_tail = (round_diameter(q, d.velocity) for q in (q2, q_other, q2))
-    r_product = (pd1 - ps2) / q2**2                     # 헤더 → 후속 펌프 흡입 (배관 + 밸브)
-    p_other = ps2 + d.other_outlet_fraction * (pd1 - ps2)
-    r_other = (pd1 - p_other) / q_other**2
+    r_product = (header - ps2) / q2**2                     # 헤더 → 후속 펌프 흡입 (배관 + 밸브)
+    p_other = ps2 + d.other_outlet_fraction * (header - ps2)
+    r_other = (header - p_other) / q_other**2
     p_tail_out = pd2 - d.tail_drop_fraction * (pd2 - ps2)
     r_tail = (pd2 - p_tail_out) / q2**2
     # 원료가 실제로 지나는 공정 순서(가열로·반응기 포함). 최단 경로는 열교환기 고온측 귀환 간선으로 반응부를 건너뛴다.
@@ -195,11 +212,15 @@ def build(key: str) -> dict:
                 "max_head_loss": 0.6, "efficiency_coupling": 0.5}
 
     booster_temp = d.booster_temp_k or (mu(d.downstream, "process_temp") + 273.15 if "process_temp" in tags[d.downstream] else 323.15)
-    feed_npsh = npsh_block(d.feed_temp_k, d.feed_npshr_m, d.feed_margin, ps1, q1, round_diameter(q1, 2.5))
+    # 절반 유량 펌프(RFCC)는 흡입 유속을 유지하는 지름(D4 사용자 결정 제원)
+    feed_diameter = round_diameter(q1, 2.5) * (1 if series else math.sqrt(0.5))
+    feed_npsh = npsh_block(d.feed_temp_k, d.feed_npshr_m, d.feed_margin, ps1, unit_q, feed_diameter)
     booster_npsh = npsh_block(booster_temp, d.booster_npshr_m, d.booster_margin, ps2, q2, round_diameter(q2, 2.5))
 
     def config(valve_share: float, strainer: float, head_loss: float, booster_strainer: float,
-               booster_head_loss: float) -> dict:
+               booster_head_loss: float, second_strainer: float | None = None) -> dict:
+        pump = {"reference_speed_rpm": d.speed, "rated_flow_m3_s": unit_q, "shutoff_head_m": head1 * d.shutoff_ratio,
+                "rated_head_m": head1, "efficiency": d.efficiency}
         valve_k = valve_share * r_product * 2 * area(d_product)**2 / rho
         return {
             "plant_id": plant_id, "unit_id": unit, "equip_id": d.source,
@@ -214,10 +235,12 @@ def build(key: str) -> dict:
             "max_booster_strainer_resistance_pa_s2_m6": float(f"{booster_strainer:.6g}"),
             "max_booster_head_loss": round(booster_head_loss, 4),
             "max_booster_efficiency_loss": d.efficiency_loss,
+            "station": {"topology": d.topology,
+                        "max_second_strainer_resistance_pa_s2_m6": float(f"{second_strainer or strainer:.6g}"),
+                        "units": [{"unit_id": u, "pump": pump, "npsh": feed_npsh, **line} for u in (d.source, d.second)]},
             "network": {
                 "density_kg_m3": rho, "pump_npsh": feed_npsh,
-                "pump": {"reference_speed_rpm": d.speed, "rated_flow_m3_s": q1, "shutoff_head_m": head1 * d.shutoff_ratio,
-                         "rated_head_m": head1, "efficiency": d.efficiency},
+                "pump": pump,
                 "branches": [
                     {"branch_id": "virtual:other-branch", "outlet_node": "virtual:other-boundary", "outlet_abs_pa": p_other,
                      "pipes": {"virtual:other-equivalent": {
@@ -229,6 +252,8 @@ def build(key: str) -> dict:
                          "length_m": d.product_length, "diameter_m": d_product, "darcy_factor": DARCY,
                          "minor_loss_k": pipe_k((1 - valve_share) * r_product, rho, d.product_length, d_product)}},
                      "valves": {"virtual:product-control-valve": {"diameter_m": d_product, "full_open_k": valve_k}},
+                     # 액위 조절 밸브가 유출 = 유입을 맞춘다. inlet_abs_pa = 정상 후속 흡입압(드럼 압력 + 설정 액위 수두)
+                     **({"drum": {"inlet_abs_pa": ps2, "level_valve_share": DRUM_VALVE_SHARE}} if d.drum else {}),
                      "booster": {"speed_rpm": d.booster_speed, "pump": {
                          "reference_speed_rpm": d.booster_speed, "rated_flow_m3_s": q2,
                          "shutoff_head_m": head2 * d.booster_shutoff_ratio, "rated_head_m": head2,
@@ -244,10 +269,15 @@ def build(key: str) -> dict:
     def solve(cfg: dict, **amounts: float):
         return CoupledCase.model_validate(cfg).solve(
             amounts.get("clog", 0), amounts.get("wear", 0), amounts.get("restriction", 0),
-            amounts.get("booster_clog", 0), amounts.get("booster_wear", 0))
+            amounts.get("booster_clog", 0), amounts.get("booster_wear", 0),
+            amounts.get("second_clog", 0), amounts.get("second_wear", 0))
 
     def product(result):
         return next(b for b in result.branches if b.branch_id == "virtual:product-branch")
+
+    def outflow(branch) -> float:
+        """후속 펌프 유량: 드럼이 있으면 드럼 유출, 없으면 분기 유량."""
+        return branch.flow_m3_s if branch.booster_flow_m3_s is None else branch.booster_flow_m3_s
 
     def gauge(eid: str, signal: str, value_abs: float) -> float:
         return (value_abs - ATM_PA) / PRESSURE_PA[tags[eid][signal].unit]
@@ -281,11 +311,13 @@ def build(key: str) -> dict:
     share_margin = bisect(lambda s: restricted(s).booster_npsh_margin if feasible(s) else -1e9,
                           0.001, upper, MARGIN_FLOOR, increasing=False)
     share = min(share_flow, share_suction, share_margin)
-    # 2) 입력 펌프 스트레이너: 최대 막힘에서 흡입압이 하한 목표에 닿게 한다.
+    # 2) 입력 펌프 스트레이너: 최대 막힘에서 흡입압·그 펌프 유량(병렬은 다른 펌프가 받아 가 유량이 먼저 무너진다) 하한 목표 중 먼저 닿는 쪽.
     s_target = lower_target(limits(d.source, "suction_pressure"), mu(d.source, "suction_pressure"))
     strainer = min(
         bisect(lambda r: gauge(d.source, "suction_pressure", solve(config(share, r, 0.1, 1, 0.1), clog=1).suction_abs_pa),
                1.0, 1e14, s_target, increasing=False),
+        bisect(lambda r: solve(config(share, r, 0.1, 1, 0.1), clog=1).pump_flow_m3_s * 3600,
+               1.0, 1e14, lower_target(limits(d.source, "flow"), mu(d.source, "flow")), increasing=False),
         # 캐비테이션이 먼저 시작되면 여유비 0.85 까지만 (모델 유효 범위 안)
         bisect(lambda r: solve(config(share, r, 0.1, 1, 0.1), clog=1).pump_npsh_margin, 1.0, 1e14, MARGIN_FLOOR, increasing=False))
     # 3) 입력 펌프 마모: 토출압 하한이 있으면 그 목표(양정 감소 15 % 상한), 없으면 10 %(관리 기준 편차로만 보인다).
@@ -293,8 +325,11 @@ def build(key: str) -> dict:
     head_loss = 0.10 if d_target is None else bisect(
         lambda h: gauge(d.source, "discharge_pressure", solve(config(share, strainer, h, 1, 0.1), wear=1).discharge_abs_pa),
         0.02, 0.15, d_target, increasing=False)
-    # 4) 후속 펌프 스트레이너: 후속 흡입압 하한 목표.
+    # 4) 후속 펌프 스트레이너: 후속 유량(CDU 와 같은 기준)·흡입압 하한·NPSH 여유비 중 먼저 닿는 쪽. 캐비테이션이 흡입압을 받쳐
+    #    흡입압·여유비 목표에 닿지 않는 회로는 유량 목표가 없으면 탐색 상한(1e14)까지 가서 막힘 10 % 에도 유량이 0 에 가까웠다 (2026-11-25 D3).
     booster_strainer = min(
+        bisect(lambda r: outflow(product(solve(config(share, strainer, head_loss, r, 0.1), booster_clog=1))) * 3600,
+               1.0, 1e14, flow_target, increasing=False),
         bisect(lambda r: gauge(d.downstream, "suction_pressure", product(
             solve(config(share, strainer, head_loss, r, 0.1), booster_clog=1)).booster_suction_abs_pa),
             1.0, 1e14, b_target, increasing=False),
@@ -304,19 +339,40 @@ def build(key: str) -> dict:
     #    양정 10 % 감소를 쓰고, 관측은 전류·흡입압의 관리 기준 편차로 나타난다.
     bd_target = None
     booster_head_loss = 0.10
-    result = config(share, strainer, head_loss, booster_strainer, booster_head_loss)
+    # 6) 둘째 입력 펌프 막힘. 병렬은 같은 흡입 경계라 첫 펌프와 같다. 직렬 2단은 2단 흡입압 하한·2단 유량 하한·NPSH 여유비 중 먼저 닿는 쪽.
+    second_targets = {}
+    second_strainer = None
+    if series:
+        second_targets = {"second_suction": lower_target(limits(d.second, "suction_pressure"), mu(d.second, "suction_pressure")),
+                          "second_flow": lower_target(limits(d.second, "flow"), mu(d.second, "flow"))}
+
+        def blocked(r: float):
+            return solve(config(share, strainer, head_loss, booster_strainer, booster_head_loss, r), second_clog=1)
+        candidates = {
+            "second_suction": bisect(lambda r: gauge(d.second, "suction_pressure", blocked(r).units[1].suction_abs_pa),
+                                     1.0, 1e14, second_targets["second_suction"], increasing=False),
+            "second_flow": bisect(lambda r: blocked(r).units[1].flow_m3_s * 3600, 1.0, 1e14, second_targets["second_flow"], increasing=False),
+            "npsh_margin": bisect(lambda r: blocked(r).units[1].npsh_margin, 1.0, 1e14, MARGIN_FLOOR, increasing=False),
+            # 후속 펌프도 유효 범위 안에 있어야 한다
+            "downstream_npsh_margin": bisect(lambda r: product(blocked(r)).booster_npsh_margin, 1.0, 1e14, MARGIN_FLOOR, increasing=False)}
+        second_targets["second_basis"] = min(candidates, key=candidates.get)
+        second_strainer = min(candidates.values())
+    result = config(share, strainer, head_loss, booster_strainer, booster_head_loss, second_strainer)
     targets = {"product_flow_m3h": flow_target, "valve_share_basis": "flow" if share == share_flow else "downstream_suction", "source_suction": s_target, "source_discharge": d_target,
-               "downstream_suction": b_target, "downstream_discharge": bd_target}
+               "downstream_suction": b_target, "downstream_discharge": bd_target, **second_targets}
     return result, targets
 
 
 def dump(key: str, cfg: dict, targets: dict) -> str:
     d = DESIGN[key]
     header = [
-        f"# synthetic assumption: {cfg['plant_id']} 대표 수력 등가회로 ({d.source} → 공통 헤더 → 두 등가 분기, 제품 분기에 {d.downstream}).",
+        f"# synthetic assumption: {cfg['plant_id']} 대표 수력 등가회로 ({d.source}·{d.second} {'직렬' if d.topology == 'series' else '병렬'} → 공통 헤더 → 두 등가 분기, 제품 분기에 {d.downstream}).",
         f"# scripts/calibrate_physics.py {key} 로 생성. 정상 해는 plant_{key}.yaml 의 운전점 μ 를 재현한다.",
         "# 밀도·회전수·효율·체절 비·배관 치수·분기 압력 비율·NPSHr·정상 NPSH 여유비·유체 온도는 합성 설계 선택이며 현장 자료가 아니다.",
+        "# 입력 펌프 두 대의 직렬·병렬 관계와 토출 라인(10 m, 2 m/s, 체크밸브 K 2.0, 게이트 K 0.2)도 합성 가정이다(PU-D4·D5a).",
         "# 고장 최대치는 아래 목표(태그 단위)에 닿도록 역산했다. None 은 해당 하한이 마스터에 없어 기본 10 % 를 쓴 항목.",
+        *(["# 제품 분기 끝에 후속 펌프 흡입 드럼(탑·드럼 대용모델, 2026-11-26, open-issues 42·43): inlet_abs_pa = 정상 후속 흡입압.",
+           "#   액위 조절 밸브(정상점 토출 저항의 50 %, 정상 개도 0.5)가 유출 = 유입을 맞추고, 고장 최대치는 드럼 회로로 역산했다."] if d.drum else []),
         *(f"#   {name}: {value if not isinstance(value, float) else round(value, 4)}" for name, value in targets.items()),
     ]
     return "\n".join(header) + "\n" + yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False, width=120)

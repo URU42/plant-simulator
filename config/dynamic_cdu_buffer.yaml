@@ -1,0 +1,31 @@
+# PU-D6 CDU 경유 제품 측 합성 완충/분배 대용모델 (synthetic assumption). 증류탑(AT) 물리 모델이 아니다.
+# 기존 등가회로(P-8101A/B → DS → HX → HT → AT → P-8401A, physics_cdu_integrated.yaml)는 정적 계산에 그대로 쓰고,
+# 시간 계산에서만 AT 이후 경유 제품 측에 용기 하나를 둔다:  dV/dt = alpha · Qfeed − Qout
+#   Qfeed = 입력 펌프 두 대(P-8101A + P-8101B, 병렬) 합계 — 정상 상태 회로 해(준정적)
+#   alpha = 정상 Qout / 정상 Qfeed (정상 해에서 계산, 설정 아님. 결과에 값을 싣는다)
+#   Qout  = P-8401A 유량: 액위로 정한 흡입압 + 기존 후속 펌프 곡선·NPSH + 토출 배관 + 액위 제어밸브
+# 모든 수치는 근거 자료가 없는 합성 값이다. 액위 태그가 마스터에 없어 액위는 관측되지 않는 내부 상태다.
+provenance: synthetic assumption
+plant_id: PL-CDU
+circuit: coupled:P-8101A
+node: AT
+feeds: [P-8101A, P-8101B]
+target: P-8401A
+vessel:
+  area_m2: 10.0              # 수평 단면적 (액위 1 m = 10 m3)
+  min_level_m: 0.3           # 이 아래로는 P-8401A 흡입 상실로 보고 유출을 유입까지 줄인다 (경계 사건)
+  max_level_m: 3.7           # 이 위로는 넘침으로 보고 넘친 양을 따로 적는다 (경계 사건)
+  setpoint_m: 2.0            # 정상 액위 (보유량 20 m3, 정상 체류 약 5.7 분)
+  nozzle_elevation_m: 3.0    # 용기 바닥 → P-8401A 흡입 노즐 높이차. 흡입압 = 용기 상부압 + ρg(액위 + 높이차)
+valve:                       # 기존 토출 배관 저항의 일부를 액위 제어밸브로 나눈다(정상점 총저항 유지)
+  diameter_m: 0.13
+  share_of_discharge_loss: 0.3
+  normal_opening: 0.5
+control:
+  mode: pi                   # pi: 액위 비례적분 제어 / manual: 밸브 고정
+  gain: 1.0                  # 개도 변화 / (액위 편차 / 액위 범위)
+  integral_sec: 1200         # 평균 액위 제어(언더슈트·완충 절충, 게인·적분 시간 비교는 docs D6 참고)
+  min_opening: 0.05
+  max_opening: 1.0
+dt_sec: 1
+max_duration_sec: 7200

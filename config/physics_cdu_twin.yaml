@@ -1,5 +1,5 @@
 # PL-CDU 디지털 트윈 물리 회로 묶음 (D0, 2026-11-24). 회로끼리는 경계 조건으로만 닿고 서로 다시 풀지 않는다.
-# 결합 회로: P-8101A → 공통 헤더 → P-8401A (D2-A). 단일 회로: P-8303A(NPSH·캐비테이션), F-8201(강제 통풍 팬 → 가열로).
+# 결합 회로: P-8101A·P-8101B(병렬, PU-D5a) → 공통 헤더 → P-8401A (D2-A). 단일 회로: P-8303A(NPSH·캐비테이션), F-8201(강제 통풍 팬 → 가열로).
 # 모든 계수는 synthetic assumption 이다.
 circuits:
   - physics_cdu_integrated.yaml
@@ -13,6 +13,9 @@ exclusions:
 # D2-A 명시 시나리오 매핑 (설비 ID → 기존 고장 카탈로그 ID). 여기 없는 모드는 물리 계산·트윈 주입을 하지 않는다.
 scenarios:
   P-8101A: [PM-SUCTION-LOSS, PM-IMPELLER-WEAR, PM-DISCHARGE-VALVE-RESTRICTION, OP-THROUGHPUT-CHANGE]
+  P-8101B: [PM-SUCTION-LOSS, PM-IMPELLER-WEAR]
   P-8401A: [PM-SUCTION-LOSS, PM-IMPELLER-WEAR]
   P-8303A: [PM-SUCTION-LOSS, PM-SUCTION-HOT, PM-IMPELLER-WEAR]
   F-8201: [FN-IMPELLER-FOULING, FN-INLET-RESTRICTION]
+# 정상 흔들림의 원인 변동(정상값 대비 표준편차, synthetic 2026-11-26): scripts/calibrate_noise.py. 입력 펌프 두 대의 유량·압력이 나눠 갖는다.
+disturbance: { suction: 0.0023829, demand: 0.0319516, shared_header: true }

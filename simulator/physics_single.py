@@ -213,21 +213,24 @@ class SingleAdapter:
         self.primary = case.equip_id
         self.circuit_id = f"single:{case.equip_id}"
         self.roles = {case.equip_id: "single"}
-        tags = [t for t in equipment[case.equip_id].tags if t.signal in SIGNALS]
-        if len({t.signal for t in tags}) != len(tags) or not any(t.signal == "flow" for t in tags):
+        # 윤활유 펌프는 토출압 태그 대신 oil_pressure 를 둔다(정적 계산 전용 회로 P-2501). 토출압으로 읽는다.
+        signal = lambda t: "discharge_pressure" if t.signal == "oil_pressure" else t.signal     # noqa: E731
+        tags = [t for t in equipment[case.equip_id].tags if signal(t) in SIGNALS]
+        if len({signal(t) for t in tags}) != len(tags) or not any(t.signal == "flow" for t in tags):
             raise ValueError(f"{case.equip_id}: 물리 계측 신호가 중복되거나 유량 태그가 없습니다.")
         self.keys: dict[str, TagKey] = {}
         self.units: dict[str, str] = {}
         for t in tags:
-            ok = (t.unit in PRESSURE_PA if t.signal.endswith("_pressure") and t.signal != "differential_pressure"
-                  else t.unit == "mmH2O" if t.signal == "differential_pressure"
-                  else t.unit in FLOW_UNITS if t.signal == "flow" else t.unit == "A")
+            sig = signal(t)
+            ok = (t.unit in PRESSURE_PA if sig.endswith("_pressure") and sig != "differential_pressure"
+                  else t.unit == "mmH2O" if sig == "differential_pressure"
+                  else t.unit in FLOW_UNITS if sig == "flow" else t.unit == "A")
             if not ok:
                 raise ValueError(f"{case.equip_id}/{t.tag_id}: 지원하지 않는 단위 {t.unit}")
             if t.unit == "Nm3/h" and case.flow_reference_density_kg_m3 is None:
                 raise ValueError("Nm3/h 유량 태그에는 표준 상태 밀도가 필요합니다.")
-            self.keys[t.signal] = (case.equip_id, t.tag_id)
-            self.units[t.signal] = t.unit
+            self.keys[sig] = (case.equip_id, t.tag_id)
+            self.units[sig] = t.unit
         self.tag_keys = set(self.keys.values())
         self.parameters: frozenset[HydraulicParameter] = frozenset(
             {"strainer_blockage", "impeller_wear"} | ({"suction_temperature_rise"} if case.npsh else set()))
@@ -253,7 +256,7 @@ class SingleAdapter:
                   if key not in self.tag_keys and (not parameters or tp.via != "process")}
         if parameters:
             applied = tuple(change for tp in parameters.values() for change in tp.applied)
-            result.update({key: TagPlan(applied, (), via="physics") for key in sorted(self.tag_keys)})
+            result.update({key: TagPlan(applied, (), via="physics", recovery=max(tp.recovery for tp in parameters.values())) for key in sorted(self.tag_keys)})
         return result
 
     def parameter_plans(self, events: list[FaultEvent]) -> ParameterPlans:

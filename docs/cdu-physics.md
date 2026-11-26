@@ -1,5 +1,7 @@
 # PL-CDU 원유 공급 펌프 물리 재생
 
+> 2026-11-25 PU-D5a: 원료 펌프가 두 대(CDU·RFCC 병렬, HOU·RHDS·VRDS 직렬)로 늘었다. 이 문서의 단일 펌프 회로 수치·검증은 그 전 기록이다. 현재 회로는 `config/physics_*_integrated.yaml` 의 `station` 과 README 의 '두 번째 원료 펌프' 절을 본다.
+
 `UNIT-CDU-01`의 원유 공급 펌프 `P-8101A`에서 탈염기 방향 `DS` 경계까지 계산한다. 설비·신호·센서 태그와 `process` 연결은 기존 `config/plant_cdu.yaml`에서 확인한다. `DS`는 토출 배관 끝의 압력 경계다. 오프라인 재생은 기존 수집·AI API에 접속하거나 데이터를 적재하지 않는다.
 
 ## 실행
@@ -115,7 +117,7 @@ python -m simulator.physics --schema result
 
 ## D2-A 기존 생성기와 결합
 
-`config/runtime_cdu.yaml`에서 다음 항목의 주석을 해제하면 기존 생성기가 CDU 결합 회로를 사용한다. 경로는 런타임 YAML의 디렉터리를 기준으로 해석한다. 설정을 생략하거나 `null`로 두면 기존 통계형 생성 경로를 사용한다.
+(2026-11-25 PU-D5a: `runtime_cdu.yaml`은 이제 `physics`와 `physics_general: true`로 물리를 켠다.) 실행 설정에 다음 항목을 두면 기존 생성기가 CDU 결합 회로를 사용한다. 경로는 런타임 YAML의 디렉터리를 기준으로 해석한다. 설정을 생략하거나 `null`로 두면 기존 통계형 생성 경로를 사용한다.
 
 ```yaml
 physics: physics_cdu_integrated.yaml
@@ -128,7 +130,7 @@ uv run python -m collector.app --plants config/plants.yaml --with-simulators --t
 uv run python -m simulator.physics_scenario cdu-scenario-example
 ```
 
-기존 주입 요청 `POST /cdu/anomalies`에 `equip_id: P-8101A`와 아래 `mode`를 사용한다. 기존 `speed` 값의 의미도 같다. 멈춤·수리에는 각각 `POST /cdu/anomalies/P-8101A/stop`, `POST /cdu/anomalies/P-8101A/repair`를 사용한다. 쓰기와 물리 모드의 사건 조회에는 운영자 `X-Ingest-Token`이 필요하다.
+기존 주입 요청 `POST /cdu/anomalies`에 `equip_id: P-8101A`와 아래 `mode`를 사용한다. 기존 `speed` 값의 의미도 같다. 멈춤·수리에는 각각 `POST /cdu/anomalies/P-8101A/stop`, `POST /cdu/anomalies/P-8101A/repair`를 사용한다. 쓰기와 물리 모드의 진행·손상 조회에는 운영자 `X-Ingest-Token`이, 정답지 `GET /cdu/anomalies`에는 별도 `X-Eval-Token`이 필요하다.
 
 | 모드 | 물리 파라미터 | 복귀 |
 | --- | --- | --- |

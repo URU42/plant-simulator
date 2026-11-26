@@ -18,7 +18,7 @@
 plant:
   plant_id: PL-RFCC
   name: "RFCC(중질유 유동상 촉매 분해)"
-  config_version: 8                 # 2026-11-23 한계값을 공학 기준값으로 (7: 통계 μ±3σ·4.5σ·6σ)
+  config_version: 9                 # 2026-11-25 PU-D5a: P-1101B 추가 (병렬), 바뀐 μ·σ·한계는 limit_basis (8: 2026-11-23 공학 기준 한계값)
   unit_groups:
     - id: UG-RFCC-01
       name: 원료 공급
@@ -69,6 +69,8 @@ signals:
   - { signal: current, prefix: II, unit: A, name: 모터 전류 }
   - { signal: speed, prefix: SI, unit: rpm, name: 축 회전속도 }
   - { signal: axial_position, prefix: ZI, unit: mm, name: 축방향 상대 위치 }
+  - { signal: strainer_dp, prefix: PDI, unit: kPa, name: 흡입 스트레이너 차압 }   # 2026-11-27 추가 계측 (synthetic)
+  - { signal: strainer_inlet_pressure, prefix: PI, unit: "bar(g)", name: 스트레이너 앞 흡입 압력 }   # 2026-11-27 추가 계측 (synthetic)
 
 # 정상 운전 공통 요인 (synthetic): 공정 그룹마다 평균 0 인 빠른 성분 하나를 아래 신호의 태그들이 나눠 갖는다.
 # 태그 분산 중 share 만큼이 공통 요인이고, 부호는 그 신호가 부하와 같이(1)·반대로(-1) 움직이는지다.
@@ -87,6 +89,7 @@ flow:
     GR: "가스 회수 설비"
   edges:
     - [P-1101A, RX, "", process]
+    - [P-1101B, RX, "", process]   # 가상 공장 추가 (PU-D5a)
     - [RX, FR, "", process]
     - [FR, C-1401, "", process]
     - [C-1401, GR, "", process]
@@ -126,12 +129,77 @@ equipment:
           limits: { alarm_lo: 11.1, warn_lo: 13.8, warn_hi: 24, alarm_hi: 25.2, trip_hi: 26.4 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.264μ·alarm_hi 1.328μ·trip_hi 1.39μ·warn_lo 0.724μ·alarm_lo 0.583μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r004, control: { mean: 19.01285, sigma: 0.030415587636555778 } }
       - { tag_id: FI-P-1101A, signal: flow, unit: m3/h, description: "액체 체적 유량",
-          limits: { trip_lo: 110, alarm_lo: 138, warn_lo: 160 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.766μ·alarm_lo 0.659μ·trip_lo 0.526μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
-          interval_sec: 1, decimals: 4, seed_key: r005, control: { mean: 209.4573, sigma: 0.6623794814991241 } }
+          limits: { trip_lo: 55.1, alarm_lo: 69, warn_lo: 80.2 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.766μ·alarm_lo 0.659μ·trip_lo 0.526μ (synthetic, 2026-11-25 PU-D5a: 두 대 병렬 절반 유량 μ 에 같은 비율)",
+          interval_sec: 1, decimals: 4, seed_key: r005, control: { mean: 104.72865, sigma: 0.33118974074956203 } }
       - { tag_id: II-P-1101A, signal: current, unit: A, description: "구동 모터 전류",
-          limits: { warn_hi: 185, alarm_hi: 197, trip_hi: 212 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.28μ·alarm_hi 1.359μ·trip_hi 1.464μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
+          limits: { warn_hi: 92.6, alarm_hi: 98.4, trip_hi: 106 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.28μ·alarm_hi 1.359μ·trip_hi 1.464μ (synthetic, 2026-11-25 PU-D5a: 두 대 병렬 절반 축동력 μ 에 같은 비율)",
           interval_sec: 1, decimals: 4, seed_key: r006,
-          derive: { formula: power, terms: [{ tag: FI-P-1101A, exp: 1 }, { tag: PD-P-1101A, minus: PS-P-1101A, exp: 1 }], noise_sigma: 0.102991 }, control: { mean: 144.7389, sigma: 0.67389 } }
+          derive: { formula: power, terms: [{ tag: FI-P-1101A, exp: 1 }, { tag: PD-P-1101A, minus: PS-P-1101A, exp: 1 }], noise_sigma: 0.0514955 }, control: { mean: 72.36945, sigma: 0.19496 } }
+      - { tag_id: PDI-P-1101A-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "흡입 스트레이너 차압 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 60, alarm_hi: 120 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 60·경보 120 kPa(고압 구간이라 약한 막힘 차압의 약 2배로 둠). 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: r-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-P-1101A-STR,
+          signal: strainer_inlet_pressure,
+          unit: "bar(g)",
+          description: "스트레이너 앞 흡입 압력 (2026-11-27 추가 계측, synthetic)",
+          limits: { trip_lo: 1.33, alarm_lo: 1.67, warn_lo: 2.09 },
+          limit_basis: "가정값: 같은 설비 흡입 압력(PS-P-1101A)과 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: r-str-pi,
+          control: { mean: 3.250000, sigma: 0.0076 } }
+  # 합성 추가 (2026-11-25 PU-D5a): 자료에 없는 두 번째 펌프(P-1101A 와 병렬). 태그·단위·주기·잡음은 P-1101A 를 본떴고 개별 잡음은 seed_key 로 독립이다
+  - equip_id: P-1101B
+    name: "Feed Charge Pump B (합성 가정)"
+    type: PM
+    unit_id: UNIT-RFCC-01
+    tags:
+      - { tag_id: VI-P-1101B, signal: vibration, unit: mm/s RMS, description: "펌프 구동측 케이싱 진동 속도 Overall RMS",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 }, limit_basis: "P-1101A 를 본뜬 합성 설비: 펌프 진동 3.0/4.5/7.1 mm/s(API 610 선호운전영역·ISO 20816-3 경계, 다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
+          interval_sec: 1, decimals: 4, seed_key: r101, control: { mean: 1.4575, sigma: 0.03761084502112299 } }
+      - { tag_id: TI-P-1101B, signal: bearing_temp, unit: degC, description: "펌프 구동측 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 }, limit_basis: "P-1101A 를 본뜬 합성 설비: 펌프 베어링 80/90/100 ℃(다른 공장 펌프에서 가장 흔한 값) (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
+          interval_sec: 10, decimals: 4, seed_key: r102, control: { mean: 65.0117, sigma: 0.17651137414737636 } }
+      - { tag_id: PS-P-1101B, signal: suction_pressure, unit: bar(g), description: "흡입 압력",
+          limits: { trip_lo: 1.33, alarm_lo: 1.67, warn_lo: 2.09 }, limit_basis: "P-1101A 를 본뜬 합성 설비: CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.652μ·alarm_lo 0.522μ·trip_lo 0.417μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
+          interval_sec: 1, decimals: 4, seed_key: r103, control: { mean: 3.2, sigma: 0.0076193214288587 } }
+      - { tag_id: PD-P-1101B, signal: discharge_pressure, unit: bar(g), description: "토출 압력",
+          limits: { alarm_lo: 11.1, warn_lo: 13.8, warn_hi: 24, alarm_hi: 25.2, trip_hi: 26.4 }, limit_basis: "P-1101A 를 본뜬 합성 설비: CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.264μ·alarm_hi 1.328μ·trip_hi 1.39μ·warn_lo 0.724μ·alarm_lo 0.583μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
+          interval_sec: 1, decimals: 4, seed_key: r104, control: { mean: 19.01285, sigma: 0.030415587636555778 } }
+      - { tag_id: FI-P-1101B, signal: flow, unit: m3/h, description: "액체 체적 유량",
+          limits: { trip_lo: 55.1, alarm_lo: 69, warn_lo: 80.2 }, limit_basis: "P-1101A 를 본뜬 합성 설비: CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_lo 0.766μ·alarm_lo 0.659μ·trip_lo 0.526μ (synthetic, 2026-11-25 PU-D5a: 두 대 병렬 절반 유량 μ 에 같은 비율)",
+          interval_sec: 1, decimals: 4, seed_key: r105, control: { mean: 104.72865, sigma: 0.33118974074956203 } }
+      - { tag_id: II-P-1101B, signal: current, unit: A, description: "구동 모터 전류",
+          limits: { warn_hi: 92.6, alarm_hi: 98.4, trip_hi: 106 }, limit_basis: "P-1101A 를 본뜬 합성 설비: CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.28μ·alarm_hi 1.359μ·trip_hi 1.464μ (synthetic, 2026-11-25 PU-D5a: 두 대 병렬 절반 축동력 μ 에 같은 비율)",
+          interval_sec: 1, decimals: 4, seed_key: r106,
+          derive: { formula: power, terms: [{ tag: FI-P-1101B, exp: 1 }, { tag: PD-P-1101B, minus: PS-P-1101B, exp: 1 }], noise_sigma: 0.0514955 }, control: { mean: 72.36945, sigma: 0.194503 } }
+      - { tag_id: PDI-P-1101B-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "흡입 스트레이너 차압 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 60, alarm_hi: 120 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 60·경보 120 kPa(고압 구간이라 약한 막힘 차압의 약 2배로 둠). 실제 설정값 아님 (합성 설비)",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: r-b-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-P-1101B-STR,
+          signal: strainer_inlet_pressure,
+          unit: "bar(g)",
+          description: "스트레이너 앞 흡입 압력 (2026-11-27 추가 계측, synthetic)",
+          limits: { trip_lo: 1.33, alarm_lo: 1.67, warn_lo: 2.09 },
+          limit_basis: "가정값: 같은 설비 흡입 압력(PS-P-1101B)과 같은 한계 (합성 설비)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: r-b-str-pi,
+          control: { mean: 3.250000, sigma: 0.0076 } }
   # ---------------- UNIT-RFCC-02 촉매 재생 ----------------
   - equip_id: B-1201
     name: Main Air Blower
@@ -267,6 +335,26 @@ equipment:
           limits: { warn_hi: 83.2, alarm_hi: 88.3, trip_hi: 95.1 }, limit_basis: "CDU·HOU·RHDS·VRDS 같은 신호 비율 중앙값: warn_hi 1.28μ·alarm_hi 1.359μ·trip_hi 1.464μ (synthetic, 2026-11-23 · 이전 μ±3σ/4.5σ/6σ(D23) 대체)",
           interval_sec: 1, decimals: 4, seed_key: r040,
           derive: { formula: power, terms: [{ tag: FI-P-1303A, exp: 1 }, { tag: PD-P-1303A, minus: PS-P-1303A, exp: 1 }], noise_sigma: 0.0418425 }, control: { mean: 64.991, sigma: 0.467667 } }
+      - { tag_id: PDI-P-1303A-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "후속 펌프 흡입 스트레이너 차압 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 40, alarm_hi: 80 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 40·경보 80 kPa(고압 구간이라 약한 막힘 차압의 약 2배로 둠). 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: r-d-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-P-1303A-STR,
+          signal: strainer_inlet_pressure,
+          unit: "bar(g)",
+          description: "후속 펌프 스트레이너 앞 흡입 압력 (2026-11-27 추가 계측, synthetic)",
+          limits: { trip_lo: 1.04, alarm_lo: 1.3, warn_lo: 1.63 },
+          limit_basis: "가정값: 같은 설비 흡입 압력(PS-P-1303A)과 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: r-d-str-pi,
+          control: { mean: 2.549300, sigma: 0.008 } }
   # ---------------- UNIT-RFCC-05 습가스 압축 ----------------
   - equip_id: C-1401
     name: Wet Gas Compressor

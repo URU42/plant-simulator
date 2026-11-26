@@ -12,11 +12,12 @@ from simulator.physics_single import SingleAdapter
 
 ROOT = Path(__file__).resolve().parents[1]
 PLANTS = ("cdu", "hou", "rfcc", "rhds", "vrds")
-# (역할, 모드) → 회로 solve 인자. 결합 회로: (입력 스트레이너, 입력 마모, 밸브, 후속 스트레이너, 후속 마모)
+# (역할, 모드) → 회로 solve 인자. 결합 회로: (첫 입력 스트레이너, 마모, 밸브, 후속 스트레이너, 마모, 둘째 입력 스트레이너, 마모)
 COUPLED = {
     ("source", "PM-SUCTION-LOSS"): (1, 0, 0, 0, 0), ("source", "PM-IMPELLER-WEAR"): (0, 1, 0, 0, 0),
     ("source", "PM-DISCHARGE-VALVE-RESTRICTION"): (0, 0, 1, 0, 0), ("source", "OP-THROUGHPUT-CHANGE"): (0, 0, 0.2, 0, 0),
     ("downstream", "PM-SUCTION-LOSS"): (0, 0, 0, 1, 0), ("downstream", "PM-IMPELLER-WEAR"): (0, 0, 0, 0, 1),
+    ("second", "PM-SUCTION-LOSS"): (0, 0, 0, 0, 0, 1, 0), ("second", "PM-IMPELLER-WEAR"): (0, 0, 0, 0, 0, 0, 1),
 }
 # 단일 회로: (스트레이너, 마모, 흡입 온도 상승). PM-SUCTION-HOT 은 S1 온도 1.0 + S3 막힘 0.55.
 SINGLE = {"PM-SUCTION-LOSS": (1, 0, 0), "PM-SUCTION-HOT": (0.55, 0, 1), "PM-IMPELLER-WEAR": (0, 1, 0),
@@ -48,12 +49,13 @@ def build(key: str) -> dict:
     name = lambda k: f"{k[0]}/{k[1]}"
     normal = {}
     for adapter in adapters:
-        normal.update(adapter.sensor_centers(adapter.solve(*((0,) * (3 if isinstance(adapter, SingleAdapter) else 5)))))
+        normal.update(adapter.sensor_centers(adapter.solve(0, 0, 0)))
     scenarios = []
     for adapter in adapters:
         single = isinstance(adapter, SingleAdapter)
         modes = ([((adapter.primary, m), a) for m, a in SINGLE.items()] if single else
-                 [((adapter.primary if r == "source" else adapter.downstream, m), a) for (r, m), a in COUPLED.items()])
+                 [(({"source": adapter.primary, "second": adapter.second, "downstream": adapter.downstream}[r], m), a)
+                  for (r, m), a in COUPLED.items()])
         catalog = {(e.equip_id, m.id) for e in plant.equipment for m in physics_modes(plant, physics, e.equip_id)}
         for (equip, mode), args in modes:
             if (equip, mode) not in catalog:

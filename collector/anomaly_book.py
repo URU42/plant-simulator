@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from collector.storage import Storage
 from common.config_models import PlantConfig
 from common.timefmt import from_db, to_db
-from simulator.fault import (MAX_RECOVERY_SEC, RECOVERY_SEC, SPEEDS, FaultEvent, FaultMode, effect_start, holds_damage,
+from simulator.fault import (MAX_RECOVERY_SEC, RECOVERY_SEC, SPEEDS, Boost, FaultEvent, FaultMode, effect_start, holds_damage,
                              plan)
 from simulator import instrument as im
 from simulator.physics_adapter import PhysicsAdapter
@@ -45,6 +45,12 @@ def _db(epoch: float) -> str:
 
 def _epoch(s: str | None) -> float | None:
     return None if s is None else from_db(s).timestamp()
+
+
+def _boost_row(b: Boost) -> dict:
+    """정답지의 교호작용 규칙. 요인 곱이 아닌 규칙에는 빈 요인 칸을 싣지 않는다."""
+    row = b.model_dump(exclude_none=True)
+    return row if b.factors else {k: v for k, v in row.items() if k not in ("factors", "shapes")}
 
 
 class AnomalyBook:
@@ -95,11 +101,18 @@ class AnomalyBook:
 
     def _physical_effect_at(self, e: FaultEvent, at: float) -> bool:
         """이 사건의 물리 파라미터가 at 에 아직 0 이 아닐 수 있는가 (진행 중·멈춘 뒤 회복 중·손상 미수리·수리 뒤 회복 중)."""
-        if not self.physics.physical_parameters(e.mode, e.equip_id):
+        parameters = self.physics.physical_parameters(e.mode, e.equip_id)
+        if not parameters:
             return False
-        if e.stop is None or e.stop + RECOVERY_SEC > at:
+        recovery = max(tp.recovery for tp in parameters.values())
+        if e.stop is None or e.stop + recovery > at:
             return True
-        return self._held(e) and (e.repair is None or e.repair + RECOVERY_SEC > at)
+        return self._held(e) and (e.repair is None or e.repair + recovery > at)
+
+    def recovery(self, e: FaultEvent) -> float:
+        """고장 설비 자신의 태그 가운데 가장 느린 회복 시간 (하류 전파는 뺀다)."""
+        return max((tp.recovery for key, tp in self._plan(e.mode, e.equip_id).items() if key[0] == e.equip_id and tp.hop == 0),
+                   default=RECOVERY_SEC)
 
     def _held(self, e: FaultEvent) -> bool:
         """멈춘 사건에 수리 전까지 남는 손상 효과가 있는가 (고친 뒤에도 True)."""
@@ -135,9 +148,9 @@ class AnomalyBook:
             stages = [{"id": s.id, "name": s.name, "at_sec": s.at_sec, "nelson_quiet": s.nelson_quiet, "damage": s.damage}
                       for s in mode.stages]
             applied = [{"equip_id": k[0], "tag_id": k[1], "stage": a.stage, "start_sec": a.start, "via": tp.via, "hop": tp.hop,
-                        "damage": a.damage, "boost_by": tp.boost and tp.boost.by[1]}
+                        "damage": a.damage, "recovery": tp.recovery, "boost_by": tp.boost and tp.boost.by_tags()}
                        for k, tp in tags.items() for a in tp.applied]
-            boost = mode.boost and mode.boost.model_dump(exclude_none=True)
+            boost = mode.boost and _boost_row(mode.boost)
             physical = any(tp.via == "physics" for tp in tags.values())
             recorded = {"stages": stages, "tags": applied, "unobserved": mode.unobserved,
                         "code": mode.label.code, "speed": speed, "boost": boost}
@@ -220,17 +233,18 @@ class AnomalyBook:
             stages = [{"id": s["id"], "name": s["name"], "start_at": _db(start + s["at_sec"] / speed), "nelson_quiet": s["nelson_quiet"]}
                       for s in p["stages"] if started(s["at_sec"])]
             tags = [{"equip_id": t["equip_id"], "tag_id": t["tag_id"], "stage": t["stage"], "start_at": _db(start + sec),
-                     "via": t.get("via"), "hop": t.get("hop"), "damage": t.get("damage", False),   # via·hop: 2026-11-20 전 사건은 null
+                     "via": t.get("via"), "hop": t.get("hop"), "damage": t.get("damage", False),
+                     "recovery_sec": t.get("recovery", RECOVERY_SEC * ((t.get("hop") or 0) + 1)),   # via·hop: 2026-11-20 전 사건은 null
                      "boost_by": t.get("boost_by")}             # 교호작용으로 키운 효과면 그 by 태그 (2026-11-23)
                     for t in p["tags"]
                     for sec in [effect_start(t["start_sec"], t["start_sec"] - stage_at[t["stage"]], speed)]
                     if stop is None or start + sec < stop]
-            hop = max((t["hop"] or 0 for t in tags), default=0)      # 멈추기 전에 시작한 하류 효과 중 가장 먼 단계: 회복이 (k+1)배
-            end_at = None if stop is None else _db(stop + RECOVERY_SEC * (hop + 1))
+            # 멈추기 전에 시작한 효과 중 가장 느린 회복 (온도·먼 하류). 회복을 적기 전(2026-11-25 전) 사건은 60초 × (k+1)
+            slow = max((t["recovery_sec"] for t in tags), default=RECOVERY_SEC)
+            end_at = None if stop is None else _db(stop + slow)
             held = stop is not None and any(t["damage"] for t in tags)
             if held:        # 손상 효과는 수리 뒤 회복이 끝나야 사라진다
-                dhop = max(t["hop"] or 0 for t in tags if t["damage"])
-                end_at = None if repair is None else max(end_at, _db(repair + RECOVERY_SEC * (dhop + 1)))
+                end_at = None if repair is None else max(end_at, _db(repair + max(t["recovery_sec"] for t in tags if t["damage"])))
             if from_ and end_at is not None and end_at < from_:
                 continue
             out.append({"event_id": r["event_id"], "equip_id": r["equip_id"], "mode": r["mode"],

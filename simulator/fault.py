@@ -3,7 +3,7 @@
 고장 모드는 config/fault_modes.yaml 에 단계(stage)별 효과로 적는다. 효과는 태그가 아니라 신호(signal)로 지정해
 같은 유형 설비에 재사용한다. 크기는 관리 기준 μ·σ 대비 z 이고, to_limit 을 주면 그 한계값 기준으로 정한다.
 주입하면 설비 하나(와 propagate.driven 이면 그 설비가 구동하는 설비, propagate.process·utility 면 공정 흐름 그래프의 하류 설비)의
-태그마다 적용 목록(TagPlan)을 만들고, 생성기는 정상 신호 위에 효과 z 를 더한다. 멈춘 뒤에는 RECOVERY_SEC(하류 k단계는 × (k+1))
+태그마다 적용 목록(TagPlan)을 만들고, 생성기는 정상 신호 위에 효과 z 를 더한다. 멈춘 뒤에는 회복 시간(recovery_sec: 온도는 느리다. 하류 k단계는 × (k+1))
 동안 효과가 0 으로 가라앉는다. 손상 단계(damage)의 step·ramp 효과는 멈춘 시각의 크기로 남아 있다가 수리(repair) 뒤
 같은 회복 시간 동안 0 으로 가라앉는다. 고장 모드의 boost 는 같은 설비의 다른 신호(예: 유체 온도)가 사건으로 오른 만큼(태그 단위)
 효과를 키우는 교호작용이다.
@@ -19,12 +19,19 @@ from pydantic import Field, model_validator
 
 from common.config_models import ConfigError, EquipmentConfig, PlantConfig, StrictModel, TagKey, load_yaml
 
-RECOVERY_SEC = 60       # 멈춘 뒤 효과가 0 으로 가라앉는 시간
+RECOVERY_SEC = 60       # 멈춘 뒤 효과가 0 으로 가라앉는 시간 (유량·압력·진동 등 빠른 신호)
+TEMP_RECOVERY_SEC = 300 # 온도 신호의 회복 시간 (열용량으로 느리다. 수치는 synthetic, 2026-11-25 D2)
 # 공정 흐름 하류 전파 (완만한 감쇠, 사용자 확정 2026-11-20, 수치는 synthetic): k단계 크기 ×0.7^(k−1), lag·rise ×k, 회복 ×(k+1)
 MAX_HOP = 2
 HOP_RATIO = 0.7
 MIN_HOP_Z = 0.25        # 줄인 뒤 |z| 가 이 이하면 걸지 않는다
-MAX_RECOVERY_SEC = RECOVERY_SEC * (MAX_HOP + 1)     # 사건 효과가 남아 있을 수 있는 최대 시간 (멈춤 뒤)
+MAX_RECOVERY_SEC = TEMP_RECOVERY_SEC * (MAX_HOP + 1)     # 사건 효과가 남아 있을 수 있는 최대 시간 (멈춤 뒤)
+
+
+def recovery_sec(signal: str) -> int:
+    """신호(또는 물리 파라미터) 이름의 회복 시간. 온도는 느리다."""
+    return TEMP_RECOVERY_SEC if "temp" in signal else RECOVERY_SEC
+
 
 Shape = Literal["step", "ramp", "spike", "wobble"]
 HELD = ("step", "ramp")     # 손상 단계에서 멈춘 뒤에도 남는 모양 (spike·wobble 은 순간 현상이라 남지 않는다)
@@ -74,7 +81,9 @@ class Propagation(StrictModel):
         return self
 
 
-HydraulicParameter = Literal["strainer_blockage", "impeller_wear", "valve_restriction", "suction_temperature_rise"]
+# discharge_valve_restriction: 펌프 자체 토출 차단밸브(정적 계산 전용 모드 config/fault_modes_calc.yaml). 트윈 회로는 쓰지 않는다.
+HydraulicParameter = Literal["strainer_blockage", "impeller_wear", "valve_restriction", "suction_temperature_rise",
+                             "discharge_valve_restriction"]
 
 
 class HydraulicEffect(StrictModel):
@@ -103,18 +112,36 @@ class Label(StrictModel):
     code: Literal[0, 1] = 0     # 정답지 코드: 0 비정상(설비 고장), 1 정상(정상 운전 변화). 계측 이상은 2 (simulator.instrument)
 
 
+class Factor(StrictModel):
+    """요인 곱 교호작용의 요인 하나. 수준 = clamp(direction × 변화 / span, 0, 1).
+    변화는 사건의 step·ramp 효과만 본다 (맥동이 자기 수준을 되먹이지 않게. 정상 잡음·계측 이상 제외).
+    over 가 없으면 그 태그의 효과 z, 있으면 (signal + offset)/(over + offset) 비의 운전점 대비 상대 변화다 (예: 절대압 압축비)."""
+
+    signal: str
+    over: str | None = None
+    offset: float = 0.0                 # 게이지압 → 절대압 (over 가 있을 때)
+    direction: Literal[-1, 1]
+    span: float = Field(gt=0)
+
+
 class Boost(StrictModel):
-    """교호작용 (2026-11-23 사용자 확정, 계수는 synthetic): 같은 설비 by 신호 태그의 상태에 따라 signals 효과를 키운다. 두 방식 중 하나.
+    """교호작용 (2026-11-23 사용자 확정, 계수는 synthetic): 같은 설비 by 신호 태그의 상태에 따라 signals 효과를 키운다. 세 방식 중 하나.
     - per_unit (선형): 배율 = min(max_gain, 1 + per_unit × max(0, ΔT)). ΔT 는 by 태그가 사건으로 오른 만큼(태그 단위, 정상 잡음·계측
       이상 제외). 내려가면 키우지 않는다. 예: 흡입 유체 온도 → 캐비테이션.
     - exponent (비율 거듭제곱): 배율 = min(max_gain, (N / N_설계)^exponent). N = 운전점 μ + 사건 효과(태그 단위). 낮으면 1 보다 작다.
       키우는 태그의 효과 크기(to_limit 포함)는 설계 운전점 μ 로 정한다 — 운전점이 옮긴 μ 로 정하면 한계 목표가 회전수 차이를 상쇄한다.
-      예: 팬 회전수 → 불균형 진동 (불균형 힘 ∝ 회전수²)."""
+      예: 팬 회전수 → 불균형 진동 (불균형 힘 ∝ 회전수²).
+    - factors (요인 곱, 2026-11-25): 배율 = min(max_gain, 1 + gain × 요인 수준의 곱). by 대신 factors 를 쓴다. 요인이 하나라도 0 이면 1.
+      멈춘 뒤에는 멈춘 시각의 배율을 유지한다 (손상이 남는 동안 요인이 회복해도 손상 크기는 그대로)."""
 
-    by: str                             # 예: process_temp (흡입 유체 온도), speed (회전수)
+    rule: Literal["I3", "I4", "I5", "I6"] | None = None     # 교호작용 규칙 번호 (정답지·대조 실험)
+    by: str | None = None               # 예: process_temp (흡입 유체 온도), speed (회전수)
     signals: list[str]                  # 키울 효과의 신호 (예: vibration, flow)
     per_unit: float | None = Field(default=None, gt=0)    # 선형: by 태그 단위 1 당 배율 증가 (예: ℃ 당 0.03)
     exponent: float | None = Field(default=None, gt=0)    # 비율 거듭제곱의 지수 (예: 2)
+    factors: list[Factor] = []
+    gain: float | None = Field(default=None, gt=0)        # 요인 곱의 이득 (factors 와 함께)
+    shapes: list[Shape] = []            # 요인 곱이 키울 효과 모양 (비우면 전부). 요인이면서 반응인 신호의 ramp 를 다시 키우지 않게 좁힌다
     max_gain: float = Field(gt=1)
     # 적용할 설비 (비우면 by 태그가 있는 모든 설비). by 태그의 뜻이 설비마다 다를 때 좁힌다
     # (예: process_temp 가 흡입 유체 온도인 펌프만 — 2026-11-23 사용자 확정)
@@ -125,8 +152,12 @@ class Boost(StrictModel):
 
     @model_validator(mode="after")
     def _one_kind(self) -> "Boost":
-        if (self.per_unit is None) == (self.exponent is None):
-            raise ValueError("boost needs exactly one of per_unit or exponent")
+        if sum((self.per_unit is not None, self.exponent is not None, bool(self.factors))) != 1:
+            raise ValueError("boost needs exactly one of per_unit, exponent or factors")
+        if bool(self.factors) != (self.gain is not None) or bool(self.factors) == (self.by is not None):
+            raise ValueError("boost needs factors with gain, or by")
+        if self.factors and (len(self.factors) < 2 or self.hold_below_alarm) or self.shapes and not self.factors:
+            raise ValueError("boost factors need at least two and no hold_below_alarm; shapes need factors")
         return self
 
 
@@ -136,6 +167,7 @@ class FaultMode(StrictModel):
     equip_types: list[str] = []         # 적용할 설비 유형 (예: ST)
     equip_ids: list[str] = []           # 또는 설비 ID 를 직접 (예: 원심 압축기만)
     label: Label
+    basis: str | None = None            # 가정 기반 표시 (물리 계산 없이 정한 효과). 있으면 트윈에서도 주입할 수 있다. 정답 분류가 아니다
     stages: list[Stage]
     expect: dict[str, Any] | None = None    # 평가용 기대값 (자유 형식, 정답지에 그대로 싣는다)
     # 실제 고장이면 보일 신호지만 마스터에 태그가 없어 만들지 않는 것 (예: 증기 온도). 기록용이며 생성에는 쓰지 않는다
@@ -210,17 +242,42 @@ HOLD_MARGIN_Z = 3.0         # 경고 구간 보장: 키운 효과의 상한 = �
 
 
 @dataclass(frozen=True)
+class FactorRef:
+    """한 설비에 묶은 요인: 태그 키와 운전점 (μ + offset, σ). over 는 비의 분모."""
+
+    factor: Factor
+    key: TagKey
+    point: tuple[float, float]
+    over: tuple[TagKey, float, float] | None = None
+
+    def level(self, z_of) -> float:
+        change = z_of(self.key)
+        if self.over is not None:
+            (mu, sg), (key2, mu2, sg2) = self.point, self.over
+            change = (mu + sg * change) / mu * mu2 / (mu2 + sg2 * z_of(key2)) - 1
+        return min(1.0, max(0.0, self.factor.direction * change / self.factor.span))
+
+
+@dataclass(frozen=True)
 class TagBoost:
     """한 태그에 걸린 교호작용. 선형이면 per_z 는 by 태그 z 1 당 배율 증가(= per_unit × σ_by).
     비율 거듭제곱이면 power = (운전점 μ_by / 설계 μ_by, σ_by / 설계 μ_by, 지수) 이고 per_z 는 쓰지 않는다.
     hold 는 경고 구간 보장: (경보 목표 효과의 정의상 시작 초, 그 lag, 그 rise_sec, |z| 상한). 그 시작 전에는 키운 효과가 상한을 넘지 않고,
     시작 뒤 rise_sec 동안 상한을 서서히 푼다 (한꺼번에 풀면 단계 경계에서 값이 계단처럼 튄다)."""
 
-    by: TagKey
+    by: TagKey | None
     per_z: float
     max_gain: float
     hold: tuple[float, float, float, float] | None = None
     power: tuple[float, float, float] | None = None
+    factors: tuple[FactorRef, ...] = ()
+    gain: float = 0.0
+    shapes: tuple[Shape, ...] = ()
+    only: bool = False          # 키운 만큼((배율 − 1) × 효과)만 낸다. 원래 효과는 물리 회로 해가 이미 낸다
+
+    def by_tags(self) -> str:
+        """정답지에 남길 요인 태그 ID (요인 곱이면 쉼표로 잇는다)."""
+        return self.by[1] if self.by else ",".join(f.key[1] for f in self.factors)
 
 
 @dataclass(frozen=True)
@@ -231,6 +288,7 @@ class TagPlan:
     hop: int = 0                                # 흐름 그래프 단계 (고장 설비와 축 사슬은 0)
     recovery: float = RECOVERY_SEC              # 멈춘 뒤 0 으로 가라앉는 시간
     boost: TagBoost | None = None               # 교호작용 (이 태그에 걸린 것)
+    extra: "TagPlan | None" = None              # 회로 해(via physics) 위에 더하는 교호작용 몫
 
 
 def _hop_effect(effect: Effect, hop: int) -> Effect | None:
@@ -296,7 +354,13 @@ def plan(plant: PlantConfig, mode: FaultMode, equip_id: str,
             if inherited:
                 found.setdefault((e.equip_id, t.tag_id), []).extend(inherited)
     boost: dict[TagKey, TagBoost] = {}
-    src = next((t for t in by_id[equip_id].tags if mode.boost and t.signal == mode.boost.by
+    factors = _factor_refs(mode.boost, by_id[equip_id], control) if mode.boost and mode.boost.factors else ()
+    if factors:
+        b = mode.boost
+        for t in by_id[equip_id].tags:
+            if t.signal in b.signals:
+                boost[(equip_id, t.tag_id)] = TagBoost(None, 0.0, b.max_gain, factors=factors, gain=b.gain, shapes=tuple(b.shapes))
+    src = next((t for t in by_id[equip_id].tags if mode.boost and mode.boost.by and t.signal == mode.boost.by
                 and (not mode.boost.equip_ids or equip_id in mode.boost.equip_ids)), None)
     if src is not None:
         b, by = mode.boost, (equip_id, src.tag_id)
@@ -307,10 +371,35 @@ def plan(plant: PlantConfig, mode: FaultMode, equip_id: str,
                 boost[key] = TagBoost(by, (b.per_unit or 0.0) * control[by][1], b.max_gain,
                                       _hold(found.get(key, ()), t.limits, *control[key]) if b.hold_below_alarm else None, power)
     out = {}
+    signals = {(e.equip_id, t.tag_id): t.signal for e in plant.equipment for t in e.tags}
     for key, a in found.items():
         via, hop = role[key[0]]
-        out[key] = TagPlan(tuple(a), quiet, via, hop, RECOVERY_SEC * (hop + 1), boost.get(key))
+        out[key] = TagPlan(tuple(a), quiet, via, hop, recovery_sec(signals[key]) * (hop + 1), boost.get(key))
     return out
+
+
+def _factor_refs(b: Boost, e: EquipmentConfig, control: dict[TagKey, tuple[float, float]]) -> tuple[FactorRef, ...]:
+    """설비의 요인 태그. 요인 하나라도 태그가 없거나 대상 설비가 아니면 빈 값 (교호작용 없음)."""
+    if b.equip_ids and e.equip_id not in b.equip_ids:
+        return ()
+    first = {}
+    for t in e.tags:
+        first.setdefault(t.signal, (e.equip_id, t.tag_id))
+    refs = []
+    for f in b.factors:
+        if f.signal not in first or (f.over and f.over not in first):
+            return ()
+        (mu, sg), over = control[first[f.signal]], None
+        if f.over:
+            k2 = first[f.over]
+            over = (k2, control[k2][0] + f.offset, control[k2][1])
+        refs.append(FactorRef(f, first[f.signal], (mu + f.offset, sg), over))
+    return tuple(refs)
+
+
+def factor_gain(boost: TagBoost, z_of) -> float:
+    """요인 곱 교호작용 배율. z_of(태그) 는 그 태그의 step·ramp 사건 효과 z."""
+    return min(boost.max_gain, 1 + boost.gain * math.prod(f.level(z_of) for f in boost.factors))
 
 
 def _hold(applied, limits, mu: float, sigma: float) -> tuple[float, float, float, float] | None:
@@ -369,8 +458,8 @@ def effect_start(start_sec: float, lag_sec: float, speed: int = 1) -> float:
 
 
 def tag_effect(tp: TagPlan, t: float, stop: float | None, speed: int = 1,
-               repair: float | None = None) -> tuple[float, bool]:
-    """사건 시작 기준 t 초(실제 시간)의 (효과 z 합, nelson_quiet 여부). stop·repair 도 사건 시작 기준(None 이면 아직 안 함).
+               repair: float | None = None, shapes: tuple[Shape, ...] = ()) -> tuple[float, bool]:
+    """shapes 를 주면 그 모양의 효과만 더한다. 사건 시작 기준 t 초(실제 시간)의 (효과 z 합, nelson_quiet 여부). stop·repair 도 사건 시작 기준(None 이면 아직 안 함).
     효과 시작은 단계 시각/speed + lag (effect_start). 멈추기 전에 시작하지 못한 효과는 없고,
     멈춘 뒤에는 tp.recovery 동안 선형으로 0 이 된다. 손상 효과(a.damage)는 멈춘 시각의 크기로 남아 있다가
     수리 뒤 tp.recovery 동안 0 이 된다."""
@@ -379,6 +468,8 @@ def tag_effect(tp: TagPlan, t: float, stop: float | None, speed: int = 1,
     healed = 1.0 if repair is None or t < repair else max(0.0, 1 - (t - repair) / tp.recovery)
     z = 0.0
     for a in tp.applied:
+        if shapes and a.effect.shape not in shapes:
+            continue
         s = effect_start(a.start, a.effect.lag_sec, speed)
         if s > t or (stop is not None and s >= stop):
             continue
@@ -399,13 +490,13 @@ def hydraulic_plan(mode: FaultMode) -> dict[HydraulicParameter, TagPlan]:
             effects.setdefault(change.parameter, []).append(
                 Applied(stage.id, stage.at_sec, effect, change.amount, stage.damage)
             )
-    return {key: TagPlan(tuple(changes), (), via="physics") for key, changes in effects.items()}
+    return {key: TagPlan(tuple(changes), (), via="physics", recovery=recovery_sec(key)) for key, changes in effects.items()}
 
 
-def event_tag_effect(tp: TagPlan, event: FaultEvent, epoch: float) -> tuple[float, bool]:
+def event_tag_effect(tp: TagPlan, event: FaultEvent, epoch: float, shapes: tuple[Shape, ...] = ()) -> tuple[float, bool]:
     """절대 시각의 사건 효과. 태그와 물리 파라미터가 같은 수명 주기를 쓴다."""
     return tag_effect(tp, epoch - event.start, None if event.stop is None else event.stop - event.start,
-                      event.speed, None if event.repair is None else event.repair - event.start)
+                      event.speed, None if event.repair is None else event.repair - event.start, shapes)
 
 
 def holds_damage(tags: dict[TagKey, TagPlan], ev: FaultEvent) -> bool:

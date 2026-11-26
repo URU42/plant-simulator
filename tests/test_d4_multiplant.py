@@ -21,6 +21,7 @@ def _plants(config_dir, tmp_path):
     for key in KEYS:
         runtime = load_yaml_dict(config_dir / f"runtime_{key}.yaml")
         runtime["physics"] = str(config_dir / f"physics_{key}_twin.yaml")
+        runtime.pop("physics_general", None)
         path = tmp_path / f"runtime_{key}.yaml"
         path.write_text(yaml.safe_dump(runtime, allow_unicode=True), encoding="utf-8")
         entries.append({"key": key, "plant": str(config_dir / f"plant_{key}.yaml"), "runtime": str(path),
@@ -158,4 +159,4 @@ def test_compose_twin_config_runs_all_five_plants_with_physics(config_dir):
         runtime = load_runtime(entry.runtime)
         assert runtime.physics is not None and runtime.physics.name == f"physics_{entry.key}_twin.yaml"
         base = load_runtime(config_dir / f"runtime_{entry.key}.yaml")
-        assert runtime.model_dump(exclude={"physics"}) == base.model_dump(exclude={"physics"})
+        assert runtime.model_dump(exclude={"physics", "physics_general"}) == base.model_dump(exclude={"physics", "physics_general"})

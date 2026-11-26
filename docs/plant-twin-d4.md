@@ -1,5 +1,7 @@
 # 다섯 플랜트 대표 수력 회로와 디지털 트윈 (D0 보완 → D4)
 
+> 2026-11-25 PU-D5a: 원료 펌프가 두 대(CDU·RFCC 병렬, HOU·RHDS·VRDS 직렬)로 늘었다. 이 문서의 단일 펌프 회로 수치·검증은 그 전 기록이다. 현재 회로는 `config/physics_*_integrated.yaml` 의 `station` 과 README 의 '두 번째 원료 펌프' 절을 본다.
+
 > **상태(2026-11-24 저녁)**: 강화된 D0 게이트 뒤 D3·D4 를 다시 실행했다. 다섯 플랜트 브라우저 E2E 와 비공개 DB 감사가 통과해 아래 [재검증](#재검증-2026-11-24-저녁) 결과로 D4 를 판정한다. 오후 이전의 "검증 (2026-11-24 실행)" 표는 이전 D0 기준 기록으로 남겨 둔다. Docker 컨테이너 재생성은 sk-clx-diag-agent `docs/VALIDATION.md` 의 Docker 절에 기록했다(필수 확인 통과).
 
 작성 기준일 2026-11-24. 대상: `plant-simulator` 와 `sk-clx-diag-agent` 의 로컬 디지털 트윈. AI가 작성한 구현·검증 정리본이며 팀 승인 문서가 아니다. 물리 계수·경계 조건은 모두 **synthetic assumption** 이고 현장 자료가 아니다. 전체 설비·시나리오 지원 범위는 [지원 매트릭스](twin-support-matrix.md), Modelica 결과는 [models/modelica/REPORT.md](../models/modelica/REPORT.md) 에 있다. CDU D0~D2 상세는 [CDU 물리 재생 안내](cdu-physics.md) 를 따른다.

@@ -13,29 +13,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from common.config_models import load_yaml
-from simulator.physics.network import Network, NetworkResult, OperatingPoint
+from simulator.physics.network import OperatingPoint
 from simulator.physics.pipe import Pipe
-from simulator.physics.pump import GRAVITY_M_S2, Pump  # noqa: F401
+from simulator.physics.pump import GRAVITY_M_S2, Pump
+from simulator.physics.station import Station, UnitState
 from simulator.physics_adapter import CoupledCase
 from simulator.physics_single import SingleCase
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 REL_TOL = 1e-6
-# 합격 조건은 max(절대 바닥값, |Python 기준값| × 상대 허용오차)다.
-ABS_TOL = {
-    "feedFlow": 1e-8, "otherFlow": 1e-8, "productFlow": 1e-8,
-    "suctionPressure": 1.0, "headerPressure": 1.0, "boosterSuction": 1.0, "boosterDischarge": 1.0,
-    "feedHead": 1e-4, "feedHydraulic": 0.1, "feedShaft": 0.1, "boosterShaft": 0.1,
-    "feedNpsha": 1e-6, "feedNpshr": 1e-6, "feedMargin": 1e-6, "feedLoss": 1e-6,
-    "boosterNpsha": 1e-6, "boosterNpshr": 1e-6, "boosterMargin": 1e-6, "boosterLoss": 1e-6,
-}
-BALANCE_TOL = {
-    "massResidual": 1e-6, "feedPressureResidual": 1.0,
-    "otherPressureResidual": 1.0, "productPressureResidual": 1.0, "energyResidual": 0.1,
-}
-
-
 @dataclass(frozen=True)
 class Scenario:
     name: str
@@ -45,9 +32,12 @@ class Scenario:
     valve_restriction: float = 0.0
     booster_blockage: float = 0.0
     booster_wear: float = 0.0
+    second_blockage: float = 0.0
+    second_wear: float = 0.0
 
-    def amounts(self) -> tuple[float, float, float, float, float]:
-        return self.blockage, self.wear, self.valve_restriction, self.booster_blockage, self.booster_wear
+    def amounts(self) -> tuple[float, ...]:
+        return (self.blockage, self.wear, self.valve_restriction, self.booster_blockage, self.booster_wear,
+                self.second_blockage, self.second_wear)
 
 
 SCENARIOS = (
@@ -60,6 +50,8 @@ SCENARIOS = (
     Scenario("StrainerBlocked", blockage=1.0),
     Scenario("BoosterStrainerBlocked", booster_blockage=1.0),
     Scenario("BoosterWorn", booster_wear=1.0),
+    Scenario("SecondStrainerBlocked", second_blockage=1.0),
+    Scenario("SecondWorn", second_wear=1.0),
 )
 
 
@@ -85,49 +77,25 @@ def pump_args(prefix: str, pump: Pump, speed: float, npsh=None) -> str:
     return assignment(prefix, **fields)[:-1] + ", cavitation=true)"
 
 
-Spec = tuple[Network, OperatingPoint, float, float]
+Spec = tuple[Station, OperatingPoint, dict[str, UnitState], float]
 
 
 def models(case: CoupledCase) -> tuple[str, dict[str, Spec]]:
-    network = case.network
-    product = next(b for b in network.branches if b.branch_id == case.downstream_branch)
-    others = [b for b in network.branches if b is not product]
+    from models.modelica.verify_station import text
+    product = next(b for b in case.network.branches if b.branch_id == case.downstream_branch)
+    others = [b for b in case.network.branches if b is not product]
     if (len(others) != 1 or len(product.pipes) != 1
             or set(product.valves) != {case.control_valve} or product.booster is None):
         raise ValueError("검증 회로에는 제품 분기 한 곳과 별도 단순 분기 한 곳이 필요합니다.")
-    other = others[0]
-    if len(other.pipes) != 1 or other.valves or other.booster is not None:
+    if len(others[0].pipes) != 1 or others[0].valves or others[0].booster is not None:
         raise ValueError("별도 분기는 배관 하나로 구성되어야 합니다.")
     specs: dict[str, Spec] = {}
-    # 시작 추정값은 설계 정격 유량(설정 입력)이다. Python 해를 넘기지 않는다.
-    feed_start = network.pump.rated_flow_m3_s
-    product_start = product.booster.pump.rated_flow_m3_s
-    other_start = max(feed_start - product_start, 0.1 * feed_start)
     lines = ["package Scenarios"]
     for scenario in SCENARIOS:
-        net, point, resistance, booster_resistance = case.scenario(*scenario.amounts())
+        station, point, states, booster_r = case.scenario(*scenario.amounts())
         point = point.model_copy(update={"speed_rpm": point.speed_rpm * scenario.speed_ratio})
-        specs[scenario.name] = (net, point, resistance, booster_resistance)
-        branch = next(b for b in net.branches if b.branch_id == case.downstream_branch)
-        valve = branch.valves[case.control_valve]
-        args = [
-            f"rho={net.density_kg_m3:.17g}, g={GRAVITY_M_S2:.17g}",
-            f"feedStart={feed_start:.17g}, otherStart={other_start:.17g}, productStart={product_start:.17g}",
-            assignment("source", p=point.suction_abs_pa),
-            assignment("otherSink", p=other.outlet_abs_pa),
-            assignment("productSink", p=product.outlet_abs_pa),
-            assignment("strainer", resistance=resistance),
-            pump_args("feed", net.pump, point.speed_rpm, net.pump_npsh),
-            pipe_args("otherLine", next(iter(other.pipes.values())), other.elevation_change_m),
-            pipe_args("processLine", next(iter(product.pipes.values())), product.elevation_change_m),
-            assignment("valve", diameter=valve.diameter_m, fullK=valve.full_open_k,
-                       opening=point.valve_openings.get(case.control_valve, 1.0)),
-            assignment("boosterStrainer", resistance=booster_resistance),
-            pump_args("booster", branch.booster.pump, branch.booster.speed_rpm, branch.booster.npsh),
-            pipe_args("delivery", branch.booster.discharge_pipe),
-        ]
-        lines.extend([f"  model {scenario.name}", "    extends PlantHydraulics.Circuit(",
-                      "      " + ",\n      ".join(args) + ");", f"  end {scenario.name};"])
+        specs[scenario.name] = (station, point, states, booster_r)
+        lines.append(text(scenario.name, case, station, point, states, booster_r=booster_r))
     lines.append("end Scenarios;")
     return "\n".join(lines) + "\n", specs
 
@@ -154,56 +122,14 @@ def read_final_row(file: Path) -> dict[str, float]:
     return {k: float(v) for k, v in rows[-1].items()}
 
 
-def python_outputs(case: CoupledCase, network: Network, point: OperatingPoint, result: NetworkResult) -> dict[str, float]:
-    product = next(b for b in result.branches if b.branch_id == case.downstream_branch)
-    other = next(b for b in result.branches if b is not product)
-    booster = next(b.booster for b in network.branches if b.branch_id == case.downstream_branch)
-    assert booster is not None and product.booster_shaft_w is not None
-    assert product.booster_discharge_abs_pa is not None and product.booster_suction_abs_pa is not None
-    energy = (result.hydraulic_w + product.booster_hydraulic_w
-              - result.pump_flow_m3_s * (point.suction_abs_pa - result.suction_abs_pa)
-              - sum(b.flow_m3_s * (b.friction_loss_pa + b.elevation_pressure_pa
-                                    + b.outlet_abs_pa - point.suction_abs_pa) for b in result.branches))
-    return {
-        "feedFlow": result.pump_flow_m3_s, "otherFlow": other.flow_m3_s, "productFlow": product.flow_m3_s,
-        "suctionPressure": result.suction_abs_pa, "headerPressure": result.discharge_abs_pa,
-        "boosterSuction": product.booster_suction_abs_pa,
-        "boosterDischarge": product.booster_discharge_abs_pa, "feedHead": result.pump_head_m,
-        "feedHydraulic": result.hydraulic_w, "feedShaft": result.shaft_w, "boosterShaft": product.booster_shaft_w,
-        "massResidual": result.mass_residual_kg_s, "feedPressureResidual": result.pump_pressure_residual_pa,
-        "otherPressureResidual": other.pressure_residual_pa, "productPressureResidual": product.pressure_residual_pa,
-        "energyResidual": energy,
-        **({"feedNpsha": result.pump_npsha_m, "feedNpshr": result.pump_npshr_m, "feedMargin": result.pump_npsh_margin,
-            "feedLoss": result.pump_head_loss} if result.pump_npsha_m is not None else {}),
-        **({"boosterNpsha": product.booster_npsha_m, "boosterNpshr": product.booster_npshr_m,
-            "boosterMargin": product.booster_npsh_margin, "boosterLoss": product.booster_head_loss}
-           if product.booster_npsha_m is not None else {}),
-    }
-
-
-def comparison_row(name: str, field: str, expected: float, measured: float) -> dict:
-    if not math.isfinite(measured) or not math.isfinite(expected):
-        raise ValueError(f"{name} {field}: 유한한 계산값이 필요합니다.")
-    error = abs(measured - expected)
-    if field in BALANCE_TOL:
-        limit = BALANCE_TOL[field]
-        passed = max(abs(measured), abs(expected)) <= limit
-        relative = None
-    else:
-        limit = max(ABS_TOL[field], REL_TOL * abs(expected))
-        passed = error <= limit
-        relative = error / abs(expected) if expected else None
-    return {"scenario": name, "quantity": field, "python": expected, "openmodelica": measured,
-            "absolute_error": error, "relative_error": relative, "tolerance": limit, "passed": passed}
-
-
 def compare(config: Path, omc: str, output: Path) -> bool:
     if "machine" in load_yaml(config):
         return compare_single(config, omc, output)
+    from models.modelica.verify_station import expected, row
     case = CoupledCase.model_validate(load_yaml(config))
     source, specs = models(case)
     output.mkdir(parents=True)
-    for name in ("PlantHydraulics.mo", "Smoke.mo"):
+    for name in ("PlantHydraulics.mo", "PumpStation.mo", "Smoke.mo"):
         shutil.copyfile(HERE / name, output / name)
     (output / "Scenarios.mo").write_text(source, encoding="utf-8")
     version = run_omc(omc, output, "--version", "version.log")
@@ -215,25 +141,24 @@ def compare(config: Path, omc: str, output: Path) -> bool:
     if not math.isclose(smoke, math.exp(-1), abs_tol=1e-6, rel_tol=0):
         raise ValueError(f"Smoke 적분 결과가 허용오차를 벗어났습니다. x(1)={smoke}")
 
-    commands = ['loadFile("PlantHydraulics.mo"); getErrorString();',
-                'loadFile("Scenarios.mo"); getErrorString();']
+    commands = [f'loadFile("{name}"); getErrorString();' for name in ("PlantHydraulics.mo", "PumpStation.mo", "Scenarios.mo")]
     for name in specs:
         commands.append(f'simulate(Scenarios.{name}, stopTime=1, numberOfIntervals=1, tolerance=1e-10, '
                         f'outputFormat="csv", fileNamePrefix="{name}"); getErrorString();')
     (output / "cases.mos").write_text("\n".join(commands) + "\n", encoding="utf-8")
     run_omc(omc, output, "cases.mos", "cases.log")
     rows = []
-    for name, (network, point, resistance, booster_resistance) in specs.items():
-        reference = python_outputs(case, network, point, network.solve(point, resistance, booster_resistance))
+    for name, (station, point, states, booster_r) in specs.items():
+        reference = expected(case, station, states, station.solve(point, states, booster_suction_resistance=booster_r))
         actual = read_final_row(output / f"{name}_res.csv")
-        rows.extend(comparison_row(name, field, expected, actual[field]) for field, expected in reference.items())
+        rows.extend(row(case.plant_id, name, field, value, actual[field]) for field, value in reference.items())
     with (output / "comparison.csv").open("x", encoding="utf-8", newline="") as file:
         writer = csv.DictWriter(file, list(rows[0]), lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     passed = all(r["passed"] for r in rows)
     report = {"omc_version": version, "config": config.name, "plant_id": case.plant_id,
-              "circuit": [case.equip_id, case.downstream_path[-1]],
+              "circuit": [case.equip_id, case.second, case.downstream_path[-1]],
               "config_sha256": hashlib.sha256(config.read_bytes()).hexdigest(),
               "relative_tolerance": REL_TOL, "smoke_x_at_1": smoke, "passed": passed, "rows": rows}
     (output / "comparison.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")

@@ -22,7 +22,7 @@ def test_with_simulators_fills_current_values(rfcc_plant_path, rfcc_runtime_path
     app = create_single_app(rfcc_plant_path, rfcc_runtime_path, ":memory:", settings=Settings(with_simulators=True, time_mode="live"))
     with TestClient(app) as c:
         rows = _wait(c, "/plant/current", lambda r: sum(x["value"] is not None for x in r) >= 60)
-        assert len(rows) == 82
+        assert len(rows) == 94
 
 
 def test_with_simulators_backfill_keeps_api_responsive(rfcc_plant_path, rfcc_runtime_path, tmp_path):

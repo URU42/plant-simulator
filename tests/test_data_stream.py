@@ -63,3 +63,15 @@ def test_redis_down_does_not_raise():
     s = DataStream(redis.Redis.from_url("redis://127.0.0.1:1", socket_timeout=0.2, socket_connect_timeout=0.2), "cdu")
     s.send([{"plant": "cdu", "ts": datetime.now(timezone.utc).isoformat(), "samples": []}])
     s.close()
+
+
+def test_controlled_simulation_never_publishes(config_dir):
+    """조작 시뮬레이션(일부러 낸 고장)은 REDIS_URL 이 있어도 AE 입력 Stream 으로 나가지 않는다. 그 밖의 공장은 그대로 보낸다."""
+    from collector.plant_context import PlantContext
+    from collector.plants import PlantEntry
+    for runtime, control, sends in (("runtime_rhds_twin.yaml", True, False), ("runtime_rhds_twin.yaml", False, True),
+                                    ("runtime_rhds.yaml", True, True)):
+        ctx = PlantContext.open(PlantEntry(key="rhds", plant=str(config_dir / "plant_rhds.yaml"), runtime=str(config_dir / runtime),
+                                           db=":memory:"), {}, "redis://127.0.0.1:1", simulation_control=control)
+        assert (ctx.data_stream is not None) == sends, (runtime, control)
+        ctx.close()

@@ -1,5 +1,7 @@
 # 플랜트 디지털 트윈 지원 매트릭스
 
+> 2026-11-25 PU-D5a: 원료 펌프가 두 대(CDU·RFCC 병렬, HOU·RHDS·VRDS 직렬)로 늘었다. 이 문서의 단일 펌프 회로 수치·검증은 그 전 기록이다. 현재 회로는 `config/physics_*_integrated.yaml` 의 `station` 과 README 의 '두 번째 원료 펌프' 절을 본다.
+
 작성 기준일 2026-11-24(오후 D0 재게이트·D1·D2 반영, 밤 D4 재검증 반영). 트윈 카탈로그(`collector/twin_catalog.py`)와 같은 날 실행 기록으로 생성. AI 편집 정리본이며 팀 승인 문서가 아니다. 물리 계수는 synthetic assumption 이다.
 
 - **트윈 주입**: 트윈 패널·`/simulation/control` 에서 허용하는 조합(서버 강제, 그 외 422).

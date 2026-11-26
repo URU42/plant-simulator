@@ -15,6 +15,7 @@ services:
     environment:
       ROOT_PATH: ${ROOT_PATH:-}
       INGEST_TOKEN: ${INGEST_TOKEN:-}                                   # 주입·멈춤(/anomalies)·외부 /ingest 에 필요. 없으면 403
+      EVAL_TOKEN: ${EVAL_TOKEN:-}                                       # 정답지(GET /anomalies) 전용. INGEST_TOKEN 과 달라야 한다. 없으면 403
     volumes:
       - plant-data:/app/data
       - ./config:/app/config:ro

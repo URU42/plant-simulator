@@ -5,13 +5,20 @@
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from collector.storage import Storage
 from common.config_models import Limits, PlantConfig
+from common.sim_clock import KST
+from common.timefmt import to_db
 
 
 def seed_master(storage: Storage, plant: PlantConfig) -> None:
     p = plant.plant
     with storage.transaction():
+        # 같은 버전으로 다시 켜면 처음 적은 시각을 유지한다
+        storage.execute("INSERT OR IGNORE INTO plant_config_change VALUES (?, ?, ?)",
+                        (p.plant_id, p.config_version, to_db(datetime.now(KST))))
         storage.execute("INSERT OR REPLACE INTO plant VALUES (?, ?, ?)", (p.plant_id, p.name, p.config_version))
         storage.executemany("INSERT OR REPLACE INTO unit_group VALUES (?, ?, ?)",
                             [(g.id, p.plant_id, g.name) for g in p.unit_groups])

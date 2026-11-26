@@ -22,6 +22,7 @@ def prepare(plants: list[str], username: str = "twin-d4-demo") -> Path:
     run = Path(mkdtemp(prefix="run.", dir=CACHE))
     values = {
         "INGEST_TOKEN": secrets.token_urlsafe(32),
+        "EVAL_TOKEN": secrets.token_urlsafe(32),
         "AGENT_INTERNAL_TOKEN": secrets.token_urlsafe(32),
         "AUTH_JWT_SECRET": secrets.token_urlsafe(40),
         "AUTH_ADMIN_USERNAME": username,
@@ -37,6 +38,7 @@ def prepare(plants: list[str], username: str = "twin-d4-demo") -> Path:
         config = load_yaml(ROOT / f"config/runtime_{key}.yaml")
         # 공장별 회로 묶음(설비별 제외 사유 포함). CDU: 결합 회로 + P-8303A + F-8201.
         config["physics"] = str(ROOT / f"config/physics_{key}_twin.yaml")
+        config.pop("physics_general", None)        # 일반 모드 전용
         runtime.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
         entries.append({"key": key, "plant": str(ROOT / f"config/plant_{key}.yaml"),
                         "runtime": str(runtime), "db": str(run / f"{key}.db")})

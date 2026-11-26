@@ -190,7 +190,7 @@ def fault_modes(ctx: PlantContext = Depends(context)):
     for mode in ctx.book.modes.values():
         equip_ids = [e.equip_id for e in ctx.plant.equipment if mode in ctx.book.applicable(e.equip_id)]
         if equip_ids:
-            out.append({"mode": mode.id, "name": mode.name, "equip_ids": equip_ids, "unobserved": mode.unobserved,
+            out.append({"mode": mode.id, "name": mode.name, "equip_ids": equip_ids, "unobserved": mode.unobserved, "basis": mode.basis,
                         "stages": [{"id": s.id, "name": s.name, "at_sec": s.at_sec, "damage": s.damage} for s in mode.stages]})
     return out
 
@@ -249,18 +249,18 @@ async def repair_anomaly(equip_id: str, request: Request, ctx: PlantContext = De
     return {"repaired": repaired, "repair_requested_at": _utc(at)}
 
 
-def _require_physics_evaluation_token(request: Request, ctx: PlantContext) -> None:
-    if ctx.runtime.physics is None:
+def _require_physics_operator_token(request: Request, ctx: PlantContext) -> None:
+    if not ctx.runtime.twin:
         return
     token = request.app.state.settings.ingest_token
     if not token or not hmac.compare_digest(request.headers.get("X-Ingest-Token", ""), token):
-        raise HTTPException(403, "physics scenario records require the evaluation operator token")
+        raise HTTPException(403, "physics scenario records require the operator token")
 
 
 @router.get("/anomalies/damaged")
 def damaged_anomalies(request: Request, ctx: PlantContext = Depends(context)):
     """멈췄지만 손상이 남아 아직 안 고친 사건 (화면의 수리 버튼용). 정답 분류는 싣지 않는다."""
-    _require_physics_evaluation_token(request, ctx)
+    _require_physics_operator_token(request, ctx)
     return [{"event_id": e.event_id, "equip_id": e.equip_id, "mode": e.mode.id, "start_at": _utc(e.start), "stop_requested_at": _utc(e.stop)}
             for e in ctx.book.damaged()]
 
@@ -268,7 +268,7 @@ def damaged_anomalies(request: Request, ctx: PlantContext = Depends(context)):
 @router.get("/anomalies/active")
 def active_anomalies(request: Request, ctx: PlantContext = Depends(context)):
     """안 멈춘 고장 모드 사건: event_id·설비·모드·시작. 정답 분류는 싣지 않는다 (화면의 적용/해제 상태용)."""
-    _require_physics_evaluation_token(request, ctx)
+    _require_physics_operator_token(request, ctx)
     return [{"event_id": e.event_id, "equip_id": e.equip_id, "mode": e.mode.id, "speed": e.speed, "start_at": _utc(e.start)}
             for e in ctx.book.active()]
 
@@ -276,8 +276,10 @@ def active_anomalies(request: Request, ctx: PlantContext = Depends(context)):
 @router.get("/anomalies")
 def answer_key(request: Request, equip_id: str | None = None, from_: str | None = Query(default=None, alias="from"), to: str | None = None,
                ctx: PlantContext = Depends(context)):
-    """정답지: 사건마다 고장 모드·분류·기대값·단계와 태그별 효과 시작·시작·멈춤·끝(멈춤 + 회복). from/to 는 구간과 겹치는 사건."""
-    _require_physics_evaluation_token(request, ctx)
+    """정답지(X-Eval-Token 필요): 사건마다 고장 모드·분류·기대값·단계와 태그별 효과 시작·시작·멈춤·끝(멈춤 + 회복). from/to 는 구간과 겹치는 사건."""
+    token = request.app.state.settings.eval_token
+    if not token or not hmac.compare_digest(request.headers.get("X-Eval-Token", "").encode(), token.encode()):
+        raise HTTPException(403, "answer key requires X-Eval-Token (EVAL_TOKEN)")
     return ctx.book.answer_key(equip_id, query_time("from", from_) if from_ else None, query_time("to", to) if to else None)
 
 
@@ -412,12 +414,14 @@ async def stream(ctx: PlantContext = Depends(context)):
 # --- 앱 ----------------------------------------------------------------------
 def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
+    if settings.eval_token and settings.eval_token == settings.ingest_token:
+        raise ConfigError("EVAL_TOKEN must differ from INGEST_TOKEN: operators must not be able to read the answer key")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         modes = load_fault_modes(plants.fault_modes)
         app.state.plants = {entry.key: PlantContext.open(entry, modes, settings.redis_url, settings.reset_db_on_schema_change,
-                                                         settings.profile)
+                                                         settings.profile, settings.simulation_control)
                             for entry in plants.plants}
         app.state.started_at = to_db(datetime.now(timezone.utc))
         tasks: list[asyncio.Task] = []
@@ -428,8 +432,8 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
             limiter = asyncio.Semaphore(EMBEDDED_CONCURRENCY)
             for entry in plants.plants:
                 ctx = app.state.plants[entry.key]
-                # 물리 회로가 켜진 공장마다 조작 시계를 둔다 (D0 CDU → D4 HOU·RFCC·RHDS·VRDS).
-                if settings.simulation_control and ctx.runtime.physics is not None:
+                # 트윈 실행 설정인 공장마다 조작 시계를 둔다 (D0 CDU → D4 HOU·RFCC·RHDS·VRDS).
+                if settings.simulation_control and ctx.runtime.twin:
                     stored = ctx.storage.sim_now()
                     anchor = align_down(datetime.now(KST), ctx.runtime.send_interval_sec)
                     if stored:

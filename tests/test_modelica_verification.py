@@ -1,24 +1,26 @@
 import pytest
 
 from common.config_models import load_yaml
-from models.modelica.verify import CoupledCase, comparison_row, models, read_final_row
+from models.modelica.verify import CoupledCase, models, read_final_row
+from models.modelica.verify_station import row
 
 
 def test_modelica_inputs_and_python_operating_points_share_yaml(config_dir):
     case = CoupledCase.model_validate(load_yaml(config_dir / "physics_cdu_integrated.yaml"))
     source, points = models(case)
-    assert len(points) == 9
+    assert len(points) == 11
     assert "source(p=375990)" in source
-    assert "strainer(resistance=14000000)" in source
-    assert "boosterStrainer(resistance=1074440000)" in source
+    assert "s1(resistance=14000000)" in source and "s2(resistance=14000000)" in source
+    assert "boosterStrainer(resistance=1022230000)" in source
     assert points["SpeedLow"][1].speed_rpm == 3240
     assert points["SpeedHigh"][1].speed_rpm == pytest.approx(3960)
     assert points["ValveRestricted"][1].valve_openings[case.control_valve] == 0.4
-    assert points["StrainerBlocked"][2] == case.max_strainer_resistance_pa_s2_m6
+    assert points["StrainerBlocked"][2]["P-8101A"].suction_resistance == case.max_strainer_resistance_pa_s2_m6
     assert points["BoosterStrainerBlocked"][3] == case.max_booster_strainer_resistance_pa_s2_m6
     assert points["ThroughputReduced"][1].valve_openings[case.control_valve] == pytest.approx(0.88)
-    assert points["ImpellerWorn"][0].pump.efficiency == pytest.approx(0.6)
-    flow = {k: network.solve(point, r, rb).pump_flow_m3_s for k, (network, point, r, rb) in points.items()}
+    assert points["ImpellerWorn"][2]["P-8101A"].efficiency_loss == pytest.approx(0.2)
+    assert set(points["SecondWorn"][2]) == {"P-8101B"} and not points["Normal"][2]
+    flow = {k: st.solve(point, states, booster_suction_resistance=rb).flow_m3_s for k, (st, point, states, rb) in points.items()}
     assert flow["SpeedLow"] < flow["Normal"] < flow["SpeedHigh"]
     assert flow["ValveRestricted"] < flow["Normal"]
     assert flow["StrainerBlocked"] < flow["Normal"]
@@ -31,20 +33,18 @@ def test_modelica_inputs_and_python_operating_points_share_yaml(config_dir):
 def test_every_plant_circuit_builds_all_modelica_scenarios(config_dir, key):
     case = CoupledCase.model_validate(load_yaml(config_dir / f"physics_{key}_integrated.yaml"))
     source, points = models(case)
-    assert source.count("extends PlantHydraulics.Circuit(") == len(points) == 9
-    for network, point, r, rb in points.values():
-        result = network.solve(point, r, rb)
+    assert source.count("import PlantHydraulics.*;") == len(points) == 11
+    for st, point, states, rb in points.values():
+        result = st.solve(point, states, booster_suction_resistance=rb)
         assert abs(result.mass_residual_kg_s) < 1e-9
         assert all(b.pressure_residual_pa == pytest.approx(0, abs=1e-4) for b in result.branches)
 
 
 def test_balance_requires_both_models_to_close():
-    common_bias = comparison_row("Normal", "massResidual", 1e-5, 1e-5)
-    assert common_bias["absolute_error"] == 0 and common_bias["relative_error"] is None
-    assert not common_bias["passed"]
-    pressure = comparison_row("Normal", "headerPressure", 2_000_000, 2_000_001.5)
+    common_bias = row("cdu", "Normal", "massResidual", 1e-5, 1e-5)
+    assert common_bias["absolute_error"] == 0 and not common_bias["passed"]
+    pressure = row("cdu", "Normal", "otherLine.a.p", 2_000_000, 2_000_001.5)
     assert pressure["passed"] and pressure["tolerance"] == 2.0
-    assert pressure["relative_error"] == pytest.approx(7.5e-7)
 
 
 def test_incomplete_or_invalid_omc_result_is_rejected(tmp_path):
@@ -53,7 +53,7 @@ def test_incomplete_or_invalid_omc_result_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="종료 시각"):
         read_final_row(file)
     with pytest.raises(ValueError, match="유한한"):
-        comparison_row("Normal", "feedFlow", 0.1, float("nan"))
+        row("cdu", "Normal", "p1.q", 0.1, float("nan"))
 
 
 @pytest.mark.parametrize("name", ["physics_cdu_p8303a.yaml", "physics_cdu_f8201.yaml"])

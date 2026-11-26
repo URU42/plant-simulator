@@ -56,12 +56,13 @@ class PlantContext:
 
     @classmethod
     def open(cls, entry: PlantEntry, modes: dict[str, FaultMode], redis_url: str | None = None,
-             reset_db: bool = False, profile: str = "demo") -> "PlantContext":
+             reset_db: bool = False, profile: str = "demo", simulation_control: bool = False) -> "PlantContext":
         """modes 는 공장들이 함께 쓰는 고장 모드 정의(config/fault_modes.yaml). redis_url 이 있으면 Redis Stream 으로도 보낸다.
+        조작 시뮬레이션(simulation_control 이고 트윈 실행 설정인 공장)은 보내지 않는다: 일부러 낸 고장이 AE·업무 알람으로 이어지지 않게.
         reset_db 면 스키마 버전이 다른 DB 파일을 지우고 새로 만든다. profile 은 실행 용도(demo·eval)로 DB 마다 하나로 고정된다."""
         plant = load_plant(entry.plant)
         runtime = apply_profile(load_runtime(entry.runtime), profile)
-        physics = load_physics(plant, runtime.physics) if runtime.physics is not None else None
+        physics = load_physics(plant, runtime.physics, runtime.physics_general) if runtime.physics is not None else None
         Path(entry.db).parent.mkdir(parents=True, exist_ok=True) if entry.db != ":memory:" else None
         storage = Storage(entry.db, reset_on_schema_change=reset_db)
         _pin_profile(storage, entry.db, profile)
@@ -73,7 +74,7 @@ class PlantContext:
         return cls(key=entry.key, plant=plant, runtime=runtime, storage=storage, jobs=JobRunner(storage, plant, runtime),
                    broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime, physics), tag_keys=storage.tag_keys(),
                    loop=loop, book=AnomalyBook(storage, plant, modes, _instrument(plant, runtime), physics),
-                   data_stream=DataStream.from_url(redis_url, entry.key) if redis_url else None)
+                   data_stream=DataStream.from_url(redis_url, entry.key) if redis_url and not (simulation_control and runtime.twin) else None)
 
     def set_live(self, at: float) -> None:
         """생성기가 실시간으로 넘어가 시계를 따라잡았다(at = 따라잡은 첫 구간 시작, epoch 초). 이때부터 주입을 받는다."""

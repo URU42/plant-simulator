@@ -18,8 +18,8 @@ from simulator.physics_adapter import PhysicsAdapter
 
 START = datetime(2026, 11, 24, tzinfo=KST)
 EPOCH = int(START.timestamp())
-CIRCUITS = {"cdu": ("P-8101A", "P-8401A"), "hou": ("P-2101", "P-2701"), "rfcc": ("P-1101A", "P-1303A"),
-            "rhds": ("P-3101", "P-3102"), "vrds": ("P-4101", "P-4102")}
+CIRCUITS = {"cdu": ("P-8101A", "P-8401A", "P-8101B"), "hou": ("P-2101", "P-2701", "P-2101-S2"), "rfcc": ("P-1101A", "P-1303A", "P-1101B"),
+            "rhds": ("P-3101", "P-3102", "P-3101-S2"), "vrds": ("P-4101", "P-4102", "P-4101-S2")}      # (첫 입력 펌프, 후속, 둘째 입력 펌프)
 # 밸브 제한은 CDU 결합 회로 전용(2026-11-24 D2-A). 다른 공장에는 밸브 설비·태그가 없다.
 SOURCE_MODES = {"PM-SUCTION-LOSS", "PM-IMPELLER-WEAR", "OP-THROUGHPUT-CHANGE"}
 CDU_SOURCE_EXTRA = {"PM-DISCHARGE-VALVE-RESTRICTION"}
@@ -30,14 +30,15 @@ EXTRA_DOWNSTREAM = {"rhds": {"PM-SUCTION-HOT"}, "vrds": {"PM-SUCTION-HOT"}}
 SOLVE_INDEX = {("source", "PM-SUCTION-LOSS"): (0, 1.0), ("source", "PM-IMPELLER-WEAR"): (1, 1.0),
                ("source", "PM-DISCHARGE-VALVE-RESTRICTION"): (2, 1.0), ("source", "OP-THROUGHPUT-CHANGE"): (2, 0.2),
                ("downstream", "PM-SUCTION-LOSS"): (3, 1.0), ("downstream", "PM-IMPELLER-WEAR"): (4, 1.0),
-               ("downstream", "PM-SUCTION-HOT"): (3, 0.55)}
+               ("downstream", "PM-SUCTION-HOT"): (3, 0.55),
+               ("second", "PM-SUCTION-LOSS"): (5, 1.0), ("second", "PM-IMPELLER-WEAR"): (6, 1.0)}
 
 
 def _setup(config_dir, key):
     plant = load_plant(config_dir / f"plant_{key}.yaml")
     physics = PhysicsAdapter(plant, config_dir / f"physics_{key}_integrated.yaml")
     runtime = load_runtime(config_dir / f"runtime_{key}.yaml").model_copy(update={
-        "physics": config_dir / f"physics_{key}_integrated.yaml",
+        "physics_general": False, "physics": config_dir / f"physics_{key}_integrated.yaml",
         "units": sorted({plant.equipment_by_id()[e].unit_id for e in CIRCUITS[key]}),
     })
     storage = Storage(":memory:")
@@ -57,7 +58,7 @@ def circuit(request, config_dir):
 
 def test_normal_solution_reproduces_master_operating_point(circuit):
     key, plant, _, physics, _ = circuit
-    assert (physics.primary, physics.downstream) == CIRCUITS[key]
+    assert (physics.primary, physics.downstream, physics.second) == CIRCUITS[key]
     assert physics.case.plant_id == plant.plant.plant_id
     control = plant.control_by_key()
     normal = physics.solve(0, 0, 0)
@@ -79,12 +80,12 @@ def test_circuit_ids_sensors_and_boundaries_are_plant_specific(config_dir):
         assert {e for e, _ in adapter.tag_keys} == set(CIRCUITS[key])
 
 
-@pytest.mark.parametrize("role", ["source", "downstream"])
+@pytest.mark.parametrize("role", ["source", "downstream", "second"])
 def test_each_supported_scenario_moves_physics_and_recovers(circuit, role, config_dir):
     key, plant, runtime, physics, _ = circuit
-    equip = CIRCUITS[key][0 if role == "source" else 1]
+    equip = CIRCUITS[key][["source", "downstream", "second"].index(role)]
     modes = (SOURCE_MODES | (CDU_SOURCE_EXTRA if key == "cdu" else set())) if role == "source" \
-        else DOWNSTREAM_MODES | EXTRA_DOWNSTREAM.get(key, set())
+        else DOWNSTREAM_MODES if role == "second" else DOWNSTREAM_MODES | EXTRA_DOWNSTREAM.get(key, set())
     normal = physics.solve(0, 0, 0)
     for mode in sorted(modes):
         _, _, _, book, storage = _setup(config_dir, key)
@@ -98,7 +99,7 @@ def test_each_supported_scenario_moves_physics_and_recovers(circuit, role, confi
                 assert book.repair(equip, EPOCH + 270)[1] == [event.event_id]
             plans = physics.parameter_plans(book.external(EPOCH, EPOCH + 400))
             index, amount = SOLVE_INDEX[(role, mode)]
-            args = [0.0] * 5
+            args = [0.0] * 7
             args[index] = amount
             plateau = physics.state(EPOCH + 190, plans)
             assert plateau == physics.solve(*args), (key, mode)
@@ -123,7 +124,7 @@ def test_each_supported_scenario_moves_physics_and_recovers(circuit, role, confi
 
 def test_one_physics_scenario_per_circuit(circuit):
     key, _, _, _, book = circuit
-    source, downstream = CIRCUITS[key]
+    source, downstream, _ = CIRCUITS[key]
     book.inject(source, "PM-SUCTION-LOSS", EPOCH + 10)
     with pytest.raises(CircuitBusy):
         book.inject(downstream, "PM-IMPELLER-WEAR", EPOCH + 20)
@@ -138,10 +139,16 @@ def test_one_physics_scenario_per_circuit(circuit):
     book.inject(source, "PM-SUCTION-LOSS", EPOCH + 461)
 
 
+# 가정 기반 시나리오 (I5·I6): 물리 회로 밖이지만 주입할 수 있다
+ASSUMED = {"C-2301": {"CC-SURGE"}, "B-1201": {"CC-SURGE"}, "C-1401": {"CC-SURGE", "CC-SURGE-HIGH-RATIO", "OP-LOW-FLOW"},
+           "C-3101": {"CC-SURGE"}, "C-4101": {"CC-SURGE"}, "GB-3101": {"GB-LUBE-WEAR"},
+           "GB-2301": {"GB-LUBE-WEAR"}, "GB-4101": {"GB-LUBE-WEAR"}}
+
+
 def test_catalog_marks_supported_and_unsupported_targets(circuit):
     key, plant, _, physics, book = circuit
     catalog = build_catalog(plant, book, physics, EPOCH)
-    assert (catalog["circuit"]["source"], catalog["circuit"]["downstream"]) == CIRCUITS[key]
+    assert (catalog["circuit"]["source"], catalog["circuit"]["downstream"]) == CIRCUITS[key][:2]
     by_id = {a["equip_id"]: a for a in catalog["equipment"]}
     assert set(by_id) == {e.equip_id for e in plant.equipment}
     for equip_id, asset in by_id.items():
@@ -151,9 +158,15 @@ def test_catalog_marks_supported_and_unsupported_targets(circuit):
         elif equip_id == CIRCUITS[key][1]:
             assert supported == DOWNSTREAM_MODES | EXTRA_DOWNSTREAM.get(key, set())
             assert asset["hydraulic_role"] == "downstream"
+        elif equip_id == CIRCUITS[key][2]:
+            assert supported == DOWNSTREAM_MODES and asset["hydraulic_role"] == "source"
         else:
-            assert not supported and asset["reason"] and asset["hydraulic_role"] is None
-            assert all(s["reason"] == OUTSIDE for s in asset["scenarios"])
+            assert supported == ASSUMED.get(equip_id, set()) and asset["hydraulic_role"] is None
+            assert bool(asset["reason"]) == (not supported)
+            for s in asset["scenarios"]:
+                assert (s["model"], s["injectable"], s["reason"]) == (
+                    ("empirical", True, None) if s["supported"] else ("empirical", False, OUTSIDE))
+                assert not s["supported"] or not s["basis"]["physical_tags"]
         for scenario in asset["scenarios"]:
             assert set(scenario) == {"mode", "name", "model", "supported", "injectable", "blocked_by", "reason", "damage", "basis"}
     assert "label" not in str(catalog) and "expect" not in str(catalog)
@@ -170,7 +183,7 @@ def test_control_api_rejects_unsupported_and_noop_commands(config_dir, tmp_path)
     key = "hou"
     path = tmp_path / "runtime.yaml"
     runtime = load_runtime(config_dir / f"runtime_{key}.yaml").model_copy(update={
-        "physics": config_dir / f"physics_{key}_integrated.yaml"})
+        "physics_general": False, "physics": config_dir / f"physics_{key}_integrated.yaml"})
     path.write_text(runtime.model_dump_json(), encoding="utf-8")
     app = create_single_app(config_dir / f"plant_{key}.yaml", path, ":memory:",
                             settings=Settings(with_simulators=False, ingest_token="local-test"))
@@ -199,6 +212,35 @@ def test_control_api_rejects_unsupported_and_noop_commands(config_dir, tmp_path)
         state = client.get("/plant/simulation/catalog", headers=headers).json()
         p2101 = next(a for a in state["equipment"] if a["equip_id"] == "P-2101")
         assert p2101["state"] in ("recovering", "active")
+
+
+def test_control_api_injects_assumption_based_scenarios(config_dir, tmp_path):
+    """가정 기반: GB-3101(I6)을 주입·정지·수리한다. 손상이 남은 동안은 다시 주입하지 않고, 물리 회로 주입은 막지 않는다."""
+    app = create_single_app(config_dir / "plant_rhds.yaml", config_dir / "runtime_rhds_twin.yaml", ":memory:",
+                            settings=Settings(with_simulators=False, ingest_token="local-test"))
+    headers = {"X-Ingest-Token": "local-test"}
+    with TestClient(app) as client:
+        ctx = app.state.plants["plant"]
+        ctx.simulation_clock = ControlledClock(START)
+
+        def control(n, **body):
+            return client.post("/plant/simulation/control", headers=headers, json={"command_id": f"c{n}", **body}).status_code
+
+        def asset():
+            rows = client.get("/plant/simulation/catalog", headers=headers).json()["equipment"]
+            return next(a for a in rows if a["equip_id"] == "GB-3101")
+
+        gear = {"equip_id": "GB-3101"}
+        assert control(1, action="start") == 200
+        assert control(2, action="inject", mode="GB-LUBE-WEAR", scenario_speed=10, **gear) == 200
+        assert control(3, action="inject", mode="GB-LUBE-WEAR", **gear) == 409
+        assert control(4, action="inject", equip_id="P-3101", mode="PM-SUCTION-LOSS") == 200
+        assert control(5, action="inject", equip_id="F-3101", mode="FN-FOULING-SPEED-UP") == 422      # 가정 기반으로 열지 않은 모드
+        event = next(e for e in ctx.book._events.values() if e.equip_id == "GB-3101")
+        ctx.book.stop("GB-3101", event.start + 400)          # 배속 10: 치면 마모(S2) 뒤에 멈춤
+        assert asset()["state"] == "damaged" and asset()["can_repair"]
+        assert control(6, action="inject", mode="GB-LUBE-WEAR", **gear) == 409
+        assert control(7, action="repair", **gear) == 200
 
 
 def test_plant_without_physics_has_no_twin_control(config_dir, tmp_path):

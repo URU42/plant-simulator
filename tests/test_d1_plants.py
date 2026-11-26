@@ -25,10 +25,12 @@ def test_cli_normal_point_and_balances(key):
                          cwd=ROOT, capture_output=True, text=True, check=True)
     out = json.loads(run.stdout)
     r = out["result"]
+    for u in r["units"]:
+        assert abs(u["pressure_residual_pa"]) < 1e-4
     assert out["plant_id"] == f"PL-{key.upper()}" and out["provenance"] == "synthetic assumption"
     assert abs(r["mass_residual_kg_s"]) < 1e-9 and abs(r["pump_pressure_residual_pa"]) < 1e-4
     assert all(abs(b["pressure_residual_pa"]) < 1e-4 for b in r["branches"])
-    assert sum(b["flow_m3_s"] for b in r["branches"]) == pytest.approx(r["pump_flow_m3_s"], rel=1e-9)
+    assert sum(b["flow_m3_s"] for b in r["branches"]) == pytest.approx(r["total_flow_m3_s"], rel=1e-9)
     plant = load_plant(ROOT / f"config/plant_{key}.yaml")
     flow_tag = next(t for t in plant.equipment_by_id()[out["equip_id"]].tags if t.signal == "flow")
     assert r["pump_flow_m3_s"] * 3600 == pytest.approx(plant.control_by_key()[(out["equip_id"], flow_tag.tag_id)][0], abs=0.01)
@@ -37,22 +39,25 @@ def test_cli_normal_point_and_balances(key):
 @pytest.mark.parametrize("key", PLANTS)
 def test_resistance_speed_and_flow_split_sensitivity(key):
     c = case(key)
-    base = c.network.solve(c.default_point)
+    def solve(network=c.network, point=c.default_point):
+        return c.model_copy(update={"network": network}).supply().solve(point)
+
+    base = solve()
     product = c.downstream_branch
     # 제품 분기 배관 저항 +50 %: 제품 유량 ↓, 헤더 압력 ↑, 다른 분기 유량 ↑
     branches = [b.model_copy(update={"pipes": {k: p.model_copy(update={"minor_loss_k": p.minor_loss_k * 1.5 + 1})
                                                for k, p in b.pipes.items()}}) if b.branch_id == product else b
                 for b in c.network.branches]
-    stiff = c.network.model_copy(update={"branches": branches}).solve(c.default_point)
+    stiff = solve(c.network.model_copy(update={"branches": branches}))
     flow = lambda res, bid: next(b.flow_m3_s for b in res.branches if b.branch_id == bid)
     other = next(b.branch_id for b in c.network.branches if b.branch_id != product)
     assert flow(stiff, product) < flow(base, product) and flow(stiff, other) > flow(base, other)
-    assert stiff.discharge_abs_pa > base.discharge_abs_pa
+    assert stiff.header_abs_pa > base.header_abs_pa
     # 회전수: 유량·헤더 압력 단조 증가
-    speeds = [c.network.solve(c.default_point.model_copy(update={"speed_rpm": c.default_point.speed_rpm * r}))
+    speeds = [solve(point=c.default_point.model_copy(update={"speed_rpm": c.default_point.speed_rpm * r}))
               for r in (0.9, 1.0, 1.05)]
-    assert [s.pump_flow_m3_s for s in speeds] == sorted(s.pump_flow_m3_s for s in speeds)
-    assert [s.discharge_abs_pa for s in speeds] == sorted(s.discharge_abs_pa for s in speeds)
+    assert [s.flow_m3_s for s in speeds] == sorted(s.flow_m3_s for s in speeds)
+    assert [s.header_abs_pa for s in speeds] == sorted(s.header_abs_pa for s in speeds)
     for res in (stiff, *speeds):
         assert abs(res.mass_residual_kg_s) < 1e-9
 
@@ -110,4 +115,6 @@ def test_ontology_and_3d_mapping_have_no_mismatch():
         pytest.skip("진단 저장소 체크아웃이 같은 상위 폴더에 없음")
     from scripts.twin_ontology_mapping import build
     _, problems = build(diag)
-    assert problems == []
+    # PU-D5a 의 새 펌프 다섯 대는 PU-D5b 에서 온톨로지·3D 에 들어간다. 그 밖의 불일치는 없어야 한다.
+    new = ("P-8101B", "P-1101B", "P-2101-S2", "P-3101-S2", "P-4101-S2")
+    assert [p for p in problems if not any(n in p for n in new)] == []

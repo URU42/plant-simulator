@@ -27,14 +27,15 @@ EPOCH = int(START.timestamp())
 PLANTS = ["hou", "rfcc", "rhds", "vrds"]
 ARGS = {("source", "PM-SUCTION-LOSS"): (1, 0, 0, 0, 0), ("source", "PM-IMPELLER-WEAR"): (0, 1, 0, 0, 0),
         ("source", "OP-THROUGHPUT-CHANGE"): (0, 0, 0.2, 0, 0), ("downstream", "PM-SUCTION-LOSS"): (0, 0, 0, 1, 0),
-        ("downstream", "PM-IMPELLER-WEAR"): (0, 0, 0, 0, 1)}
+        ("downstream", "PM-IMPELLER-WEAR"): (0, 0, 0, 0, 1),
+        ("second", "PM-SUCTION-LOSS"): (0, 0, 0, 0, 0, 1, 0), ("second", "PM-IMPELLER-WEAR"): (0, 0, 0, 0, 0, 0, 1)}
 MODES = load_fault_modes(ROOT / "config/fault_modes.yaml")
 
 
 def setup(key: str, units=None):
     plant = load_plant(ROOT / f"config/plant_{key}.yaml")
     physics_path = ROOT / f"config/physics_{key}_twin.yaml"
-    runtime = load_runtime(ROOT / f"config/runtime_{key}.yaml").model_copy(update={"physics": physics_path,
+    runtime = load_runtime(ROOT / f"config/runtime_{key}.yaml").model_copy(update={"physics": physics_path, "physics_general": False,
                                                                                     **({"units": units} if units else {})})
     physics = load_physics(plant, physics_path)
     storage = Storage(":memory:")
@@ -61,7 +62,7 @@ def test_each_mapped_scenario_full_cycle_without_side_effects(key, eid, mode):
     plant, runtime, physics, book, storage = setup(key)
     try:
         owner = physics._owner[eid]
-        args = ARGS[(physics.roles[eid], mode)]
+        args = ARGS[("second" if eid == owner.second else physics.roles[eid], mode)]
         damage = any(st.damage for st in MODES[mode].stages)
         event = book.inject(eid, mode, EPOCH + 10, 10)
         book.stop(eid, EPOCH + 310)
@@ -85,8 +86,13 @@ def test_each_mapped_scenario_full_cycle_without_side_effects(key, eid, mode):
         for tag in owner.tag_keys:                     # 물리 태그: 회로 해 변화만(z 중복 없음), 후속 설비 포함
             assert got[tag] - base[tag] == pytest.approx(centers[tag] - reference[tag], abs=1.001 * 10 ** -decimals[tag])
         partner = next(e for e in owner.roles if e != eid)
-        assert any(abs(centers[k] - reference[k]) > 10 ** -decimals[k] for k in owner.tag_keys if k[0] == partner), \
-            "연결된 후속(또는 상류) 설비가 회로 해로 변해야 한다"
+        moved = any(abs(centers[k] - reference[k]) > 10 ** -decimals[k] for k in owner.tag_keys if k[0] == partner)
+        drum = next(b for b in owner.case.network.branches if b.branch_id == owner.case.downstream_branch).drum is not None
+        if drum and eid == owner.downstream:
+            # 후속 펌프 흡입 드럼(RFCC·HOU): 후속 고장은 액위가 받아 상류 펌프로 되돌아가지 않는다(open-issues 42·43).
+            assert not moved, "드럼 뒤 후속 고장이 상류 설비를 움직였다"
+        else:
+            assert moved, "연결된 후속(또는 상류) 설비가 회로 해로 변해야 한다"
         allowed = owner.tag_keys | {(eid, t.tag_id) for t in plant.equipment_by_id()[eid].tags}
         for tag, value in got.items():                 # 다른 설비·태그는 그대로 (비의도적 영향 없음)
             if tag not in allowed:
@@ -95,8 +101,12 @@ def test_each_mapped_scenario_full_cycle_without_side_effects(key, eid, mode):
         assert all(k[0] == eid for k in empirical), "경험 신호는 주입 설비에만"
         if empirical:
             assert any(got[k] != base[k] for k in empirical if k in got), "경험 신호가 움직여야 한다"
-        recovered, again = at(PlantGenerator(plant, runtime, book), 590), at(PlantGenerator(plant, runtime), 590)
-        assert recovered == again
+        signal = {(e.equip_id, t.tag_id): t.signal for e in plant.equipment for t in e.tags}
+        early, again = at(PlantGenerator(plant, runtime, book), 590), at(PlantGenerator(plant, runtime), 590)
+        late = {k for k in early if early[k] != again[k]}
+        assert all("temp" in signal[k] for k in late), "온도가 아닌 태그는 먼저 회복한다"
+        assert late or not any("temp" in signal[k] for k in empirical), "온도는 늦게 회복한다"
+        assert at(PlantGenerator(plant, runtime, book), 720) == at(PlantGenerator(plant, runtime), 720)
     finally:
         storage.close()
 
@@ -116,8 +126,8 @@ def test_other_plants_and_bypass_path_are_untouched(key):
         finally:
             ostorage.close()
         # 우회 경로: physics 없는 실행 설정은 기존 통계형 생성기 그대로, 물리 전용 모드는 걸 수 없다.
-        bypass = load_runtime(ROOT / f"config/runtime_{key}.yaml")
-        assert bypass.physics is None and PlantGenerator(plant, bypass).physics is None
+        bypass = load_runtime(ROOT / f"config/runtime_{key}.yaml").model_copy(update={"physics": None, "physics_general": False})
+        assert PlantGenerator(plant, bypass).physics is None
         plain = AnomalyBook(storage, plant, MODES)
         assert "PM-IMPELLER-WEAR" not in {m.id for m in plain.applicable(eid)}
     finally:
@@ -131,7 +141,7 @@ def test_physics_only_runs_for_units_holding_circuit_tags(key):
         circuit_units = {plant.equipment_by_id()[e].unit_id for e in physics.roles}
         other_unit = next(e.unit_id for e in plant.equipment if e.unit_id not in circuit_units)
         _, outside_runtime, _, _, _ = setup(key, units=[other_unit])
-        plain = load_runtime(ROOT / f"config/runtime_{key}.yaml").model_copy(update={"units": [other_unit]})
+        plain = load_runtime(ROOT / f"config/runtime_{key}.yaml").model_copy(update={"physics": None, "physics_general": False, "units": [other_unit]})
         window = (START, START + timedelta(seconds=30))
         book.inject(next(iter(physics.scenarios)), "PM-SUCTION-LOSS", EPOCH + 2, 10)
         assert PlantGenerator(plant, outside_runtime, book).generate(*window) == PlantGenerator(plant, plain).generate(*window)

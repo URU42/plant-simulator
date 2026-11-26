@@ -1,7 +1,10 @@
-# synthetic assumption: PL-RFCC 대표 수력 등가회로 (P-1101A → 공통 헤더 → 두 등가 분기, 제품 분기에 P-1303A).
+# synthetic assumption: PL-RFCC 대표 수력 등가회로 (P-1101A·P-1101B 병렬 → 공통 헤더 → 두 등가 분기, 제품 분기에 P-1303A).
 # scripts/calibrate_physics.py rfcc 로 생성. 정상 해는 plant_rfcc.yaml 의 운전점 μ 를 재현한다.
 # 밀도·회전수·효율·체절 비·배관 치수·분기 압력 비율·NPSHr·정상 NPSH 여유비·유체 온도는 합성 설계 선택이며 현장 자료가 아니다.
+# 입력 펌프 두 대의 직렬·병렬 관계와 토출 라인(10 m, 2 m/s, 체크밸브 K 2.0, 게이트 K 0.2)도 합성 가정이다(PU-D4·D5a).
 # 고장 최대치는 아래 목표(태그 단위)에 닿도록 역산했다. None 은 해당 하한이 마스터에 없어 기본 10 % 를 쓴 항목.
+# 제품 분기 끝에 후속 펌프 흡입 드럼(탑·드럼 대용모델, 2026-11-26, open-issues 42·43): inlet_abs_pa = 정상 후속 흡입압.
+#   액위 조절 밸브(정상점 토출 저항의 50 %, 정상 개도 0.5)가 유출 = 유입을 맞추고, 고장 최대치는 드럼 회로로 역산했다.
 #   product_flow_m3h: 81.74
 #   valve_share_basis: flow
 #   source_suction: 1.534
@@ -22,42 +25,65 @@ downstream_path:
 downstream_branch: virtual:product-branch
 control_valve: virtual:product-control-valve
 atmospheric_pa: 101325.0
-max_strainer_resistance_pa_s2_m6: 32424600.0
+max_strainer_resistance_pa_s2_m6: 276518000.0
 max_impeller_head_loss: 0.15
 max_impeller_efficiency_loss: 0.2
 max_valve_opening_loss: 0.6
-max_booster_strainer_resistance_pa_s2_m6: 100000000000000.0
+max_booster_strainer_resistance_pa_s2_m6: 81614000.0
 max_booster_head_loss: 0.1
 max_booster_efficiency_loss: 0.2
+station:
+  topology: parallel
+  max_second_strainer_resistance_pa_s2_m6: 276518000.0
+  units:
+  - unit_id: P-1101A
+    pump: &id001
+      reference_speed_rpm: 3560
+      rated_flow_m3_s: 0.029091291666666668
+      shutoff_head_m: 209.2769767280149
+      rated_head_m: 171.5385055147663
+      efficiency: 0.72
+    npsh: &id002
+      fluid_temp_k: 473.15
+      vapor_pressure_pa: 308846.9841238478
+      vapor_b_k: 4000.0
+      suction_diameter_m: 0.12374368670764584
+      npshr_rated_m: 5.0
+      npshr_zero_flow_fraction: 0.5
+      onset_margin: 1.3
+      steep_coefficient: 0.8
+      max_head_loss: 0.6
+      efficiency_coupling: 0.5
+    line: &id003
+      length_m: 10.0
+      diameter_m: 0.14
+      darcy_factor: 0.025
+    check_valve: &id004
+      diameter_m: 0.14
+      forward_k: 2.0
+    valve: &id005
+      diameter_m: 0.14
+      full_open_k: 0.2
+  - unit_id: P-1101B
+    pump: *id001
+    npsh: *id002
+    line: *id003
+    check_valve: *id004
+    valve: *id005
 network:
   density_kg_m3: 940
-  pump_npsh:
-    fluid_temp_k: 473.15
-    vapor_pressure_pa: 308846.9841238478
-    vapor_b_k: 4000.0
-    suction_diameter_m: 0.17500000000000002
-    npshr_rated_m: 5.0
-    npshr_zero_flow_fraction: 0.5
-    onset_margin: 1.3
-    steep_coefficient: 0.8
-    max_head_loss: 0.6
-    efficiency_coupling: 0.5
-  pump:
-    reference_speed_rpm: 3560
-    rated_flow_m3_s: 0.058182583333333336
-    shutoff_head_m: 209.2769767280149
-    rated_head_m: 171.5385055147663
-    efficiency: 0.72
+  pump_npsh: *id002
+  pump: *id001
   branches:
   - branch_id: virtual:other-branch
     outlet_node: virtual:other-boundary
-    outlet_abs_pa: 681526.0
+    outlet_abs_pa: 680187.9630073705
     pipes:
       virtual:other-equivalent:
         length_m: 70
         diameter_m: 0.115
         darcy_factor: 0.025
-        minor_loss_k: 693.0477120988921
+        minor_loss_k: 690.1782960467949
   - branch_id: virtual:product-branch
     outlet_node: virtual:product-boundary
     outlet_abs_pa: 836061.0
@@ -66,11 +92,14 @@ network:
         length_m: 180
         diameter_m: 0.155
         darcy_factor: 0.025
-        minor_loss_k: 516.1973237098562
+        minor_loss_k: 524.7869040507661
     valves:
       virtual:product-control-valve:
         diameter_m: 0.155
-        full_open_k: 344.8039244224244
+        full_open_k: 332.6085241458521
+    drum:
+      inlet_abs_pa: 351255.0
+      level_valve_share: 0.5
     booster:
       speed_rpm: 3560
       pump:

@@ -1,5 +1,7 @@
 # CDU 디지털 트윈 D0 완성 기준선
 
+> 2026-11-25 PU-D5a: 원료 펌프가 두 대(CDU·RFCC 병렬, HOU·RHDS·VRDS 직렬)로 늘었다. 이 문서의 단일 펌프 회로 수치·검증은 그 전 기록이다. 현재 회로는 `config/physics_*_integrated.yaml` 의 `station` 과 README 의 '두 번째 원료 펌프' 절을 본다.
+
 작성 기준일 2026-11-24. AI가 작성한 구현·검증 정리본이며 팀 승인 문서가 아니다. 모든 물리 계수·곡선·물성·경계 조건은 **synthetic assumption** 이다(현장 자료 없음). 설비·태그 ID 는 `config/plant_cdu.yaml`·온톨로지 원본을 그대로 쓴다.
 
 ## 1. 설비·노드 목록과 물리 회로 편입 (요구 9)

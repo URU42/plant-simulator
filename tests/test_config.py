@@ -14,7 +14,7 @@ from common.config_models import (
 )
 
 # RHDS 구성안: 펌프 3, 압축기 2, 팬 1 + 합성 추가 전동기 2·기어박스 1
-EXPECTED_TYPE_COUNTS = {"PM": 3, "CC": 2, "FN": 1, "MT": 2, "GB": 1}
+EXPECTED_TYPE_COUNTS = {"PM": 4, "CC": 2, "FN": 1, "MT": 2, "GB": 1}
 SYNTHETIC_TYPES = {"MT", "GB"}   # 자료에 없는 합성 추가 설비 (2026-11-18). 한계값이 없다
 
 
@@ -22,9 +22,9 @@ def test_plant_loads_and_matches_master(plant_path: Path):
     plant = load_plant(plant_path)
     assert isinstance(plant, PlantConfig)
     assert plant.plant.plant_id == "PL-RHDS"
-    assert len(plant.equipment) == 9
+    assert len(plant.equipment) == 10
     assert plant.type_counts() == EXPECTED_TYPE_COUNTS
-    assert len(plant.all_tags()) == 58
+    assert len(plant.all_tags()) == 70
     assert len(plant.unit_ids()) == 6
 
 
@@ -82,7 +82,7 @@ def test_runtime_units_subset_selects_equipment(plant_path: Path):
     rt = RuntimeConfig(units=["UNIT-RHDS-02"], source_id="SIM-U2")
     chosen = plant.equipment_for_units(rt.units)
     assert [e.equip_id for e in chosen] == ["M-3102", "C-3102"]
-    assert len(plant.equipment_for_units(["all"])) == 9
+    assert len(plant.equipment_for_units(["all"])) == 10
 
 
 def test_runtime_unknown_unit_rejected(plant_path: Path):

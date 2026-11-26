@@ -1,5 +1,7 @@
 # 플랜트 대표 수력 회로 Modelica 교차 검증 (D2-B → D4)
 
+> 2026-11-25 PU-D5a: 원료 펌프가 두 대(CDU·RFCC 병렬, HOU·RHDS·VRDS 직렬)로 늘었다. 이 문서의 단일 펌프 회로 수치·검증은 그 전 기록이다. 현재 회로는 `config/physics_*_integrated.yaml` 의 `station` 과 README 의 '두 번째 원료 펌프' 절을 본다.
+
 2026-11-24부터 모델 파일은 범용 `PlantHydraulics.mo`(결합 `Circuit`, 단일 `SingleCircuit`, 펌프 NPSH·캐비테이션 포함)이며 다섯 플랜트 설정(`config/physics_<plant>_integrated.yaml`)을 각각 비교한다. `--all` 은 `<output>/<plant>` 에, `--cdu-d0` 는 CDU 회로 묶음(결합·P-8303A·F-8201)을 회로별 하위 폴더에 쓴다. 이번 실행 결과는 [REPORT.md](REPORT.md) 마지막 절에 있다.
 
 D2-A의 `config/physics_cdu_integrated.yaml`을 **입력값 원본**으로 사용한다. `PlantHydraulics.mo`(이전 이름 `CduHydraulics.mo`)는 연결점의 압력 연속과 유량 보존을 Modelica 커넥터로 표현한다. OpenModelica가 이 연립방정식을 풀고, Python은 기존 이분법으로 같은 운전점을 계산한다. Python 해는 Modelica 초기값이나 입력값에 전달하지 않는다. Modelica의 순방향 유량 시작 추정값은 각 설정의 입력 펌프·후속 펌프 설계 정격 유량과 그 차이(입력값)다. 두 실행의 물리적 초기 조건은 동일한 정상 상태 경계압과 고정 회전수이며 열·질량 저장 상태는 없다.

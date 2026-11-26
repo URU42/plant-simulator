@@ -29,6 +29,8 @@ SCENARIOS = {
     ("P-8101A", "PM-IMPELLER-WEAR"): ((0, 1, 0, 0, 0), True, 0),
     ("P-8101A", "PM-DISCHARGE-VALVE-RESTRICTION"): ((0, 0, 1, 0, 0), False, 0),
     ("P-8101A", "OP-THROUGHPUT-CHANGE"): ((0, 0, 0.2, 0, 0), False, 1),
+    ("P-8101B", "PM-SUCTION-LOSS"): ((0, 0, 0, 0, 0, 1, 0), False, 0),
+    ("P-8101B", "PM-IMPELLER-WEAR"): ((0, 0, 0, 0, 0, 0, 1), True, 0),
     ("P-8401A", "PM-SUCTION-LOSS"): ((0, 0, 0, 1, 0), False, 0),
     ("P-8401A", "PM-IMPELLER-WEAR"): ((0, 0, 0, 0, 1), True, 0),
     ("P-8303A", "PM-SUCTION-LOSS"): ((1, 0, 0), False, 0),
@@ -37,13 +39,13 @@ SCENARIOS = {
     ("F-8201", "FN-IMPELLER-FOULING"): ((0, 1, 0), True, 0),
     ("F-8201", "FN-INLET-RESTRICTION"): ((1, 0, 0), False, 0),
 }
-CIRCUIT_EQUIPMENT = {"P-8101A", "P-8401A", "P-8303A", "F-8201"}
+CIRCUIT_EQUIPMENT = {"P-8101A", "P-8101B", "P-8401A", "P-8303A", "F-8201"}
 
 
 @pytest.fixture
 def cdu(config_dir):
     plant = load_plant(config_dir / "plant_cdu.yaml")
-    runtime = load_runtime(config_dir / "runtime_cdu.yaml").model_copy(update={"physics": config_dir / "physics_cdu_twin.yaml"})
+    runtime = load_runtime(config_dir / "runtime_cdu.yaml").model_copy(update={"physics": config_dir / "physics_cdu_twin.yaml", "physics_general": False})
     physics = load_physics(plant, runtime.physics)
     storage = Storage(":memory:")
     seed_master(storage, plant)
@@ -151,15 +153,16 @@ def test_each_scenario_injects_rises_stops_repairs_and_recovers(cdu, config_dir,
     book.stop(equip, EPOCH + 310)
     if damage:
         assert book.repair(equip, EPOCH + 400)[1] == [event.event_id]
-    plans = physics.parameter_plans(book.external(EPOCH, EPOCH + 600))
+    plans = physics.parameter_plans(book.external(EPOCH, EPOCH + 650))
     owner = physics._owner[equip]
     index = physics.adapters.index(owner)
     normal_states = physics.state(EPOCH, physics.parameter_plans([]))
-    states = {t: physics.state(EPOCH + t, plans) for t in (11, 25, 300, 380, 560)}
+    states = {t: physics.state(EPOCH + t, plans) for t in (11, 25, 300, 380, 560, 640)}
     assert states[300][index] == owner.solve(*args), "최대 단계 도달 후 회로 해"
     assert states[25][index] not in (normal_states[index], states[300][index]), "단계 상승 중"
     assert (states[380][index] == states[300][index]) == damage, "정지 뒤 손상 유지 여부"
-    assert states[560][index] == normal_states[index], "회복"
+    slow = mode == "PM-SUCTION-HOT"                               # 흡입 온도 파라미터는 300초 동안 회복한다
+    assert (states[560][index] == normal_states[index]) != slow and states[640][index] == normal_states[index], "회복"
     for i, state in enumerate(states[300]):                       # 다른 회로는 다시 풀지 않는다
         if i != index:
             assert state == normal_states[i]
@@ -178,8 +181,8 @@ def test_each_scenario_injects_rises_stops_repairs_and_recovers(cdu, config_dir,
     assert moved >= 2, "시나리오가 물리 태그를 움직여야 한다"
     for key in physics.tag_keys - owner.tag_keys:                  # 다른 회로 물리 태그는 그대로
         assert generated[key] == nominal[key], key
-    recovered = at(window(PlantGenerator(plant, runtime, book), 590), 590)
-    base = at(window(PlantGenerator(plant, runtime), 590), 590)
+    recovered = at(window(PlantGenerator(plant, runtime, book), 650), 650)
+    base = at(window(PlantGenerator(plant, runtime), 650), 650)
     assert all(recovered[k] == base[k] for k in physics.tag_keys)
 
 
@@ -212,7 +215,7 @@ def test_circuits_are_isolated_for_concurrency(cdu):
 
 def test_cdu_control_api_with_bundle(config_dir, tmp_path):
     path = tmp_path / "runtime.yaml"
-    runtime = load_runtime(config_dir / "runtime_cdu.yaml").model_copy(update={"physics": config_dir / "physics_cdu_twin.yaml"})
+    runtime = load_runtime(config_dir / "runtime_cdu.yaml").model_copy(update={"physics": config_dir / "physics_cdu_twin.yaml", "physics_general": False})
     path.write_text(runtime.model_dump_json(), encoding="utf-8")
     app = create_single_app(config_dir / "plant_cdu.yaml", path, ":memory:",
                             settings=Settings(with_simulators=False, ingest_token="local-test"))
@@ -220,7 +223,7 @@ def test_cdu_control_api_with_bundle(config_dir, tmp_path):
     with TestClient(app) as client:
         app.state.plants["plant"].simulation_clock = ControlledClock(START)
         listing = client.get("/plant/equipment").json()
-        assert len(listing) == 7 and sum(len(a["tags"]) for a in listing) == 46
+        assert len(listing) == 8 and sum(len(a["tags"]) for a in listing) == 59
         models = {t["measurement_model"] for a in listing for t in a["tags"]}
         assert models == {"physical", "empirical"}
         assert {a["equip_id"] for a in listing for t in a["tags"] if t["circuit_id"]} == CIRCUIT_EQUIPMENT

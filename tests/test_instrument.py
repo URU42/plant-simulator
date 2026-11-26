@@ -47,10 +47,11 @@ def test_bad_ranges_rejected():
 def test_only_sent_values_change(rhds):
     """켜도 공정 값은 같다: 계측 이상이 걸린 표본만 다르고(튐 = z·σ, 고착 = 시작 직전 보낸 값, 누락 = 없음) 나머지는 꺼졌을 때와 같다."""
     plant, rt, on = rhds
-    end = T0 + timedelta(hours=6)
-    off = {(s.equip_id, s.tag_id, s.ts): s.value for s in PlantGenerator(plant, rt).generate(T0, end)}
-    got = {(s.equip_id, s.tag_id, s.ts): s.value for s in PlantGenerator(plant, on).generate(T0, end)}
-    events = InstrumentSchedule(plant, on.instrument_faults, on.seed, on.sample_interval_sec).events(T0.timestamp(), end.timestamp())
+    start = T0 + timedelta(hours=34)       # 세 종류가 모두 있고 서로 겹치지 않는 6시간 (태그가 늘면 일정이 바뀐다. 2026-11-27 48 → 34)
+    end = start + timedelta(hours=6)
+    off = {(s.equip_id, s.tag_id, s.ts): s.value for s in PlantGenerator(plant, rt).generate(start, end)}
+    got = {(s.equip_id, s.tag_id, s.ts): s.value for s in PlantGenerator(plant, on).generate(start, end)}
+    events = InstrumentSchedule(plant, on.instrument_faults, on.seed, on.sample_interval_sec).events(start.timestamp(), end.timestamp())
     assert {e.kind for e in events} == {"spike", "stuck", "dropout"}
     ctl = plant.control_by_key()
     touched = set()
@@ -103,3 +104,38 @@ def test_answer_key_codes(rhds, config_dir, tmp_path):
     assert key == sorted(key, key=lambda e: (e["start_at"], e["event_id"]))
     assert [e["event_id"] for e in book.answer_key("C-3101", to_db(T0), None) if e["code"] == 2] == \
         [e.event_id for e in expected if e.equip_id == "C-3101"]
+
+
+def test_bias_and_drift_change_only_their_tag(rhds):
+    """bias 는 구간 내내 z·σ, drift 는 0 → z·σ 선형. 다른 태그·구간 밖은 그대로다(평가 배치 전용 종류)."""
+    from simulator.instrument import InstrumentEvent
+
+    class Fixed:
+        def __init__(self, items):
+            self.items = items
+
+        def events(self, s, e):
+            return [x for x in self.items if x.start < e and x.end > s]
+
+    plant, rt, _ = rhds
+    eq = plant.equipment[0]
+    t1, t2 = eq.tags[0].tag_id, eq.tags[1].tag_id
+    start, end = T0, T0 + timedelta(minutes=20)
+    s0 = int(start.timestamp()) + 300
+    events = [InstrumentEvent("B", "bias", eq.equip_id, (t1,), s0, s0 + 600, 5.0),
+              InstrumentEvent("D", "drift", eq.equip_id, (t2,), s0, s0 + 600, -8.0)]
+    off = {(s.equip_id, s.tag_id, s.ts): s.value for s in PlantGenerator(plant, rt).generate(start, end)}
+    g = PlantGenerator(plant, rt)
+    g.instrument = Fixed(events)
+    got = {(s.equip_id, s.tag_id, s.ts): s.value for s in g.generate(start, end)}
+    ctl, tags = plant.control_by_key(), plant.tag_by_key()
+    for ev in events:
+        key = (ev.equip_id, ev.tag_ids[0])
+        sd, tol = ctl[key][1], 10 ** -tags[key].decimals
+        inside = [k for k in off if k[:2] == key and ev.start <= k[2].timestamp() < ev.end]
+        assert inside
+        for k in inside:
+            frac = 1.0 if ev.kind == "bias" else (k[2].timestamp() - ev.start) / (ev.end - ev.start)
+            assert got[k] == pytest.approx(off[k] + ev.z * sd * frac, abs=tol)
+    touched = {k for ev in events for k in off if k[:2] == (ev.equip_id, ev.tag_ids[0]) and ev.start <= k[2].timestamp() < ev.end}
+    assert all(got[k] == v for k, v in off.items() if k not in touched)

@@ -13,7 +13,7 @@
 plant:
   plant_id: PL-RHDS
   name: "RHDS (상압 잔사유 수첨탈황)"
-  config_version: 7
+  config_version: 8                 # 2026-11-25 PU-D5a: P-3101-S2 추가 (직렬 2단), 바뀐 μ·σ·한계는 limit_basis
   unit_groups:
     - id: UG-RHDS-01
       name: "원료 공급"
@@ -66,6 +66,8 @@ signals:
   - { signal: oil_temp, prefix: TI, unit: "DEG C", name: 윤활유 온도 }
   - { signal: differential_pressure, prefix: PDI, unit: "Pa", name: 차압 }
   - { signal: process_temp, prefix: TI, unit: "DEG C", name: 공정 유체 온도 }
+  - { signal: strainer_dp, prefix: PDI, unit: kPa, name: 흡입 스트레이너 차압 }   # 2026-11-27 추가 계측 (synthetic)
+  - { signal: strainer_inlet_pressure, prefix: PI, unit: "bar(g)", name: 스트레이너 앞 흡입 압력 }   # 2026-11-27 추가 계측 (synthetic)
 
 # 정상 운전 공통 요인 (synthetic): 공정 그룹마다 평균 0 인 빠른 성분 하나를 아래 신호의 태그들이 나눠 갖는다.
 # 태그 분산 중 share 만큼이 공통 요인이고, 부호는 그 신호가 부하와 같이(1)·반대로(-1) 움직이는지다.
@@ -85,7 +87,8 @@ flow:
     FR: "제품 분별탑"
     HX: "원료·반응 유출물 열교환기"
   edges:
-    - [P-3101, MX, "", process]
+    - [P-3101, P-3101-S2, "", process]   # 가상 공장 추가 (PU-D5a)
+    - [P-3101-S2, MX, "", process]
     - [MX, HX, "저온측", process]
     - [HX, HT, "저온측", process]
     - [HT, RX, "", process]
@@ -141,13 +144,13 @@ equipment:
       - { tag_id: PI-D-P3101,
           signal: discharge_pressure,
           unit: "bar(g)",
-          description: "토출 압력",
-          limits: { warn_hi: 170, alarm_hi: 178, trip_hi: 187 },
-          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×1.05, 정지 ×1.10",
+          description: "1단 토출 압력 (2단으로 가는 중간 압력)",
+          limits: { warn_hi: 87.9, alarm_hi: 92, trip_hi: 96.7 },
+          limit_basis: "1단 토출 = 중간 압력 (synthetic 2026-11-25 PU-D5a: 두 대 직렬, 같은 곡선 두 단). 이전 한계/이전 μ 비율 × 새 μ, 유효숫자 3자리; σ 는 회로가 정한 합성값 (2026-11-26)",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 3,
           seed_key: rhds-r004,
-          control: { mean: 155.07, sigma: 0.1293802468071882 } }
+          control: { mean: 80.167, sigma: 0.216555 } }
       - { tag_id: FI-P3101,
           signal: flow,
           unit: "m3/h",
@@ -162,13 +165,120 @@ equipment:
           signal: current,
           unit: "A",
           description: "모터 전류",
-          limits: { warn_hi: 210, alarm_hi: 223, trip_hi: 240 },
-          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×1.06, 정지 = 알람 ×1.08",
+          limits: { warn_hi: 105, alarm_hi: 112, trip_hi: 120 },
+          limit_basis: "단 축동력 (synthetic 2026-11-25 PU-D5a: 두 대 직렬, 같은 곡선 두 단). 이전 한계/이전 μ 비율 × 새 μ, 유효숫자 3자리",
           interval_sec: 1,
           decimals: 2,
           seed_key: rhds-r006,
-          derive: { formula: power, terms: [{ tag: FI-P3101, exp: 1 }, { tag: PI-D-P3101, minus: PI-S-P3101, exp: 1 }], noise_sigma: 0.180929 },
-          control: { mean: 165.8, sigma: 0.993796 } }
+          derive: { formula: power, terms: [{ tag: FI-P3101, exp: 1 }, { tag: PI-D-P3101, minus: PI-S-P3101, exp: 1 }], noise_sigma: 0.0905031 },
+          control: { mean: 82.9354, sigma: 0.366415 } }
+      - { tag_id: PDI-P3101-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "흡입 스트레이너 차압 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 40, alarm_hi: 80 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 40·경보 80 kPa(고압 구간이라 약한 막힘 차압의 약 2배로 둠). 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: rhds-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-P3101-STR,
+          signal: strainer_inlet_pressure,
+          unit: "bar(g)",
+          description: "스트레이너 앞 흡입 압력 (2026-11-27 추가 계측, synthetic)",
+          limits: { trip_lo: 2.24, alarm_lo: 2.8, warn_lo: 3.5 },
+          limit_basis: "가정값: 같은 설비 흡입 압력(PI-S-P3101)과 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: rhds-str-pi,
+          control: { mean: 5.250000, sigma: 0.0174 } }
+  # 합성 추가 (2026-11-25 PU-D5a): 자료에 없는 두 번째 펌프(P-3101 와 직렬 2단). 태그·단위·주기·잡음은 P-3101 를 본떴고 개별 잡음은 seed_key 로 독립이다
+  - equip_id: P-3101-S2
+    name: "고압 원료 공급 펌프 2단 (High Pressure Feed Pump Stage 2, 합성 가정)"
+    type: PM
+    unit_id: UNIT-RHDS-01
+    tags:
+      - { tag_id: VI-A-P3101S2,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "구동측 수평 케이싱 진동",
+          limits: { warn_hi: 4.5, alarm_hi: 7.1, trip_hi: 11 },
+          limit_basis: "P-3101 를 본뜬 합성 설비: 원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람·정지=경고 위 ISO 20816 영역 경계 두 개",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: rhds-r101,
+          control: { mean: 1.65, sigma: 0.04614035877985053 } }
+      - { tag_id: TI-B-P3101S2,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "구동측 베어링 온도",
+          limits: { warn_hi: 85, alarm_hi: 95, trip_hi: 105 },
+          limit_basis: "P-3101 를 본뜬 합성 설비: 원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 +10, 정지 +20",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: rhds-r102,
+          control: { mean: 63.2, sigma: 0.1278861255614184 } }
+      - { tag_id: PI-S-P3101S2,
+          signal: suction_pressure,
+          unit: "bar(g)",
+          description: "2단 흡입 압력 (중간 압력)",
+          limits: { warn_lo: 53.9, alarm_lo: 43.1, trip_lo: 34.5 },
+          limit_basis: "P-3101 를 본뜬 합성 설비: 2단 흡입 = 중간 압력 (synthetic 2026-11-25 PU-D5a: 두 대 직렬, 같은 곡선 두 단). 이전 한계/이전 μ 비율 × 새 μ, 유효숫자 3자리; σ 는 회로가 정한 합성값 (2026-11-26)",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: rhds-r103,
+          control: { mean: 80.103, sigma: 0.216983 } }
+      - { tag_id: PI-D-P3101S2,
+          signal: discharge_pressure,
+          unit: "bar(g)",
+          description: "2단 최종 토출 압력",
+          limits: { warn_hi: 170, alarm_hi: 178, trip_hi: 187 },
+          limit_basis: "P-3101 를 본뜬 합성 설비: 원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×1.05, 정지 ×1.10; σ 는 회로가 정한 합성값 (2026-11-26)",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r104,
+          control: { mean: 155.07, sigma: 0.432607 } }
+      - { tag_id: FI-P3101S2,
+          signal: flow,
+          unit: "m3/h",
+          description: "원료 유량",
+          limits: { warn_lo: 160, alarm_lo: 138, trip_lo: 110 },
+          limit_basis: "P-3101 를 본뜬 합성 설비: 원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×0.86, 정지 = 알람 ×0.8",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-r105,
+          control: { mean: 211.5, sigma: 1.1501088461640019 } }
+      - { tag_id: II-P3101S2,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { warn_hi: 105, alarm_hi: 112, trip_hi: 120 },
+          limit_basis: "P-3101 를 본뜬 합성 설비: 단 축동력 (synthetic 2026-11-25 PU-D5a: 두 대 직렬, 같은 곡선 두 단). 이전 한계/이전 μ 비율 × 새 μ, 유효숫자 3자리",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r106,
+          derive: { formula: power, terms: [{ tag: FI-P3101S2, exp: 1 }, { tag: PI-D-P3101S2, minus: PI-S-P3101S2, exp: 1 }], noise_sigma: 0.0905031 },
+          control: { mean: 82.9354, sigma: 0.372839 } }
+      - { tag_id: PDI-P3101S2-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "단간(1단 출구 → 2단 흡입) 스트레이너 차압 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 1140, alarm_hi: 2280 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 1140·경보 2280 kPa(고압 구간이라 약한 막힘 차압의 약 2배로 둠). 실제 설정값 아님 (합성 설비)",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: rhds-s2-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-P3101S2-STR,
+          signal: strainer_inlet_pressure,
+          unit: "bar(g)",
+          description: "스트레이너 앞 단간(1단 출구 → 2단 흡입) 압력 (2026-11-27 추가 계측, synthetic)",
+          limits: { trip_lo: 34.5, alarm_lo: 43.1, warn_lo: 53.9 },
+          limit_basis: "가정값: 같은 설비 흡입 압력(PI-S-P3101S2)과 같은 한계 (합성 설비)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: rhds-s2-str-pi,
+          control: { mean: 80.152997, sigma: 0.217 } }
   # ---------------- UNIT-RHDS-02 보충 수소 압축 ----------------
   # 합성 추가 (2026-11-18): 자료에 없는 구동 전동기(C-3102 직결). 한계값 없음, μ·σ 는 합성값. 회전속도는 C-3102 와 같다
   - equip_id: M-3102
@@ -666,6 +776,26 @@ equipment:
           seed_key: rhds-r038,
           derive: { formula: power, terms: [{ tag: FI-P3102, exp: 1 }, { tag: PI-D-P3102, minus: PI-S-P3102, exp: 1 }], noise_sigma: 0.132519 },
           control: { mean: 112.5, sigma: 0.929724 } }
+      - { tag_id: PDI-P3102-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "후속 펌프 흡입 스트레이너 차압 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 5520, alarm_hi: 11040 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 5520·경보 11040 kPa(고압 구간이라 약한 막힘 차압의 약 2배로 둠). 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: rhds-d-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-P3102-STR,
+          signal: strainer_inlet_pressure,
+          unit: "bar(g)",
+          description: "후속 펌프 스트레이너 앞 흡입 압력 (2026-11-27 추가 계측, synthetic)",
+          limits: { trip_lo: 1.92, alarm_lo: 2.4, warn_lo: 3.0 },
+          limit_basis: "가정값: 같은 설비 흡입 압력(PI-S-P3102)과 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: rhds-d-str-pi,
+          control: { mean: 4.650000, sigma: 0.0181 } }
   # ---------------- UNIT-RHDS-06 환류·순환 ----------------
   - equip_id: P-3103
     name: "분별탑 환류 펌프 (Fractionator Reflux Pump)"

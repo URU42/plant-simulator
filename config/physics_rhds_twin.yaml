@@ -1,4 +1,4 @@
-# PL-RHDS 디지털 트윈 물리 회로 묶음 (D1, 2026-11-24). 결합 회로 P-3101 → P-3102 하나. synthetic assumption.
+# PL-RHDS 디지털 트윈 물리 회로 묶음 (D1, 2026-11-24). 결합 회로 P-3101·P-3101-S2(직렬) → P-3102 하나. synthetic assumption.
 circuits:
   - physics_rhds_integrated.yaml
 # 물리 회로에 넣지 않은 기존 계측 설비와 사유 (트윈 화면·카탈로그에 그대로 보인다)
@@ -13,6 +13,9 @@ exclusions:
 # D2-A 명시 시나리오 매핑 (설비 ID → 기존 고장 카탈로그 ID). 여기 없는 모드는 물리 계산·트윈 주입을 하지 않는다.
 scenarios:
   P-3101: [PM-SUCTION-LOSS, PM-IMPELLER-WEAR, OP-THROUGHPUT-CHANGE]
+  P-3101-S2: [PM-SUCTION-LOSS, PM-IMPELLER-WEAR]
   P-3102: [PM-SUCTION-LOSS, PM-IMPELLER-WEAR]
 scenario_exclusions:
   P-3102/PM-SUCTION-HOT: "흡입 유체 온도 상승의 증기압·NPSH 영향을 이 결합 회로가 계산하지 않아(캐비테이션 모델 없음) 일부만 물리로 표현됩니다. 트윈에서 주입하지 않습니다."
+# 정상 흔들림의 원인 변동(정상값 대비 표준편차, synthetic 2026-11-26): scripts/calibrate_noise.py. 입력 펌프 두 대의 유량·압력이 나눠 갖는다.
+disturbance: { suction: 0.00276789, speed: 0.00095, demand: 0.0207199 }

@@ -32,7 +32,7 @@ HEADER = ("P-8101A", "PI-8101B")
 def coupled(config_dir):
     plant = load_plant(config_dir / "plant_cdu.yaml")
     runtime = load_runtime(config_dir / "runtime_cdu.yaml").model_copy(update={
-        "physics": config_dir / "physics_cdu_integrated.yaml", "units": ["UNIT-CDU-01", "UNIT-CDU-07"],
+        "physics_general": False, "physics": config_dir / "physics_cdu_integrated.yaml", "units": ["UNIT-CDU-01", "UNIT-CDU-07"],
     })
     modes = load_fault_modes(config_dir / "fault_modes.yaml")
     storage = Storage(":memory:")
@@ -135,8 +135,8 @@ def test_opt_in_api_preserves_measurements_and_gates_scenario_truth(coupled, con
     path = tmp_path / "runtime.yaml"
     path.write_text(runtime.model_dump_json(), encoding="utf-8")
     app = create_single_app(config_dir / "plant_cdu.yaml", path, ":memory:",
-                            settings=Settings(with_simulators=False, ingest_token="evaluation"))
-    token = {"X-Ingest-Token": "evaluation"}
+                            settings=Settings(with_simulators=False, ingest_token="operator", eval_token="evaluation"))
+    token = {"X-Ingest-Token": "operator"}
     with TestClient(app) as client:
         ctx = app.state.plants["plant"]
         assert {m["mode"] for m in client.get("/plant/fault-modes").json()} >= {
@@ -165,7 +165,9 @@ def test_opt_in_api_preserves_measurements_and_gates_scenario_truth(coupled, con
         row = client.get(f"/plant/equipment/{FLOW[0]}/tags/{FLOW[1]}/current").json()
         assert row["value"] == next(s.value for s in samples if (s.equip_id, s.tag_id) == FLOW)
         assert "PM-SUCTION-LOSS" not in str(row) and "event_id" not in row
-        for path in ("anomalies", "anomalies/active", "anomalies/damaged"):
+        assert client.get("/plant/anomalies", headers=token).status_code == 403
+        assert client.get("/plant/anomalies", headers={"X-Eval-Token": "evaluation"}).status_code == 200
+        for path in ("anomalies/active", "anomalies/damaged"):
             assert client.get(f"/plant/{path}").status_code == 403
             assert client.get(f"/plant/{path}", headers=token).status_code == 200
 
@@ -251,4 +253,36 @@ def test_simulation_observations_returns_only_bounded_observations(coupled, conf
         assert {datetime.fromisoformat(row['ts']) for row in rows} == {
             (START + timedelta(seconds=second)).astimezone(timezone.utc) for second in (9, 10)
         }
-        assert sum(len(asset['tags']) for asset in client.get('/plant/equipment').json()) == 46
+        assert sum(len(asset['tags']) for asset in client.get('/plant/equipment').json()) == 59
+
+
+def test_live_dynamic_buffer_delays_product_and_keeps_normal(config_dir):
+    """일반 모드 + dynamic_buffer: 정상은 완충 없는 생성과 같고, 입력 펌프 마모는 P-8401A 유량을 서서히(완충) 끌어내린다.
+    창을 나눠 생성해도(상태를 이어 감) 한 번에 생성한 것과 같다."""
+    plant = load_plant(config_dir / "plant_cdu.yaml")
+    base = load_runtime(config_dir / "runtime_cdu.yaml")
+    buffered = base.model_copy(update={"dynamic_buffer": config_dir / "dynamic_cdu_buffer.yaml"})
+    modes = load_fault_modes(config_dir / "fault_modes.yaml")
+
+    def run(runtime, windows):
+        storage = Storage(":memory:")
+        seed_master(storage, plant)
+        book = AnomalyBook(storage, plant, modes, physics=PlantGenerator(plant, base).physics)
+        book.inject("P-8101A", "PM-IMPELLER-WEAR", EPOCH + 60, 10)
+        g = PlantGenerator(plant, runtime, book)
+        out = []
+        for a, b in windows:
+            out += g.generate(START + timedelta(seconds=a), START + timedelta(seconds=b))
+        storage.close()
+        return out
+
+    whole = run(buffered, [(0, 1200)])
+    split = run(buffered, [(0, 400), (400, 1200)])
+    plain = run(base, [(0, 1200)])
+    assert {(s.equip_id, s.tag_id, s.ts): s.value for s in whole} == {(s.equip_id, s.tag_id, s.ts): s.value for s in split}
+    at = lambda samples, sec: _values(samples, sec)
+    assert at(whole, 50) == at(plain, 50)                                   # 사건 전 정상은 같다
+    assert at(whole, 1190)[FLOW] == at(plain, 1190)[FLOW]                    # 입력 펌프 자체는 바꾸지 않는다
+    drop = lambda samples, sec: at(samples, 50)[PRODUCT] - at(samples, sec)[PRODUCT]
+    assert drop(whole, 1190) > drop(plain, 1190) + 5                         # 고정 분배 완충: 공급 감소가 제품 유량 감소로 이어진다
+    assert drop(whole, 400) < drop(whole, 1190)                              # 서서히(완충) 내려간다

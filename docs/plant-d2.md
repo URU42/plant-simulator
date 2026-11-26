@@ -1,5 +1,7 @@
 # 플랜트 대표 회로 D2-A·D2-B (생성기 연동 · OpenModelica 교차 검증)
 
+> 2026-11-25 PU-D5a: 원료 펌프가 두 대(CDU·RFCC 병렬, HOU·RHDS·VRDS 직렬)로 늘었다. 이 문서의 단일 펌프 회로 수치·검증은 그 전 기록이다. 현재 회로는 `config/physics_*_integrated.yaml` 의 `station` 과 README 의 '두 번째 원료 펌프' 절을 본다.
+
 작성 기준일 2026-11-24. AI 편집 정리본이며 팀 승인 문서가 아니다. 물리 계수·NPSH·곡선은 synthetic assumption 이다. 기준선은 [CDU D0](cdu-d0-twin.md), 회로·태그 매핑은 [D1 대조](twin-ontology-mapping.md), 설비별 지원 범위는 [지원 매트릭스](twin-support-matrix.md).
 
 ## D2-A 명시 시나리오 매핑 (`config/physics_<plant>_twin.yaml` 의 `scenarios`)

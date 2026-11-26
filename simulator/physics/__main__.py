@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
+from pydantic import SerializeAsAny
 
 from common.config_models import StrictModel, load_yaml
 from simulator.physics.network import Network, NetworkResult, OperatingPoint, VirtualID
@@ -29,7 +30,7 @@ class CaseResult(StrictModel):
     discharge_node: str
     provenance: str
     operating_point: OperatingPoint
-    result: NetworkResult
+    result: SerializeAsAny[NetworkResult]
 
 
 def main() -> None:
@@ -64,7 +65,7 @@ def main() -> None:
         point = OperatingPoint.model_validate_json(args.point.read_bytes()) if args.point else case.default_point
         output = CaseResult(plant_id=case.plant_id, unit_id=case.unit_id, equip_id=case.equip_id,
                             suction_node=case.suction_node, discharge_node=case.discharge_node,
-                            provenance=case.provenance, operating_point=point, result=case.network.solve(point))
+                            provenance=case.provenance, operating_point=point, result=case.network.solve(point) if model is NetworkCase else case.result(point, case.supply().solve(point)))
     except (OSError, ValueError, yaml.YAMLError) as exc:
         parser.error(str(exc))
     print(output.model_dump_json(indent=2, exclude_none=True))

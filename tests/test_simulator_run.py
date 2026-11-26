@@ -26,11 +26,11 @@ async def test_batches_cover_window_without_gaps(plant_path):
         "b-20261108-172100-SIM-U1-0001", "b-20261108-172200-SIM-U1-0002", "b-20261108-172300-SIM-U1-0003"]
     for b in sender.batches:
         assert b.source_id == "SIM-U1"
-        assert len(b.samples) == 5 * 60 + 6       # P-3101 의 1초 태그 5개 × 60 + 10초 태그 1개 × 6
+        assert len(b.samples) == 2 * (7 * 60 + 6)       # P-3101·P-3101-S2 각각 1초 태그 7개(스트레이너 계측 2개 포함, 2026-11-27) × 60 + 10초 태그 1개 × 6
     ts = sorted({s.ts for b in sender.batches for s in b.samples})
     assert ts[0] == START and ts[-1] == START + timedelta(minutes=3) - timedelta(seconds=1)
     assert all((b - a).total_seconds() == 1 for a, b in zip(ts, ts[1:]))
-    assert {s.equip_id for b in sender.batches for s in b.samples} == {"P-3101"}
+    assert {s.equip_id for b in sender.batches for s in b.samples} == {"P-3101", "P-3101-S2"}
 
 
 async def test_split_units_produce_same_values_as_all(plant_path):
