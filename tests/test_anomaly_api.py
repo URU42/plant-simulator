@@ -63,7 +63,7 @@ def test_fault_modes_listing(client):
 def test_flow_graph(client):
     """3D 뷰어가 읽는 공정 흐름 그래프: 공정 노드, 설비와 축 연결, 간선(stream)."""
     body = client.get("/plant/flow").json()
-    assert body["plant"] == "PL-RHDS" and body["nodes"]["SP"] == "고압 분리기"
+    assert body["plant"] == "RHDS" and body["nodes"]["SP"] == "고압 분리기"
     assert {"equip_id": "GB-3101", "driven_by": "M-3101"} in body["equipment"]
     assert {"from": "C-3102", "to": "C-3101", "label": "보충 수소", "stream": "utility"} in body["edges"]
     assert {e["stream"] for e in body["edges"]} == {"process", "utility"}
@@ -74,7 +74,7 @@ def test_inject_busy_stop_answer_key(client):
     r = client.post("/plant/anomalies", json=SURGE, headers=TOKEN)
     assert r.status_code == 201, r.text
     body = r.json()
-    assert set(body) == {"event_id", "equip_id", "mode", "speed", "start_at"} and body["speed"] == 1 and body["event_id"].startswith("FM-PL-RHDS-")
+    assert set(body) == {"event_id", "equip_id", "mode", "speed", "start_at"} and body["speed"] == 1 and body["event_id"].startswith("FM-RHDS-")
     assert client.post("/plant/anomalies", json=SURGE, headers=TOKEN).status_code == 409
     _wait(client, "/plant/health", lambda h: h["sim_now"] > body["start_at"], timeout=8.0)   # 시작 뒤에 멈춰야 정답지에 남는다
     stop = client.post("/plant/anomalies/C-3101/stop", headers=TOKEN).json()

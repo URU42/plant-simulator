@@ -41,7 +41,7 @@ def test_messages_per_second_with_ten_second_tags_only_on_their_second(rfcc_plan
     ctx.close()
     assert [a[0] for a in fake.added] == ["plant-sim:data:rfcc"] * 3
     msgs = [a[1] for a in fake.added]
-    assert all(set(m) == {"plant", "plant_id", "ts", "samples"} and m["plant"] == "rfcc" and m["plant_id"] == "PL-RFCC" for m in msgs)
+    assert all(set(m) == {"plant", "plant_id", "ts", "samples"} and m["plant"] == "rfcc" and m["plant_id"] == "RFCC" for m in msgs)
     assert [len(m["samples"]) for m in msgs] == [2, 1, 1] and [m["ts"] for m in msgs] == sorted(m["ts"] for m in msgs)
     assert set(msgs[0]["samples"][0]) == {"equip_id", "tag_id", "ts", "value"}
     assert all(a[2] == MAXLEN == 1800 and a[3] for a in fake.added)       # 초당 1건 × 30분, 대략 자르기

@@ -6,11 +6,11 @@ Skadi 앞단 데이터 생성기. 가상 공장 다섯 곳의 설비 센서 값�
 
 | 키(경로) | plant_id | 공장 | 설비 · 태그 | 주기 | 근거 |
 | --- | --- | --- | --- | --- | --- |
-| `/rfcc/` | PL-RFCC | RFCC(중질유 유동상 촉매 분해) | 12 · 82 (합성 1) | 온도 10초 · 나머지 1초 | [RFCC 설계](docs/superpowers/specs/2026-11-09-rfcc-simulator-design.md), 샘플 `rfcc-20261109/` |
-| `/cdu/` | PL-CDU | 상압증류 | 7 · 46 | 온도 10초 · 나머지 1초 | [다중 공장 설계](docs/superpowers/specs/2026-11-09-multi-plant-design.md), 샘플 `cdu-sample/` |
-| `/hou/` | PL-HOU | 수첨분해 | 7 · 62 (합성 1) | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `hou-plant-sample/` |
-| `/rhds/` | PL-RHDS | 상압 잔사유 수첨탈황 | 9 · 58 (합성 1) | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `RHDS_VRDS_v3/` |
-| `/vrds/` | PL-VRDS | 감압 잔사유 수첨탈황 | 7 · 48 (합성 1) | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `RHDS_VRDS_v3/` |
+| `/rfcc/` | RFCC | RFCC(중질유 유동상 촉매 분해) | 12 · 82 (합성 1) | 온도 10초 · 나머지 1초 | [RFCC 설계](docs/superpowers/specs/2026-11-09-rfcc-simulator-design.md), 샘플 `rfcc-20261109/` |
+| `/cdu/` | CDU | 상압증류 | 7 · 46 | 온도 10초 · 나머지 1초 | [다중 공장 설계](docs/superpowers/specs/2026-11-09-multi-plant-design.md), 샘플 `cdu-sample/` |
+| `/hou/` | HOU | 수첨분해 | 7 · 62 (합성 1) | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `hou-plant-sample/` |
+| `/rhds/` | RHDS | 상압 잔사유 수첨탈황 | 9 · 58 (합성 1) | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `RHDS_VRDS_v3/` |
+| `/vrds/` | VRDS | 감압 잔사유 수첨탈황 | 7 · 48 (합성 1) | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `RHDS_VRDS_v3/` |
 
 샘플 묶음 폴더는 git 밖이다. 거기서 옮긴 마스터 값(계층, 설비, 태그명, 설명, 단위, 정상 기준, 경고/알람/정지 상·하한(참고값), 근거)과 Nelson 기준 μ·σ(`baselines.json`)가 `config/plant_*.yaml` 에 있다. 설계와 계획은 [기획서](plant-simulator-plan.md), [시나리오 주입형 전환 계획](docs/superpowers/plans/2026-11-19-scenario-driven.md). 2026-11-18 까지의 자동 이상·Nelson 알람 설계는 [Nelson 이상 설계](docs/superpowers/specs/2026-11-12-nelson-anomaly-design.md)(대체됨).
 
@@ -296,7 +296,7 @@ flow:
 | --- | --- |
 | 스트림 | `plant-sim:data:{공장 키}` — `plant-sim:data:rfcc`, `…:cdu`, `…:hou`, `…:rhds`, `…:vrds` |
 | 엔트리 필드 | `data` 하나. 값은 JSON 문자열 |
-| `data` | `{"plant": "rfcc", "plant_id": "PL-RFCC", "ts": "2026-11-19T16:19:30+09:00", "samples": [{"equip_id", "tag_id", "ts", "value"}, …]}` |
+| `data` | `{"plant": "rfcc", "plant_id": "RFCC", "ts": "2026-11-19T16:19:30+09:00", "samples": [{"equip_id", "tag_id", "ts", "value"}, …]}` |
 | 주기 | 측정 시각(초)마다 하나, 시각 순. 10초 태그는 그 초(0, 10, 20…초)의 메시지에만. 누락(계측 이상)이면 그 태그가 빠진다 |
 | 길이 | `XADD … MAXLEN ~ 1800` (초당 1건 × 30분) |
 | 보내는 범위 | 실제 시각 기준 최근 30분 안의 값만 (백필의 지난 값은 보내지 않는다) |
@@ -329,6 +329,7 @@ instrument_faults:
 ```
 
 - 빈도·크기는 synthetic 가정이다. 일정은 `(seed, plant_id, KST 날짜)` 로만 정해져 같은 시드면 같고, Unit 을 나눠 돌려도 같다. 횟수는 포아송 분포.
+  plant_id 는 접두사를 떼기 전 값(`PL-RHDS`)으로 해시해, 2026-11-27 접두사 제거 전후의 일정이 같다.
 - **보내는 값만** 바꾼다. 공정 값(계산 태그의 입력, 억제 표집 상태)은 그대로라 유량계가 튀어도 전류는 그대로다. 그래서 켜도 계측 이상이 걸린 표본 밖의 값은 꺼졌을 때와 같다.
 - 누락은 표본을 보내지 않는다(실제 통신 끊김처럼).
 - 정답지에는 수집 서버가 같은 일정을 다시 계산해 `code: 2`, `kind: 계측 이상(설비 고장 아님)`, `mode: IM-SPIKE / IM-STUCK / IM-DROPOUT`, 대상 태그(`response_tags`), `start_at`·`end_at` 으로 싣는다.
@@ -417,6 +418,7 @@ Nelson 알람(`/alarms`, `nelson_alarm`)과 Redis Stream `plant-sim:alarms` 는 
 | `ingest_batch`, `job_state`, `schema_meta` | 중복 확인, 배치 진행 상태, 스키마 버전 |
 
 - **예전 DB 파일(v1~v4)은 열 수 없다.** 수집 서버가 파일 경로와 함께 옮기거나 지우라고 알리고 멈춘다. `data/old/` 로 옮긴 뒤 백필을 다시 돌린다. 배포(k8s)에서는 DB v5 이므로 PVC 의 기존 DB 파일을 지우고 다시 띄운다.
+- **plant_id 접두사 제거(2026-11-27, `PL-RHDS` → `RHDS`)**: 그 전에 만든 DB 는 그대로 열리지만 옛 흔적이 남는다. `plant` 테이블에 옛 `PL-…` 행이 참조 없이 남고(적재가 덮어쓰기라 새 행이 따로 생긴다), 정답지에는 그 전에 주입한 사건이 `FM-PL-RHDS-0001` 형식으로, 그 뒤 사건이 `FM-RHDS-0002` 형식으로 섞인다(번호는 이어져 겹치지 않는다). 계측 이상(`IM-…`)은 다시 계산하므로 모두 새 형식이고 일정은 같다. 코드는 옛 행을 지우지 않는다. 깨끗이 하려면 DB 를 지우고 백필을 다시 돌리거나 `DELETE FROM plant WHERE plant_id LIKE 'PL-%'` 로 고아 행만 지운다.
 - 보관: 10분 배치가 끝날 때마다 `raw_retention_days` 보다 오래된 `ts_raw` 행(측정 시각 기준)과 `ingest_batch` 행(받은 시각 기준)을 지운다. 집계는 남긴다.
 - 용량(하루 백필 뒤 실측, 행당 약 180 B): rfcc 1.1 GB · hou 0.7 GB · cdu 0.6 GB · rhds 0.5 GB · vrds 0.5 GB. 다섯 1초 공장을 하루 보관하면 합계 약 3.5 GB 에서 머문다. SQLite 파일은 지워도 줄지 않고 최고점에서 고정된다.
 - 수집 서버는 프로세스 하나다. 통합 실행에서는 동시에 저장하는 공장을 둘로 제한하고(나머지는 기다린다) 값 계산·저장을 워커 스레드에서 돌린다. 분리 실행으로 다섯 공장이 동시에 첫 백필을 하면 SQLite 쓰기가 직렬화돼 하루 백필이 함께 끝나기까지 약 2~5분 걸렸고, 먼저 실시간에 들어간 공장의 1초 전송은 재시도로 버틴다.

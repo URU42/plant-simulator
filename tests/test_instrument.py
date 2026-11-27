@@ -1,4 +1,5 @@
 """계측 이상 층: 일정의 결정성, 보내는 값만 바뀌는지, 정답지 코드."""
+import hashlib
 from datetime import datetime, timedelta
 
 import pytest
@@ -37,6 +38,22 @@ def test_schedule_is_deterministic_and_off_by_default(rhds):
     assert 0.8 * 7 * tags < n["spike"] < 1.2 * 7 * tags                  # 태그당 하루 1회
     assert 3 <= n["stuck"] <= 20 and 10 <= n["dropout"] <= 35             # 설비당 주 1회(9대), 공장당 하루 3회
     assert all(4 <= abs(e.z) <= 8 for e in a if e.kind == "spike")
+
+
+# plant_id 접두사 제거(2026-11-27) 전 origin/main 1430d8f 코드로 뽑은 2026-11-12 하루 일정: (사건 수, (종류·설비·태그·시작·끝·z) 해시)
+BEFORE_PREFIX_REMOVAL = {"rfcc": (93, "9920c7e71292ece9"), "cdu": (48, "5218b119e88cf037"), "hou": (58, "096ddfa2fc316bea"),
+                         "rhds": (69, "5d3e5468854c36ff"), "vrds": (61, "2403a761cf0230a9")}
+
+
+@pytest.mark.parametrize("key", BEFORE_PREFIX_REMOVAL)
+def test_schedule_same_after_plant_id_prefix_removal(key, config_dir):
+    plant, rt = load_plant(config_dir / f"plant_{key}.yaml"), load_runtime(config_dir / f"runtime_{key}.yaml")
+    t = T0.timestamp()
+    ev = InstrumentSchedule(plant, rt.instrument_faults.model_copy(update={"enabled": True}), rt.seed,
+                            rt.sample_interval_sec).events(t, t + DAY)
+    sig = [(e.kind, e.equip_id, e.tag_ids, e.start, e.end, round(e.z, 9)) for e in ev]
+    assert (len(ev), hashlib.sha256(repr(sig).encode()).hexdigest()[:16]) == BEFORE_PREFIX_REMOVAL[key]
+    assert ev[0].event_id == f"IM-{key.upper()}-20261112-0001"          # ID 만 새 형식
 
 
 def test_bad_ranges_rejected():

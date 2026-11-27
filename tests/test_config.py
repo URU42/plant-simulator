@@ -21,7 +21,7 @@ SYNTHETIC_TYPES = {"MT", "GB"}   # 자료에 없는 합성 추가 설비 (2026-1
 def test_plant_loads_and_matches_master(plant_path: Path):
     plant = load_plant(plant_path)
     assert isinstance(plant, PlantConfig)
-    assert plant.plant.plant_id == "PL-RHDS"
+    assert plant.plant.plant_id == "RHDS"
     assert len(plant.equipment) == 9
     assert plant.type_counts() == EXPECTED_TYPE_COUNTS
     assert len(plant.all_tags()) == 58

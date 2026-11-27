@@ -28,12 +28,12 @@ def _utc(epoch):
 def test_inject_busy_and_stop(book):
     b, _, _, _ = book
     e = b.inject("C-3101", "CC-SURGE", at=1000.0)
-    assert e.event_id == "FM-PL-RHDS-0001" and e.start == 1000.0 and e.stop is None
+    assert e.event_id == "FM-RHDS-0001" and e.start == 1000.0 and e.stop is None
     with pytest.raises(Busy):
         b.inject("C-3101", "CC-SURGE", at=1010.0)
     assert b.stop("C-3101", at=1100.0) == (1100.0, [e.event_id])
     assert b.stop("C-3101", at=1200.0)[1] == []
-    assert b.inject("C-3101", "CC-SURGE", at=1200.0).event_id == "FM-PL-RHDS-0002"     # 멈춘 뒤에는 다시 걸 수 있다
+    assert b.inject("C-3101", "CC-SURGE", at=1200.0).event_id == "FM-RHDS-0002"     # 멈춘 뒤에는 다시 걸 수 있다
 
 
 @pytest.mark.parametrize("equip, mode", [("C-3101", "NO-SUCH"), ("P-3101", "CC-SURGE"), ("C-3102", "CC-SURGE")])

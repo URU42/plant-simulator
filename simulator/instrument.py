@@ -61,7 +61,8 @@ class InstrumentSchedule:
 
     def _make(self, day: int) -> list[InstrumentEvent]:
         cfg, plant_id = self.cfg, self.plant.plant.plant_id
-        rng = np.random.default_rng([self.seed, zlib.crc32(plant_id.encode()), day, 2])
+        # 시드는 옛 plant_id(PL-RHDS)로 계산: 2026-11-27 에 접두사를 뗐지만 저장된 원시값·정답지와 같은 일정을 유지한다
+        rng = np.random.default_rng([self.seed, zlib.crc32(f"PL-{plant_id}".encode()), day, 2])
         day0 = int(datetime.combine(date.fromordinal(day), datetime.min.time(), KST).timestamp())
         raw: list[tuple[str, str, tuple[str, ...], int, int, float]] = []
 
