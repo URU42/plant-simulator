@@ -48,6 +48,9 @@ uv sync            # 의존성 설치 (Python 3.11+, uv)
 uv run pytest      # 테스트
 ```
 
+CI(Jenkins)는 `-m 'not slow'` 로 구성 검사·k8s 매니페스트·메시지 형식·시드 동일성·수집기 API 테스트만 돈다(목록은 `tests/conftest.py` 의 `CI_TESTS`).
+나머지(물리·고장·생성기 등)는 `slow` 라 CI 에서 빠지므로, 올리기 전에 로컬에서 `uv run pytest` 로 전체를 돌린다.
+
 가장 간단한 실행은 통합 실행이다. 수집 서버가 공장 목록의 다섯 공장을 열고 생성기까지 같은 프로세스에서 돌린다.
 
 ```bash
