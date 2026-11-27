@@ -16,6 +16,7 @@ from common.config_models import (
 # RHDS 구성안: 펌프 3, 압축기 2, 팬 1 + 합성 추가 전동기 2·기어박스 1
 EXPECTED_TYPE_COUNTS = {"PM": 4, "CC": 2, "FN": 1, "MT": 2, "GB": 1}
 SYNTHETIC_TYPES = {"MT", "GB"}   # 자료에 없는 합성 추가 설비 (2026-11-18). 한계값이 없다
+NO_LIMIT_TAGS = {("C-3102", "PI-I-C3102")}   # 합성 단간 압력 √(흡입·토출): 한계값 없음 (설명의 합성 표시는 2026-11-27 에 뺐다)
 
 
 def test_plant_loads_and_matches_master(plant_path: Path):
@@ -41,7 +42,7 @@ def test_control_mean_is_inside_warning_limits(plant_path: Path):
         for tag in e.tags:
             lim = tag.limits
             if lim is None:
-                assert e.type in SYNTHETIC_TYPES or "(synthetic)" in (tag.description or ""), tag.tag_id
+                assert e.type in SYNTHETIC_TYPES or ((e.equip_id, tag.tag_id) in NO_LIMIT_TAGS and tag.description), tag.tag_id
                 continue
             assert lim.warn_hi is None or tag.control.mean < lim.warn_hi, tag.tag_id
             assert lim.warn_lo is None or tag.control.mean > lim.warn_lo, tag.tag_id

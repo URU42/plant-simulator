@@ -52,9 +52,11 @@ def test_rhds_vrds_alarm_trip_follow_cdu_hou_gaps(key, config_dir):
     assert (tb.warn_hi, tb.alarm_hi, tb.trip_hi) == (85, 95, 105)
     ps = tags[(f"P-{n}101", f"PI-S-P{n}101")].limits
     assert (ps.warn_lo, ps.alarm_lo, ps.trip_lo) == (3.5, 2.8, 2.24)
+    no_limit = (f"C-{n}102", f"PI-I-C{n}102")                                           # 합성 단간 압력: 한계값 없음
+    assert tags[no_limit].limits is None and tags[no_limit].description
     assert all(t.limits.alarm_hi is not None or t.limits.alarm_lo is not None
                for e in plant.equipment if e.type not in ("MT", "GB") for t in e.tags
-               if "(synthetic)" not in (t.description or ""))   # 합성 추가 설비·태그는 한계값 없음
+               if (e.equip_id, t.tag_id) != no_limit)   # 합성 추가 설비(MT·GB)와 단간 압력 말고는 경보 한계가 있다
 
 
 @pytest.mark.parametrize("key", ["rfcc", "cdu", "hou", "rhds", "vrds"])
