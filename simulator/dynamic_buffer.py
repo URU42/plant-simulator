@@ -113,7 +113,7 @@ class BufferModel:
         if not math.isclose(q, self.q0, rel_tol=1e-9):
             raise ValueError(f"정상 액위·개도의 P-8401A 유량 {q * 3600:.4f} m3/h 가 등가회로 정상점 {self.q0 * 3600:.4f} 과 다릅니다.")
         keys = a.keys[cfg.target]
-        self.keys = {s: keys[s] for s in ("flow", "discharge_pressure", "current") if s in keys}
+        self.keys = {s: keys[s] for s in ("flow", "discharge_pressure", "redundant_discharge_pressure", "current") if s in keys}
         self.centers0 = calc._normal_centers[cfg.circuit]
         text = path.read_bytes()
         import hashlib
@@ -158,7 +158,7 @@ class BufferModel:
         for signal, key in self.keys.items():
             if signal == "flow":
                 center = q * 3600
-            elif signal == "discharge_pressure":
+            elif signal in ("discharge_pressure", "redundant_discharge_pressure"):   # 이중화 전송기도 같은 지점
                 center = a._gauge(key, state["discharge_abs_pa"])
             else:
                 center = self.calc.control[key][0] * state["shaft_w"] / self.shaft0

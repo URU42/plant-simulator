@@ -26,7 +26,7 @@ from simulator.fault import HELD, FaultMode, TagPlan, boosted, factor_gain, hydr
 from simulator.physics.npsh import collapse_extrapolation
 from simulator.physics.pump import GRAVITY_M_S2
 from simulator.physics.station import SolveError, Stopped, StationResult, UnitState
-from simulator.physics_adapter import booster_strainer_centers, strainer_centers, PhysicsAdapter, PhysicsBundle, _outflow, load_physics
+from simulator.physics_adapter import booster_strainer_centers, drive_centers, header_centers, redundant_centers, strainer_centers, PhysicsAdapter, PhysicsBundle, _outflow, load_physics
 from simulator.physics_single import SingleAdapter
 
 PLANTS = ("cdu", "hou", "rfcc", "rhds", "vrds")
@@ -454,7 +454,7 @@ class PlantCalc:
         if booster is not None and booster.booster is not None and booster.booster.npsh is not None \
                 and (product.booster_head_loss or 0) >= booster.booster.npsh.max_head_loss:
             collapse.append(a.downstream)
-        return self._coupled_centers(a, r), {
+        return self._coupled_centers(a, r, point.valve_openings.get(case.control_valve, 1.0)), {
             **({"_collapse": collapse} if collapse else {}), **({"_control": control} if control else {}),
             **({"_drum": {"equip_id": a.downstream, "state": product.drum_state, "opening": product.level_valve_opening}}
                if product.drum_state not in (None, "steady") else {}),
@@ -470,7 +470,7 @@ class PlantCalc:
                                      product.booster_shaft_w, product.booster_npsh_margin)}]
                         if product.booster_shaft_w is not None and product.booster_discharge_abs_pa is not None else [])}
 
-    def _coupled_centers(self, a: PhysicsAdapter, r: StationResult) -> dict[TagKey, float | None]:
+    def _coupled_centers(self, a: PhysicsAdapter, r: StationResult, opening: float | None = None) -> dict[TagKey, float | None]:
         """PhysicsAdapter.sensor_centers 와 같은 환산. 정지 펌프도 다루려고 StationResult 를 직접 읽는다.
         전류는 정상 축동력 비(엔진과 같은 정의). 체절 운전(dead_headed)은 엔진이 축동력을 계산하지 않아 None."""
         normal = self._ref_station[a.primary]
@@ -487,11 +487,15 @@ class PlantCalc:
                         k["flow"]: u.flow_m3_s * 3600,
                         k["current"]: None if u.shaft_w is None else self.control[k["current"]][0] * u.shaft_w / u0.shaft_w})
             out.update(strainer_centers(a, k, u))
+            out.update(drive_centers(k, u.speed_rpm, opening))
         if "suction_pressure" in d:
             out[d["suction_pressure"]] = a._gauge(d["suction_pressure"], product.booster_suction_abs_pa)
         if "current" in d:
             out[d["current"]] = self.control[d["current"]][0] * product.booster_shaft_w / ref_product.booster_shaft_w
         out.update(booster_strainer_centers(a, d, product))
+        out.update(drive_centers(d, product.booster_speed_rpm, opening))
+        out.update(redundant_centers(a.keys.values(), out))
+        out.update(header_centers(a.keys.values(), r.flow_m3_s))
         return out
 
     def _split_sources(self) -> dict[str, str]:
@@ -807,7 +811,8 @@ class PlantCalc:
             if p.circuit is None:
                 speed_changed[p.owner] = value
                 continue
-            if p.name == "speed_ratio" and p.owner in self.speed_tag:     # 단일 회로 팬: 회전수 태그도 원인 값대로
+            # 단일 회로 팬: 회전수 태그도 원인 값대로. 결합 회로 펌프 회전수 태그는 엔진이 계산한다(2026-11-27, 두 번 곱하지 않게)
+            if p.name == "speed_ratio" and p.owner in self.speed_tag and not isinstance(self.adapters[p.circuit], PhysicsAdapter):
                 k = self.speed_tag[p.owner]
                 cause_z[k] = (value - 1) * self.control[k][0] / self.control[k][1]
             x = self._inputs_for(p, value)

@@ -99,6 +99,7 @@ class BranchResult(StrictModel):
     booster_head_loss: float | None = None
     booster_flow_m3_s: float | None = None        # 드럼 분기: 후속 펌프 유량(유출). flow_m3_s 는 드럼 유입
     booster_strainer_loss_pa: float | None = None # 후속 펌프 앞 스트레이너 손실 (2026-11-27, 스트레이너 차압 계측용)
+    booster_speed_rpm: float | None = None        # 후속 펌프 회전수 (2026-11-27, 회전수 계측용)
     level_valve_opening: float | None = None      # 드럼 분기: 액위 조절 밸브 개도
     drum_state: Literal["steady", "level_rising", "level_falling"] | None = None
 
@@ -390,7 +391,7 @@ class DemandSide:
                 b_eta = b.pump.efficiency * (1 - (b.npsh.efficiency_coupling if b.npsh else 0.0) * bl)
                 extra = {"booster_suction_abs_pa": p_bs, "booster_discharge_abs_pa": branch.outlet_abs_pa + tail * f**2,
                          "booster_hydraulic_w": f * dp, "booster_shaft_w": f * dp / b_eta,
-                         "booster_strainer_loss_pa": self.booster_r * f**2}
+                         "booster_strainer_loss_pa": self.booster_r * f**2, "booster_speed_rpm": b.speed_rpm}
                 if b.npsh is not None:
                     _, na, nr, mg, bl2 = b.npsh.evaluate(f, p_bs, self.density, b.speed_rpm / b.pump.reference_speed_rpm,
                                                          b.pump.rated_flow_m3_s)
@@ -414,7 +415,7 @@ class DemandSide:
         extra = {"booster_suction_abs_pa": p_s, "booster_discharge_abs_pa": p_s + dp,
                  "booster_hydraulic_w": q * dp, "booster_shaft_w": q * dp / b_eta if q > 0 else 0.0,
                  "booster_flow_m3_s": q, "level_valve_opening": out["opening"], "drum_state": out["state"],
-                 "booster_strainer_loss_pa": self.booster_r * q * q}
+                 "booster_strainer_loss_pa": self.booster_r * q * q, "booster_speed_rpm": b.speed_rpm}
         if b.npsh is not None:
             _, na, nr, mg, bl2 = b.npsh.evaluate(q, p_s, self.density, b.speed_rpm / b.pump.reference_speed_rpm,
                                                  b.pump.rated_flow_m3_s)

@@ -54,6 +54,7 @@ signals:
   - { signal: bearing_temp, prefix: TI, unit: "DEG C", name: 베어링 온도 }
   - { signal: suction_pressure, prefix: PI, unit: "bar(g)", name: 흡입 압력 }
   - { signal: discharge_pressure, prefix: PI, unit: "bar(g)", name: 토출 압력 }
+  - { signal: redundant_discharge_pressure, prefix: PI, unit: "bar(g)", name: 토출 압력(이중화 전송기) }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: interstage_pressure, prefix: PI, unit: "bar(g)", name: 단간 압력 }
   - { signal: flow, prefix: FI, unit: "m3/h", name: 유량 }
   - { signal: current, prefix: II, unit: "A", name: 모터 전류 }
@@ -68,6 +69,7 @@ signals:
   - { signal: process_temp, prefix: TI, unit: "DEG C", name: 공정 유체 온도 }
   - { signal: strainer_dp, prefix: PDI, unit: kPa, name: 흡입 스트레이너 차압 }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: strainer_inlet_pressure, prefix: PI, unit: "bar(g)", name: 스트레이너 앞 흡입 압력 }   # 2026-11-27 추가 계측 (synthetic)
+  - { signal: control_valve_position, prefix: ZI, unit: \"%\", name: 제어밸브 개도 }   # 2026-11-27 추가 계측 (synthetic)
 
 # 정상 운전 공통 요인 (synthetic): 공정 그룹마다 평균 0 인 빠른 성분 하나를 아래 신호의 태그들이 나눠 갖는다.
 # 태그 분산 중 share 만큼이 공통 요인이고, 부호는 그 신호가 부하와 같이(1)·반대로(-1) 움직이는지다.
@@ -192,6 +194,26 @@ equipment:
           decimals: 4,
           seed_key: rhds-str-pi,
           control: { mean: 5.250000, sigma: 0.0174 } }
+      - { tag_id: SI-P3101,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 3213, warn_lo: 3392 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-p3101-spd,
+          control: { mean: 3570.0, sigma: 1.5 } }
+      - { tag_id: PI-D-P3101-D2,
+          signal: redundant_discharge_pressure,
+          unit: "bar(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 87.9, alarm_hi: 92.0, trip_hi: 96.7 },
+          limit_basis: "가정값: PI-D-P3101 와 같은 한계",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: rhds-r004-d2,
+          control: { mean: 80.167, sigma: 0.216555 } }
   # 합성 추가 (2026-11-25 PU-D5a): 자료에 없는 두 번째 펌프(P-3101 와 직렬 2단). 태그·단위·주기·잡음은 P-3101 를 본떴고 개별 잡음은 seed_key 로 독립이다
   - equip_id: P-3101-S2
     name: "고압 원료 공급 펌프 2단 (High Pressure Feed Pump Stage 2, 합성 가정)"
@@ -279,6 +301,26 @@ equipment:
           decimals: 4,
           seed_key: rhds-s2-str-pi,
           control: { mean: 80.152997, sigma: 0.217 } }
+      - { tag_id: SI-P3101S2,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 3213, warn_lo: 3392 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님 (합성 설비)",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-p3101s2-spd,
+          control: { mean: 3570.0, sigma: 1.5 } }
+      - { tag_id: PI-D-P3101S2-D2,
+          signal: redundant_discharge_pressure,
+          unit: "bar(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 170.0, alarm_hi: 178.0, trip_hi: 187.0 },
+          limit_basis: "가정값: PI-D-P3101S2 와 같은 한계 (합성 설비)",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-r104-d2,
+          control: { mean: 155.07, sigma: 0.432607 } }
   # ---------------- UNIT-RHDS-02 보충 수소 압축 ----------------
   # 합성 추가 (2026-11-18): 자료에 없는 구동 전동기(C-3102 직결). 한계값 없음, μ·σ 는 합성값. 회전속도는 C-3102 와 같다
   - equip_id: M-3102
@@ -796,6 +838,36 @@ equipment:
           decimals: 4,
           seed_key: rhds-d-str-pi,
           control: { mean: 4.650000, sigma: 0.0181 } }
+      - { tag_id: SI-P3102,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 1602, warn_lo: 1691 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rhds-p3102-spd,
+          control: { mean: 1780.0, sigma: 1.5 } }
+      - { tag_id: ZI-3102-FCV,
+          signal: control_valve_position,
+          unit: "%",
+          description: "제품 제어밸브 개도(위치 전송기) (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 70, warn_lo: 85 },
+          limit_basis: "가정값: 정상 개도 100 %(가상 밸브), 경고 85·경보 70 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rhds-fcv-zi,
+          control: { mean: 100.0, sigma: 0.3 } }
+      - { tag_id: PI-D-P3102-D2,
+          signal: redundant_discharge_pressure,
+          unit: "bar(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 25.0, alarm_hi: 26.2, trip_hi: 27.5 },
+          limit_basis: "가정값: PI-D-P3102 와 같은 한계",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: rhds-r036-d2,
+          control: { mean: 19.01, sigma: 0.03904839945503526 } }
   # ---------------- UNIT-RHDS-06 환류·순환 ----------------
   - equip_id: P-3103
     name: "분별탑 환류 펌프 (Fractionator Reflux Pump)"

@@ -50,6 +50,7 @@ signals:
   - { signal: bearing_temp, prefix: TI, unit: "DEG C", name: 베어링 온도 }
   - { signal: suction_pressure, prefix: PI, unit: "kg/cm2(g)", name: 흡입 압력 }
   - { signal: discharge_pressure, prefix: PI, unit: "kg/cm2(g)", name: 토출 압력 }
+  - { signal: redundant_discharge_pressure, prefix: PI, unit: "kg/cm2(g)", name: 토출 압력(이중화 전송기) }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: interstage_pressure, prefix: PI, unit: "kg/cm2(g)", name: 단간 압력 }
   - { signal: flow, prefix: FI, unit: "m3/h", name: 유량 }
   - { signal: current, prefix: II, unit: "A", name: 모터 전류 }
@@ -64,6 +65,7 @@ signals:
   - { signal: process_temp, prefix: TI, unit: "DEG C", name: 공정 유체 온도 }
   - { signal: strainer_dp, prefix: PDI, unit: kPa, name: 흡입 스트레이너 차압 }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: strainer_inlet_pressure, prefix: PI, unit: "kg/cm2(g)", name: 스트레이너 앞 흡입 압력 }   # 2026-11-27 추가 계측 (synthetic)
+  - { signal: control_valve_position, prefix: ZI, unit: \"%\", name: 제어밸브 개도 }   # 2026-11-27 추가 계측 (synthetic)
 
 # 정상 운전 공통 요인 (synthetic): 공정 그룹마다 평균 0 인 빠른 성분 하나를 아래 신호의 태그들이 나눠 갖는다.
 # 태그 분산 중 share 만큼이 공통 요인이고, 부호는 그 신호가 부하와 같이(1)·반대로(-1) 움직이는지다.
@@ -235,6 +237,26 @@ equipment:
           decimals: 4,
           seed_key: hou-str-pi,
           control: { mean: 6.767986, sigma: 0.1581 } }
+      - { tag_id: SI-2101,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 3222, warn_lo: 3401 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: hou-2101-spd,
+          control: { mean: 3580.0, sigma: 1.5 } }
+      - { tag_id: PI-2101B-D2,
+          signal: redundant_discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_hi: 103.0, trip_hi: 106.0, alarm_lo: 88.1 },
+          limit_basis: "가정값: PI-2101B 와 같은 한계",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r006-d2,
+          control: { mean: 95.8984, sigma: 0.4029437192712044 } }
   # 합성 추가 (2026-11-25 PU-D5a): 자료에 없는 두 번째 펌프(P-2101 와 직렬 2단). 태그·단위·주기·잡음은 P-2101 를 본떴고 개별 잡음은 seed_key 로 독립이다
   - equip_id: P-2101-S2
     name: "고압 원료 공급 펌프 2단 (High Pressure Feed Pump Stage 2, 합성 가정)"
@@ -350,6 +372,26 @@ equipment:
           decimals: 4,
           seed_key: hou-s2-str-pi,
           control: { mean: 95.889573, sigma: 0.4029 } }
+      - { tag_id: SI-2101S2,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 3222, warn_lo: 3401 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님 (합성 설비)",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: hou-2101s2-spd,
+          control: { mean: 3580.0, sigma: 1.5 } }
+      - { tag_id: PI-2101S2B-D2,
+          signal: redundant_discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_hi: 198.0, trip_hi: 205.0, alarm_lo: 170.0 },
+          limit_basis: "가정값: PI-2101S2B 와 같은 한계 (합성 설비)",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r106-d2,
+          control: { mean: 185.02, sigma: 0.7774128342032636 } }
   # ---------------- UNIT-HOU-02 보충 수소 압축 ----------------
   # 합성 추가 (2026-11-26): 자료에 없는 구동 전동기 (C-2201 직결). M-3102(RHDS) 를 본떴다. 한계값 없음, μ·σ 는 합성값. 회전속도 μ·σ 는 C-2201 에 맞췄다
   - equip_id: M-2201
@@ -1142,3 +1184,33 @@ equipment:
           decimals: 4,
           seed_key: hou-d-str-pi,
           control: { mean: 3.739986, sigma: 0.0451 } }
+      - { tag_id: SI-2701,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 3204, warn_lo: 3382 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: hou-2701-spd,
+          control: { mean: 3560.0, sigma: 1.5 } }
+      - { tag_id: ZI-2701-FCV,
+          signal: control_valve_position,
+          unit: "%",
+          description: "제품 제어밸브 개도(위치 전송기) (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 70, warn_lo: 85 },
+          limit_basis: "가정값: 정상 개도 100 %(가상 밸브), 경고 85·경보 70 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-fcv-zi,
+          control: { mean: 100.0, sigma: 0.3 } }
+      - { tag_id: PI-2701B-D2,
+          signal: redundant_discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_hi: 38.0, alarm_lo: 26.0, trip_lo: 22.0 },
+          limit_basis: "가정값: PI-2701B 와 같은 한계",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r059-d2,
+          control: { mean: 31.46, sigma: 0.15287292703741778 } }

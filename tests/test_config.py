@@ -24,7 +24,7 @@ def test_plant_loads_and_matches_master(plant_path: Path):
     assert plant.plant.plant_id == "PL-RHDS"
     assert len(plant.equipment) == 10
     assert plant.type_counts() == EXPECTED_TYPE_COUNTS
-    assert len(plant.all_tags()) == 70
+    assert len(plant.all_tags()) == 77
     assert len(plant.unit_ids()) == 6
 
 
@@ -214,7 +214,8 @@ def test_operating_scales_driver_and_driven_means(config_dir):
     assert all(ctl[k][1] == base[k][1] for k in base)                                    # σ 는 바꾸지 않는다
 
 
-@pytest.mark.parametrize("equip_id, msg", [("C-1401", "driver"), ("P-1101A", "speed tag")])
+# P-1101A 는 2026-11-27 회전수 태그가 생겨 회전수 태그가 없는 P-1301A 로 바꿈
+@pytest.mark.parametrize("equip_id, msg", [("C-1401", "driver"), ("P-1301A", "speed tag")])
 def test_operating_only_on_driver_with_speed(config_dir, equip_id, msg):
     raw = _rfcc_raw(config_dir)
     _equip(raw, equip_id)["operating"] = {"speed_rpm": 1000}

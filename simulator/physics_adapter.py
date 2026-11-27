@@ -37,6 +37,7 @@ class CoupledResult(NetworkResult):
     total_flow_m3_s: float
     energy_residual_w: float
     units: list[UnitResult]
+    control_valve_opening: float | None = None   # 회로 제어밸브 개도(0~1). 개도 계측용 (2026-11-27)
 
 
 class CoupledCase(NetworkCase):
@@ -98,7 +99,9 @@ class CoupledCase(NetworkCase):
 
     def solve(self, *amounts: float) -> CoupledResult:
         station, point, states, booster_r = self.scenario(*amounts)
-        return self.result(point, station.solve(point, states, booster_suction_resistance=booster_r))
+        out = self.result(point, station.solve(point, states, booster_suction_resistance=booster_r))
+        out.control_valve_opening = point.valve_openings.get(self.control_valve, 1.0)
+        return out
 
     @staticmethod
     def result(point: OperatingPoint, r: StationResult) -> CoupledResult:
@@ -124,8 +127,10 @@ CURRENT_UNIT = "A"
 REQUIRED = {"source": ("suction_pressure", "discharge_pressure", "flow", "current"),
             "downstream": ("discharge_pressure", "flow")}
 # 스트레이너 차압·스트레이너 앞(흡입 상류) 압력은 2026-11-27 추가한 선택 계측이다(원인 판별: 막힘 vs 흡입 경계압 vs 회전수).
-OPTIONAL = {"source": ("strainer_dp", "strainer_inlet_pressure"),
-            "downstream": ("suction_pressure", "current", "strainer_dp", "strainer_inlet_pressure")}
+OPTIONAL = {"source": ("strainer_dp", "strainer_inlet_pressure", "speed", "control_valve_position", "redundant_discharge_pressure",
+                       "header_flow"),
+            "downstream": ("suction_pressure", "current", "strainer_dp", "strainer_inlet_pressure", "speed", "control_valve_position",
+                           "redundant_discharge_pressure")}
 DP_UNIT = "kPa"
 # 역할별로 이 회로가 계산할 수 있는 물리 파라미터. 밸브 제한은 제품 분기 밸브 하나라 첫 입력 펌프에만 둔다(physical_parameters).
 ROLE_PARAMETERS: dict[Role, frozenset[HydraulicParameter]] = {
@@ -140,10 +145,16 @@ AMOUNTS = 7      # solve 인자 수: 첫 펌프 막힘·마모, 제품 밸브, �
 
 
 def _signal_unit_ok(signal: str, unit: str) -> bool:
-    if signal in ("suction_pressure", "discharge_pressure", "strainer_inlet_pressure"):
+    if signal in ("suction_pressure", "discharge_pressure", "strainer_inlet_pressure", "redundant_discharge_pressure"):
         return unit in PRESSURE_PA
     if signal == "strainer_dp":
         return unit == DP_UNIT
+    if signal == "header_flow":
+        return unit == FLOW_UNIT
+    if signal == "speed":
+        return unit == "rpm"
+    if signal == "control_valve_position":
+        return unit == "%"
     return unit == (FLOW_UNIT if signal == "flow" else CURRENT_UNIT)
 
 
@@ -288,6 +299,10 @@ class PhysicsAdapter:
                 keys["current"]: self.control[keys["current"]][0] * unit.shaft_w / ref.shaft_w,
             })
             centers.update(strainer_centers(self, keys, unit))
+            centers.update(drive_centers(keys, unit.speed_rpm, state.control_valve_opening))
+        centers.update(drive_centers(downstream, product.booster_speed_rpm, state.control_valve_opening))
+        centers.update(redundant_centers(self.keys.values(), centers))
+        centers.update(header_centers(self.keys.values(), state.total_flow_m3_s))
         if "suction_pressure" in downstream:
             centers[downstream["suction_pressure"]] = self._gauge(downstream["suction_pressure"], product.booster_suction_abs_pa)
         if "current" in downstream:
@@ -295,6 +310,28 @@ class PhysicsAdapter:
                                               * product.booster_shaft_w / ref_product.booster_shaft_w)
         centers.update(booster_strainer_centers(self, downstream, product))
         return centers
+
+
+def header_centers(all_keys, total_m3_s: float) -> dict[TagKey, float]:
+    """병렬 입력 펌프 헤더 합계 유량계(m3/h): 입력 펌프 유량 합 (2026-11-27, 계기 일관성 검사용)."""
+    return {k["header_flow"]: total_m3_s * 3600 for k in all_keys if "header_flow" in k}
+
+
+def redundant_centers(all_keys, centers: dict) -> dict[TagKey, float]:
+    """이중화 토출 압력 전송기: 같은 지점을 재므로 토출 압력과 같은 값이다 (2026-11-27, 계기 일관성 검사용)."""
+    return {k["redundant_discharge_pressure"]: centers[k["discharge_pressure"]] for k in all_keys
+            if "redundant_discharge_pressure" in k and centers.get(k.get("discharge_pressure")) is not None}
+
+
+def drive_centers(keys: dict[str, TagKey], speed_rpm: float | None, opening: float | None) -> dict[TagKey, float]:
+    """회전수(rpm)·회로 제어밸브 개도(%) 계측. 태그가 있을 때만 (2026-11-27). 개도는 밸브 위치 전송기 값이다:
+    고장(valve_restriction)·수동 개도만 바뀌고, 정적 계산의 가상 유량 제어(분기 저항)는 이 값을 바꾸지 않는다."""
+    out = {}
+    if "speed" in keys and speed_rpm is not None:
+        out[keys["speed"]] = speed_rpm
+    if "control_valve_position" in keys and opening is not None:
+        out[keys["control_valve_position"]] = opening * 100.0
+    return out
 
 
 def strainer_centers(adapter: "PhysicsAdapter", keys: dict[str, TagKey], unit) -> dict[TagKey, float]:

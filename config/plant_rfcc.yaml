@@ -62,15 +62,18 @@ signals:
   - { signal: oil_temp, prefix: LOT, unit: degC, name: 윤활유 공급 온도 }
   - { signal: suction_pressure, prefix: PS, unit: bar(g), name: 흡입 압력 }
   - { signal: discharge_pressure, prefix: PD, unit: bar(g), name: 토출 압력 }
+  - { signal: redundant_discharge_pressure, prefix: PD, unit: bar(g), name: 토출 압력(이중화 전송기) }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: oil_pressure, prefix: LOP, unit: bar(g), name: 윤활유 공급 압력 }
   - { signal: steam_pressure, prefix: SP, unit: bar(g), name: 입구 증기 압력 }
   - { signal: steam_temp, prefix: STT, unit: degC, name: 입구 증기 온도 }
   - { signal: flow, prefix: FI, unit: m3/h, name: 유량 }
+  - { signal: header_flow, prefix: FI, unit: m3/h, name: 입력 헤더 합계 유량 }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: current, prefix: II, unit: A, name: 모터 전류 }
   - { signal: speed, prefix: SI, unit: rpm, name: 축 회전속도 }
   - { signal: axial_position, prefix: ZI, unit: mm, name: 축방향 상대 위치 }
   - { signal: strainer_dp, prefix: PDI, unit: kPa, name: 흡입 스트레이너 차압 }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: strainer_inlet_pressure, prefix: PI, unit: "bar(g)", name: 스트레이너 앞 흡입 압력 }   # 2026-11-27 추가 계측 (synthetic)
+  - { signal: control_valve_position, prefix: ZI, unit: \"%\", name: 제어밸브 개도 }   # 2026-11-27 추가 계측 (synthetic)
 
 # 정상 운전 공통 요인 (synthetic): 공정 그룹마다 평균 0 인 빠른 성분 하나를 아래 신호의 태그들이 나눠 갖는다.
 # 태그 분산 중 share 만큼이 공통 요인이고, 부호는 그 신호가 부하와 같이(1)·반대로(-1) 움직이는지다.
@@ -155,6 +158,36 @@ equipment:
           decimals: 4,
           seed_key: r-str-pi,
           control: { mean: 3.250000, sigma: 0.0076 } }
+      - { tag_id: SI-P-1101A,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 3204, warn_lo: 3382 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rfcc-p-1101a-spd,
+          control: { mean: 3560.0, sigma: 1.5 } }
+      - { tag_id: PD-P-1101A-D2,
+          signal: redundant_discharge_pressure,
+          unit: "bar(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 24.0, alarm_hi: 25.2, trip_hi: 26.4, warn_lo: 13.8, alarm_lo: 11.1 },
+          limit_basis: "가정값: PD-P-1101A 와 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: r004-d2,
+          control: { mean: 19.01285, sigma: 0.030415587636555778 } }
+      - { tag_id: FI-1101-HDR,
+          signal: header_flow,
+          unit: "m3/h",
+          description: "병렬 입력 펌프 헤더 합계 유량 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_lo: 160.4, alarm_lo: 138.0, trip_lo: 110.2 },
+          limit_basis: "가정값: FI-P-1101A 한계를 합계 유량 비율로 키움. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: rfcc-hdr-fi,
+          control: { mean: 209.4573, sigma: 0.4684 } }
   # 합성 추가 (2026-11-25 PU-D5a): 자료에 없는 두 번째 펌프(P-1101A 와 병렬). 태그·단위·주기·잡음은 P-1101A 를 본떴고 개별 잡음은 seed_key 로 독립이다
   - equip_id: P-1101B
     name: "Feed Charge Pump B (합성 가정)"
@@ -200,6 +233,26 @@ equipment:
           decimals: 4,
           seed_key: r-b-str-pi,
           control: { mean: 3.250000, sigma: 0.0076 } }
+      - { tag_id: SI-P-1101B,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 3204, warn_lo: 3382 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님 (합성 설비)",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rfcc-p-1101b-spd,
+          control: { mean: 3560.0, sigma: 1.5 } }
+      - { tag_id: PD-P-1101B-D2,
+          signal: redundant_discharge_pressure,
+          unit: "bar(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 24.0, alarm_hi: 25.2, trip_hi: 26.4, warn_lo: 13.8, alarm_lo: 11.1 },
+          limit_basis: "가정값: PD-P-1101B 와 같은 한계 (합성 설비)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: r104-d2,
+          control: { mean: 19.01285, sigma: 0.030415587636555778 } }
   # ---------------- UNIT-RFCC-02 촉매 재생 ----------------
   - equip_id: B-1201
     name: Main Air Blower
@@ -355,6 +408,36 @@ equipment:
           decimals: 4,
           seed_key: r-d-str-pi,
           control: { mean: 2.549300, sigma: 0.008 } }
+      - { tag_id: SI-P-1303A,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 3204, warn_lo: 3382 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: rfcc-p-1303a-spd,
+          control: { mean: 3560.0, sigma: 1.5 } }
+      - { tag_id: ZI-1303-FCV,
+          signal: control_valve_position,
+          unit: "%",
+          description: "제품 제어밸브 개도(위치 전송기) (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 70, warn_lo: 85 },
+          limit_basis: "가정값: 정상 개도 100 %(가상 밸브), 경고 85·경보 70 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: rfcc-fcv-zi,
+          control: { mean: 100.0, sigma: 0.3 } }
+      - { tag_id: PD-P-1303A-D2,
+          signal: redundant_discharge_pressure,
+          unit: "bar(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 10.4, alarm_hi: 10.9, trip_hi: 11.4, warn_lo: 5.94, alarm_lo: 4.78 },
+          limit_basis: "가정값: PD-P-1303A 와 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: r038-d2,
+          control: { mean: 8.2029, sigma: 0.02579795645701467 } }
   # ---------------- UNIT-RFCC-05 습가스 압축 ----------------
   - equip_id: C-1401
     name: Wet Gas Compressor

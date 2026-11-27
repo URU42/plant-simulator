@@ -3,7 +3,7 @@ import pytest
 
 from common.config_models import load_plant, load_runtime
 
-EXPECTED = {"cdu": ("PL-CDU", 8, 59), "hou": ("PL-HOU", 11, 90), "rhds": ("PL-RHDS", 10, 70), "vrds": ("PL-VRDS", 10, 70)}  # 2026-11-27 스트레이너 계측 추가
+EXPECTED = {"cdu": ("PL-CDU", 8, 67), "hou": ("PL-HOU", 11, 97), "rhds": ("PL-RHDS", 10, 77), "vrds": ("PL-VRDS", 10, 77)}  # 2026-11-27 스트레이너 계측 추가
 
 
 @pytest.mark.parametrize("key", list(EXPECTED))

@@ -84,6 +84,7 @@ class UnitResult(StrictModel):
     cavitation_head_loss: float | None = None
     pressure_residual_pa: float = 0.0
     suction_loss_pa: float | None = None     # 흡입 저항(스트레이너 포함) 압력 손실. 흡입 상류 압력 = suction_abs_pa + 이 값 (2026-11-27)
+    speed_rpm: float | None = None           # 운전 회전수(정지 0). 회전수 계측용 (2026-11-27)
 
 
 class StationResult(StrictModel):
@@ -284,12 +285,13 @@ class _Solver:
             return r
         if not s.running:
             return UnitResult(unit_id=u.unit_id, status="stopped", flow_m3_s=0.0, rated_flow_ratio=0.0, suction_abs_pa=p_common,
-                              discharge_abs_pa=p_common, check_valve_open=False, reverse_dp_pa=header - p_common, hydraulic_w=0.0, shaft_w=0.0)
+                              discharge_abs_pa=p_common, check_valve_open=False, reverse_dp_pa=header - p_common, hydraulic_w=0.0, shaft_w=0.0,
+                              speed_rpm=0.0)
         head = self.head(u, 0.0, p_common)
         p_out = p_common + self.rho_g * head
         return UnitResult(unit_id=u.unit_id, status="dead_headed", flow_m3_s=0.0, rated_flow_ratio=0.0, suction_abs_pa=p_common,
                           discharge_abs_pa=p_out, check_valve_open=False,
-                          reverse_dp_pa=header - p_out if self.open(u) else None, head_m=head, hydraulic_w=0.0)
+                          reverse_dp_pa=header - p_out if self.open(u) else None, head_m=head, hydraulic_w=0.0, speed_rpm=self.speed(u))
 
     def unit_result(self, u: Unit, q: float, p_in: float, p_out: float) -> UnitResult:
         s = self.state[u.unit_id]
@@ -299,7 +301,7 @@ class _Solver:
         if not s.running:
             return UnitResult(unit_id=u.unit_id, status=s.stopped.mode, flow_m3_s=q if s.stopped.mode == "pass" else 0.0,
                               rated_flow_ratio=ratio if s.stopped.mode == "pass" else 0.0, suction_abs_pa=p_in, discharge_abs_pa=p_out,
-                              check_valve_open=s.stopped.mode == "pass", hydraulic_w=0.0, shaft_w=0.0)
+                              check_valve_open=s.stopped.mode == "pass", hydraulic_w=0.0, shaft_w=0.0, speed_rpm=0.0)
         if q >= self.q_max(u) * (1 - 1e-9):
             raise SolveError("runout", f"{u.unit_id}: 유량이 양정 곡선 끝을 넘습니다.")
         head, cav, extra, loss = self.head(u, q, p_in), self.cavitation(u, q, p_in), {}, 0.0
@@ -313,4 +315,5 @@ class _Solver:
         eta = u.pump.efficiency * (1 - s.efficiency_loss) * (1 - (u.npsh.efficiency_coupling if u.npsh else 0.0) * loss)
         hydraulic = q * self.rho_g * head
         return UnitResult(unit_id=u.unit_id, status="running", flow_m3_s=q, rated_flow_ratio=ratio, suction_abs_pa=p_in,
-                          discharge_abs_pa=p_out, check_valve_open=True, head_m=head, hydraulic_w=hydraulic, shaft_w=hydraulic / eta, **extra)
+                          discharge_abs_pa=p_out, check_valve_open=True, head_m=head, hydraulic_w=hydraulic, shaft_w=hydraulic / eta,
+                          speed_rpm=self.speed(u), **extra)

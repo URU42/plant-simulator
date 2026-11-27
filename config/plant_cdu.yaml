@@ -44,13 +44,16 @@ signals:
   - { signal: bearing_temp, prefix: TI, unit: "DEG C", name: 베어링 온도 }
   - { signal: suction_pressure, prefix: PI, unit: "kg/cm2(g)", name: 흡입 압력 }
   - { signal: discharge_pressure, prefix: PI, unit: "kg/cm2(g)", name: 토출 압력 }
+  - { signal: redundant_discharge_pressure, prefix: PI, unit: "kg/cm2(g)", name: 토출 압력(이중화 전송기) }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: flow, prefix: FI, unit: "m3/h", name: 유량 }
+  - { signal: header_flow, prefix: FI, unit: "m3/h", name: 입력 헤더 합계 유량 }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: current, prefix: II, unit: "A", name: 모터 전류 }
   - { signal: speed, prefix: SI, unit: "rpm", name: 회전속도 }
   - { signal: differential_pressure, prefix: PDI, unit: "mmH2O", name: 차압 }
   - { signal: process_temp, prefix: TI, unit: "DEG C", name: 공정 유체 온도 }
   - { signal: strainer_dp, prefix: PDI, unit: kPa, name: 흡입 스트레이너 차압 }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: strainer_inlet_pressure, prefix: PI, unit: "kg/cm2(g)", name: 스트레이너 앞 흡입 압력 }   # 2026-11-27 추가 계측 (synthetic)
+  - { signal: control_valve_position, prefix: ZI, unit: \"%\", name: 제어밸브 개도 }   # 2026-11-27 추가 계측 (synthetic)
 
 # 정상 운전 공통 요인 (synthetic): 공정 그룹마다 평균 0 인 빠른 성분 하나를 아래 신호의 태그들이 나눠 갖는다.
 # 태그 분산 중 share 만큼이 공통 요인이고, 부호는 그 신호가 부하와 같이(1)·반대로(-1) 움직이는지다.
@@ -190,6 +193,46 @@ equipment:
           decimals: 4,
           seed_key: cdu-str-pi,
           control: { mean: 2.851789, sigma: 0.0092 } }
+      - { tag_id: SI-8101A,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 3240, warn_lo: 3420 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: cdu-8101a-spd,
+          control: { mean: 3600.0, sigma: 1.5 } }
+      - { tag_id: ZI-8101-FCV,
+          signal: control_valve_position,
+          unit: "%",
+          description: "원유 공급 제어밸브 개도(위치 전송기) (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 70, warn_lo: 85 },
+          limit_basis: "가정값: 정상 개도 100 %(가상 밸브), 경고 85·경보 70 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: cdu-fcv-zi,
+          control: { mean: 100.0, sigma: 0.3 } }
+      - { tag_id: PI-8101B-D2,
+          signal: redundant_discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_lo: 20.16, alarm_lo: 16.24 },
+          limit_basis: "가정값: PI-8101B 와 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r005-d2,
+          control: { mean: 27.814, sigma: 0.10578375903735555 } }
+      - { tag_id: FI-8101-HDR,
+          signal: header_flow,
+          unit: "m3/h",
+          description: "병렬 입력 펌프 헤더 합계 유량 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_lo: 576.0, alarm_lo: 496.0 },
+          limit_basis: "가정값: FI-8101A 한계를 합계 유량 비율로 키움. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-hdr-fi,
+          control: { mean: 802.6939, sigma: 2.4798 } }
   # 합성 추가 (2026-11-25 PU-D5a): 자료에 없는 두 번째 펌프(P-8101A 와 병렬). 태그·단위·주기·잡음은 P-8101A 를 본떴고 개별 잡음은 seed_key 로 독립이다
   - equip_id: P-8101B
     name: "원유 공급 펌프 B (Crude Charge Pump B, 합성 가정)"
@@ -294,6 +337,26 @@ equipment:
           decimals: 4,
           seed_key: cdu-b-str-pi,
           control: { mean: 2.851789, sigma: 0.0092 } }
+      - { tag_id: SI-8101B,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 3240, warn_lo: 3420 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님 (합성 설비)",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: cdu-8101b-spd,
+          control: { mean: 3600.0, sigma: 1.5 } }
+      - { tag_id: PI-P8101B-B-D2,
+          signal: redundant_discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_lo: 20.16, alarm_lo: 16.24 },
+          limit_basis: "가정값: PI-P8101B-B 와 같은 한계 (합성 설비)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r105-d2,
+          control: { mean: 27.814, sigma: 0.10578375903735555 } }
   # ---------------- UNIT-CDU-02 U-812 ----------------
   - equip_id: P-8102A
     name: "탈염 세정수 펌프 A (Desalter Wash Water Pump A)"
@@ -782,3 +845,23 @@ equipment:
           decimals: 4,
           seed_key: cdu-d-str-pi,
           control: { mean: 2.402923, sigma: 0.0092 } }
+      - { tag_id: SI-8401A,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 3240, warn_lo: 3420 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: cdu-8401a-spd,
+          control: { mean: 3600.0, sigma: 1.5 } }
+      - { tag_id: PI-8401B-D2,
+          signal: redundant_discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_lo: 7.56, alarm_lo: 6.09 },
+          limit_basis: "가정값: PI-8401B 와 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r045-d2,
+          control: { mean: 10.4265, sigma: 0.052100997177016745 } }

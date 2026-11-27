@@ -223,7 +223,7 @@ def test_cdu_control_api_with_bundle(config_dir, tmp_path):
     with TestClient(app) as client:
         app.state.plants["plant"].simulation_clock = ControlledClock(START)
         listing = client.get("/plant/equipment").json()
-        assert len(listing) == 8 and sum(len(a["tags"]) for a in listing) == 59
+        assert len(listing) == 8 and sum(len(a["tags"]) for a in listing) == 67
         models = {t["measurement_model"] for a in listing for t in a["tags"]}
         assert models == {"physical", "empirical"}
         assert {a["equip_id"] for a in listing for t in a["tags"] if t["circuit_id"]} == CIRCUIT_EQUIPMENT

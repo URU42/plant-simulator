@@ -253,7 +253,7 @@ def test_simulation_observations_returns_only_bounded_observations(coupled, conf
         assert {datetime.fromisoformat(row['ts']) for row in rows} == {
             (START + timedelta(seconds=second)).astimezone(timezone.utc) for second in (9, 10)
         }
-        assert sum(len(asset['tags']) for asset in client.get('/plant/equipment').json()) == 59
+        assert sum(len(asset['tags']) for asset in client.get('/plant/equipment').json()) == 67
 
 
 def test_live_dynamic_buffer_delays_product_and_keeps_normal(config_dir):

@@ -17,7 +17,7 @@ from scripts.twin_expectations import PLANTS, breach
 from scripts.verify_circuits import open_plant
 from simulator.physics.pump import GRAVITY_M_S2
 from simulator.physics.station import SolveError, Station, StationResult, Stopped, UnitState
-from simulator.physics_adapter import PhysicsAdapter, booster_strainer_centers, strainer_centers
+from simulator.physics_adapter import PhysicsAdapter, booster_strainer_centers, drive_centers, strainer_centers
 
 BUILT = {k: open_plant(k)[3] for k in PLANTS}
 PARALLEL = [k for k, a in BUILT.items() if a.case.station.topology == "parallel"]
@@ -36,6 +36,7 @@ def readings(a: PhysicsAdapter, r: StationResult) -> dict[str, float]:
     product = next(b for b in r.branches if b.branch_id == a.case.downstream_branch)
     p0 = next(b for b in old.branches if b.branch_id == a.case.downstream_branch)
     dst, out = a.keys[a.downstream], {}
+    opening = a.case.default_point.valve_openings.get(a.case.control_valve, 1.0)   # 이 검증은 회로 제어밸브를 바꾸지 않는다
     for u, u0 in zip(r.units, old.units):
         src = a.keys[u.unit_id]
         out[f"{u.unit_id}:suction_pressure"] = a._gauge(src["suction_pressure"], u.suction_abs_pa)
@@ -43,6 +44,7 @@ def readings(a: PhysicsAdapter, r: StationResult) -> dict[str, float]:
         out[f"{u.unit_id}:flow"] = u.flow_m3_s * 3600
         out[f"{u.unit_id}:current"] = math.nan if u.shaft_w is None else a.control[src["current"]][0] * u.shaft_w / u0.shaft_w
         out.update({f"{u.unit_id}:{sig}": v for sig, v in _named(src, strainer_centers(a, src, u)).items()})
+        out.update({f"{u.unit_id}:{sig}": v for sig, v in _named(src, drive_centers(src, u.speed_rpm, opening)).items()})
     out[f"{a.downstream}:flow"] = product.flow_m3_s * 3600
     out[f"{a.downstream}:discharge_pressure"] = a._gauge(dst["discharge_pressure"], product.booster_discharge_abs_pa)
     if "suction_pressure" in dst:
@@ -50,6 +52,14 @@ def readings(a: PhysicsAdapter, r: StationResult) -> dict[str, float]:
     if "current" in dst:
         out[f"{a.downstream}:current"] = a.control[dst["current"]][0] * product.booster_shaft_w / p0.booster_shaft_w
     out.update({f"{a.downstream}:{sig}": v for sig, v in _named(dst, booster_strainer_centers(a, dst, product)).items()})
+    out.update({f"{a.downstream}:{sig}": v for sig, v in _named(dst, drive_centers(dst, product.booster_speed_rpm, opening)).items()})
+    for eid, keys in a.keys.items():          # 헤더 합계 유량 = 입력 펌프 유량 합 (2026-11-27)
+        if "header_flow" in keys:
+            out[f"{eid}:header_flow"] = r.flow_m3_s * 3600
+    for name in list(out):                    # 이중화 토출 압력 전송기 = 토출 압력 (2026-11-27)
+        eid, sig = name.split(":")
+        if sig == "discharge_pressure" and "redundant_discharge_pressure" in a.keys[eid]:
+            out[f"{eid}:redundant_discharge_pressure"] = out[name]
     return out
 
 

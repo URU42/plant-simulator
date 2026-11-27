@@ -27,7 +27,8 @@ def test_new_pump_mirrors_the_existing_one(key, config_dir):
     plant = load_plant(config_dir / f"plant_{key}.yaml")
     old, new = (plant.equipment_by_id()[e] for e in PAIRS[key])
     assert "합성 가정" in new.name and (old.type, old.unit_id, old.driven_by) == (new.type, new.unit_id, new.driven_by)
-    for a, b in zip(old.tags, new.tags, strict=True):
+    circuit = ("control_valve_position", "header_flow")   # 회로 제어밸브 개도·헤더 유량은 회로에 하나라 한 대에만 있다(2026-11-27)
+    for a, b in zip([t for t in old.tags if t.signal not in circuit], new.tags, strict=True):
         assert (a.signal, a.unit, a.interval_sec) == (b.signal, b.unit, b.interval_sec)
         assert a.tag_id != b.tag_id and a.seed_key != b.seed_key and "합성 설비" in b.limit_basis
 

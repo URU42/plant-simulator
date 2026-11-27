@@ -6,8 +6,8 @@ TEMPS = {"bearing_temp", "suction_temp", "discharge_temp", "oil_temp"}
 
 def test_rfcc_plant_matches_sample_package(rfcc_plant_path):
     plant = load_plant(rfcc_plant_path)
-    tags = [t for t in plant.all_tags() if "(synthetic)" not in (t.description or "") and "1101B" not in t.tag_id and not t.tag_id.endswith("-STR")]   # 합성 추가 STT-T-1401·P-1101B 제외
-    assert len(plant.equipment) == 13 and len(tags) == 81 and len(plant.all_tags()) == 94
+    tags = [t for t in plant.all_tags() if "(synthetic)" not in (t.description or "") and "1101B" not in t.tag_id and "추가 계측" not in (t.description or "")]   # 2026-11-27 추가 계측 제외   # 합성 추가 STT-T-1401·P-1101B 제외
+    assert len(plant.equipment) == 13 and len(tags) == 81 and len(plant.all_tags()) == 102
     assert len(plant.unit_ids()) == 8 and len(plant.plant.unit_groups) == 5
     temps = [t for t in tags if t.signal in TEMPS]
     assert len(temps) == 16 and all(t.interval_sec == 10 for t in temps)
