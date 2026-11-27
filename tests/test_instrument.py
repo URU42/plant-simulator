@@ -40,19 +40,19 @@ def test_schedule_is_deterministic_and_off_by_default(rhds):
     assert all(4 <= abs(e.z) <= 8 for e in a if e.kind == "spike")
 
 
-# plant_id 접두사 제거(2026-11-27) 전 origin/main 1430d8f 코드로 뽑은 2026-11-12 하루 일정: (사건 수, (종류·설비·태그·시작·끝·z) 해시)
-BEFORE_PREFIX_REMOVAL = {"rfcc": (93, "9920c7e71292ece9"), "cdu": (48, "5218b119e88cf037"), "hou": (58, "096ddfa2fc316bea"),
-                         "rhds": (69, "5d3e5468854c36ff"), "vrds": (61, "2403a761cf0230a9")}
+# 기준은 plant-simulator-1124-wook 원본(7c13058, PL- 형식) 일정: 그 코드·구성으로 뽑은 2026-11-12 하루 (사건 수, (종류·설비·태그·시작·끝·z) 해시)
+WOOK_PL_PREFIX_SCHEDULE = {"rfcc": (108, "b93d6e9848714680"), "cdu": (78, "2a09bab85fc48b14"), "hou": (88, "ebd411a7101cae79"),
+                           "rhds": (90, "da2901b1a336daab"), "vrds": (93, "a2546a72aa2d048d")}
 
 
-@pytest.mark.parametrize("key", BEFORE_PREFIX_REMOVAL)
-def test_schedule_same_after_plant_id_prefix_removal(key, config_dir):
+@pytest.mark.parametrize("key", WOOK_PL_PREFIX_SCHEDULE)
+def test_schedule_same_as_wook_pl_prefix_schedule(key, config_dir):
     plant, rt = load_plant(config_dir / f"plant_{key}.yaml"), load_runtime(config_dir / f"runtime_{key}.yaml")
     t = T0.timestamp()
     ev = InstrumentSchedule(plant, rt.instrument_faults.model_copy(update={"enabled": True}), rt.seed,
                             rt.sample_interval_sec).events(t, t + DAY)
     sig = [(e.kind, e.equip_id, e.tag_ids, e.start, e.end, round(e.z, 9)) for e in ev]
-    assert (len(ev), hashlib.sha256(repr(sig).encode()).hexdigest()[:16]) == BEFORE_PREFIX_REMOVAL[key]
+    assert (len(ev), hashlib.sha256(repr(sig).encode()).hexdigest()[:16]) == WOOK_PL_PREFIX_SCHEDULE[key]
     assert ev[0].event_id == f"IM-{key.upper()}-20261112-0001"          # ID 만 새 형식
 
 
