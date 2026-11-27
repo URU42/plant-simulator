@@ -216,7 +216,7 @@ equipment:
           control: { mean: 80.167, sigma: 0.216555 } }
   # 합성 추가 (2026-11-25 PU-D5a): 자료에 없는 두 번째 펌프(P-3101 와 직렬 2단). 태그·단위·주기·잡음은 P-3101 를 본떴고 개별 잡음은 seed_key 로 독립이다
   - equip_id: P-3101-S2
-    name: "고압 원료 공급 펌프 2단 (High Pressure Feed Pump Stage 2, 합성 가정)"
+    name: "고압 원료 공급 펌프 2단 (High Pressure Feed Pump Stage 2)"
     type: PM
     unit_id: UNIT-RHDS-01
     tags:

@@ -190,7 +190,7 @@ equipment:
           control: { mean: 209.4573, sigma: 0.4684 } }
   # 합성 추가 (2026-11-25 PU-D5a): 자료에 없는 두 번째 펌프(P-1101A 와 병렬). 태그·단위·주기·잡음은 P-1101A 를 본떴고 개별 잡음은 seed_key 로 독립이다
   - equip_id: P-1101B
-    name: "Feed Charge Pump B (합성 가정)"
+    name: "Feed Charge Pump B"
     type: PM
     unit_id: UNIT-RFCC-01
     tags:
