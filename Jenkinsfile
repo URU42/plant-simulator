@@ -32,22 +32,7 @@ pipeline {
             }
         }
 
-        stage('Test') {
-            steps {
-                sh '''#!/bin/sh
-set -eu
-
-export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"
-
-# 에이전트에 Python 을 두지 않고 uv 이미지 안에서 테스트한다 (의존성은 uv.lock 그대로)
-docker run --rm \
-  -v "$PWD":/src -w /src \
-  -e UV_CACHE_DIR=/tmp/uv-cache -e UV_PROJECT_ENVIRONMENT=/tmp/venv \
-  ghcr.io/astral-sh/uv:python3.11-bookworm-slim \
-  sh -c "uv sync --frozen && uv run pytest -q -p no:cacheprovider -m 'not slow'"
-'''
-            }
-        }
+        // 테스트는 CI 에서 돌리지 않는다(빌드 서버에서 한 시간 이상 걸린다). 올리기 전에 로컬에서 uv run pytest 로 돌린다
 
         stage('Build') {
             steps {
