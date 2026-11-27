@@ -152,7 +152,9 @@ def test_coverage_marks_the_model_kind(plants, modes, config_dir):
     assert kind[("I3", "FI-8303A")] == ("physics_coupled", False) and kind[("I3", "VI-8303A")] == ("empirical", True)
     rows = coverage(plants["rfcc"], load_runtime(config_dir / "runtime_rfcc.yaml"), modes)
     assert {r["model"] for r in rows if r["rule"] == "I5"} == {"synthetic_no_performance_map"}
-    assert all(modes[m].basis.startswith("가정 기반") for m in ("CC-SURGE", "CC-SURGE-HIGH-RATIO", "OP-LOW-FLOW", "GB-LUBE-WEAR"))
+    surge = "성능 맵 없음, 서지 한계·운전점을 계산하지 않는다"     # 물리 계산 없이 정한 효과의 근거 (같은 앵커를 셋이 나눠 쓴다)
+    assert {m: modes[m].basis for m in ("CC-SURGE", "CC-SURGE-HIGH-RATIO", "OP-LOW-FLOW", "GB-LUBE-WEAR")} == {
+        "CC-SURGE": surge, "CC-SURGE-HIGH-RATIO": surge, "OP-LOW-FLOW": surge, "GB-LUBE-WEAR": "치면 마모·기어 동역학을 계산하지 않는다"}
 
 
 @pytest.mark.parametrize("change", [{"gain": None}, {"by": "speed"}, {"factors": []}, {"per_unit": 0.1}, {"hold_below_alarm": True}])

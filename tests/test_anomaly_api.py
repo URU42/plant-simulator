@@ -74,7 +74,8 @@ def test_fault_modes_listing(client):
     assert rows["CC-SURGE"]["equip_ids"] == ["C-3101"] and "ST-WATER-INDUCTION" not in rows
     assert rows["RC-VALVE-LEAK"]["equip_ids"] == ["C-3102"] and rows["CC-SURGE"]["unobserved"]
     assert not {"label", "kind", "cause", "expect"} & set(rows["CC-SURGE"])
-    assert rows["CC-SURGE"]["basis"].startswith("가정 기반") and rows["RC-VALVE-LEAK"]["basis"] is None      # 모델 종류 표시
+    assert rows["CC-SURGE"]["basis"] == "성능 맵 없음, 서지 한계·운전점을 계산하지 않는다"      # 모델 종류 표시: 물리 계산 없이 정한 효과의 근거
+    assert rows["RC-VALVE-LEAK"]["basis"] is None
 
 
 def test_flow_graph(client):
