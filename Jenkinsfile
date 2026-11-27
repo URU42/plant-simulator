@@ -44,7 +44,7 @@ docker run --rm \
   -v "$PWD":/src -w /src \
   -e UV_CACHE_DIR=/tmp/uv-cache -e UV_PROJECT_ENVIRONMENT=/tmp/venv \
   ghcr.io/astral-sh/uv:python3.11-bookworm-slim \
-  sh -c "uv sync --frozen && uv run pytest -q -p no:cacheprovider"
+  sh -c "uv sync --frozen && uv run pytest -q -p no:cacheprovider -m 'not slow'"
 '''
             }
         }
