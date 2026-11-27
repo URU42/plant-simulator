@@ -37,3 +37,23 @@ async def test_live_clock_tracks_wall_time():
     assert now.tzinfo is not None
     assert abs((now - datetime.now(KST)).total_seconds()) < 1
     await clock.sleep_until(now)   # 과거 시각은 즉시 반환
+
+
+async def test_controlled_clock_pauses_wait_and_changes_speed():
+    import asyncio
+    from common.sim_clock import ControlledClock
+
+    start = datetime(2026, 11, 24, tzinfo=KST)
+    clock = ControlledClock(start)
+    deadline = asyncio.create_task(clock.sleep_until(start + timedelta(seconds=2)))
+    await asyncio.sleep(0.02)
+    assert not deadline.done() and clock.now() == start
+    clock.update(phase="running", rate=20)
+    await asyncio.sleep(0.02)
+    clock.update(phase="paused")
+    frozen = clock.now()
+    await asyncio.sleep(0.12)
+    assert clock.now() == frozen and not deadline.done()
+    clock.update(phase="running", rate=60)
+    await asyncio.wait_for(deadline, timeout=0.5)
+    assert clock.now() >= start + timedelta(seconds=2)

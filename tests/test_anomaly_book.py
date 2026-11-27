@@ -9,7 +9,7 @@ from collector.storage import Storage
 from common.config_models import load_plant, load_runtime
 from common.sim_clock import KST
 from common.timefmt import to_db
-from simulator.fault import MAX_RECOVERY_SEC, RECOVERY_SEC, load_fault_modes
+from simulator.fault import MAX_RECOVERY_SEC, RECOVERY_SEC, TEMP_RECOVERY_SEC, load_fault_modes
 from simulator.model import PlantGenerator
 
 
@@ -81,19 +81,21 @@ def test_answer_key_fields_and_stage_cut(book):
     assert [s["id"] for s in row["stages"]] == ["S1", "S2"]
     assert {t["stage"] for t in row["response_tags"]} == {"S1", "S2"}
     assert {(t["tag_id"], t["start_at"]) for t in row["response_tags"] if t["stage"] == "S1"} == {("FI-C3101", _utc(1000.0))}
-    assert row["end_at"] == _utc(1130.0 + RECOVERY_SEC)        # 하류 wobble(S2 + 10초)은 멈춤 전에 시작하지 못했다
+    assert row["end_at"] == _utc(1130.0 + TEMP_RECOVERY_SEC)   # S2 의 토출 온도가 가장 느리다. 하류 wobble(S2 + 10초)은 멈춤 전에 시작하지 못했다
     assert {(t["via"], t["hop"]) for t in row["response_tags"]} == {("self", 0)}
 
 
 def test_answer_key_marks_downstream_and_longer_recovery(book):
-    """하류 효과가 시작한 사건: response_tags 에 via·hop, end_at 은 가장 먼 단계의 회복(60초 × (k+1))까지."""
+    """하류 효과가 시작한 사건: response_tags 에 via·hop, end_at 은 가장 느린 회복까지 (고장 설비의 온도 300초 > 하류 1단계 압력 120초)."""
     b = book[0]
     b.inject("C-3101", "CC-SURGE", at=1000.0)
     b.stop("C-3101", at=1200.0)
     row = b.answer_key(None, None, None)[0]
     down = {(t["equip_id"], t["via"], t["hop"]) for t in row["response_tags"] if t["equip_id"] != "C-3101"}
     assert down == {("P-3102", "process", 1), ("P-3103", "process", 1)}
-    assert row["end_at"] == _utc(1200.0 + 2 * RECOVERY_SEC)
+    assert row["end_at"] == _utc(1200.0 + TEMP_RECOVERY_SEC)
+    assert {t["recovery_sec"] for t in row["response_tags"] if t["hop"] == 1} == {2 * RECOVERY_SEC}
+    assert {t["recovery_sec"] for t in row["response_tags"] if t["tag_id"] == "FI-C3101"} == {RECOVERY_SEC}
 
 
 def test_answer_key_skips_zero_length_event(book):
@@ -152,7 +154,7 @@ def test_repair_clears_damage_left_after_stop(book):
     at, ids = b.repair("GB-3101", at=60_000.0)
     assert (at, ids) == (60_000.0, [e.event_id]) and b.damaged() == [] and b.repair("GB-3101", at=60_100.0)[1] == []
     row = b.answer_key(None, None, None)[0]
-    assert row["repair_requested_at"] == _utc(60_000.0) and row["end_at"] == _utc(60_000.0 + RECOVERY_SEC)  # 손상은 기어박스·피구동 압축기(hop 0)
+    assert row["repair_requested_at"] == _utc(60_000.0) and row["end_at"] == _utc(60_000.0 + TEMP_RECOVERY_SEC)  # 손상된 베어링 온도(hop 0)
     assert b.external(60_000.0 + MAX_RECOVERY_SEC, 99_999) == []
     assert AnomalyBook(st, plant, modes).external(60_000.0 + MAX_RECOVERY_SEC, 99_999) == []
 
@@ -162,7 +164,7 @@ def test_stop_before_damage_stage_leaves_nothing(book):
     b.inject("GB-3101", "GB-LUBE-WEAR", at=0.0)
     b.stop("GB-3101", at=500.0)                                         # S2 전
     row = b.answer_key(None, None, None)[0]
-    assert b.damaged() == [] and not row["damage_remains"] and row["end_at"] == _utc(500.0 + RECOVERY_SEC)
+    assert b.damaged() == [] and not row["damage_remains"] and row["end_at"] == _utc(500.0 + TEMP_RECOVERY_SEC)      # 유온
 
 
 def test_legacy_event_without_damage_flags_holds_no_damage(book):
@@ -179,9 +181,18 @@ def test_answer_key_records_boost(book):
     b = book[0]
     b.inject("P-3102", "PM-SUCTION-HOT", at=0.0)
     row = b.answer_key(None, None, None)[0]
-    assert row["boost"] == {"by": "process_temp", "signals": ["vibration", "flow"], "per_unit": 0.03, "max_gain": 2.0,
+    assert row["boost"] == {"rule": "I3", "by": "process_temp", "signals": ["vibration", "flow"], "per_unit": 0.03, "max_gain": 2.0,
                             "hold_below_alarm": True, "equip_ids": ["P-3102", "P-4102", "P-8303A"]}
     boosted = {t["tag_id"] for t in row["response_tags"] if t["boost_by"]}
     assert boosted == {"VI-A-P3102", "FI-P3102"}
     assert {t["boost_by"] for t in row["response_tags"] if t["boost_by"]} == {"TI-F-P3102"}
     assert "TI-F-P3102" in {t["tag_id"] for t in row["response_tags"]}
+
+
+def test_answer_key_records_factor_boost(book):
+    """요인 곱 교호작용(I6): 정답지에 규칙 번호와 두 요인 태그가 남는다."""
+    b = book[0]
+    b.inject("GB-3101", "GB-LUBE-WEAR", at=0.0)
+    row = b.answer_key(None, None, None)[0]
+    assert row["boost"]["rule"] == "I6" and [f["signal"] for f in row["boost"]["factors"]] == ["oil_pressure", "oil_temp"]
+    assert {t["boost_by"] for t in row["response_tags"] if t["tag_id"] == "VI-O-GB3101"} == {"PI-LO-GB3101,TI-LO-GB3101"}

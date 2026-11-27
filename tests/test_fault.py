@@ -21,6 +21,8 @@ def test_repo_fault_modes_load_and_apply(modes, config_dir):
     """저장소의 고장 모드는 모두 읽히고, 각각 적어도 한 공장의 설비 하나에 효과가 걸린다."""
     plants = [load_plant(config_dir / f"plant_{k}.yaml") for k in ("rfcc", "cdu", "hou", "rhds", "vrds")]
     for m in modes.values():
+        if m.physics_only:  # 물리 전용 모드는 결합 회로 테스트에서 확인한다.
+            continue
         assert any(plan(p, m, e.equip_id, p.control_by_key()) for p in plants for e in p.equipment if m.applies_to(e)), m.id
 
 
@@ -174,7 +176,7 @@ def test_flow_reach_matches_viewer_rules(config_dir):
     assert {d for d, (k, _) in r.items() if k == 2} == {"P-1402A", "P-1403A", "P-1501A", "P-1502A"}
     assert set(rfcc.downstream(["P-1101A"], 1)) == {"C-1401", "P-1301A", "P-1302A", "P-1303A"}
     hou = load_plant(config_dir / "plant_hou.yaml")
-    assert hou.downstream(["P-2501"], 2) == {"C-2301": (1, "utility")}             # 윤활유: 압축기에서 멈춤
+    assert hou.downstream(["P-2501"], 2) == {"C-2301": (1, "utility"), "GB-2301": (1, "utility")}   # 윤활유: 압축기·기어박스에서 멈춤
     assert hou.downstream(["C-2201"], 2)["C-2301"] == (1, "utility")                # 가상 공장 간선
     assert "C-3101" not in load_plant(config_dir / "plant_rhds.yaml").downstream(["P-3101"], 2)   # 공정 흐름 뒤 수소 계통으로 안 퍼짐
     cdu = load_plant(config_dir / "plant_cdu.yaml")
@@ -227,6 +229,9 @@ def test_lube_oil_loss_drives_compressor_bearing_to_limits(config_dir, modes):
     oil = ("P-2501", "PI-2501")
     o = lim[oil].limits
     assert o.alarm_lo < value(oil, 900) and o.trip_lo < value(oil, 1800) < o.alarm_lo and value(oil, 3000) < o.trip_lo
+    gear = tags[("GB-2301", "PI-LO-GB2301")]          # 같은 윤활유를 받는 기어박스는 공급 압력이 내려가고 베어링 온도가 오른다
+    assert gear.via == "utility" and tag_effect(gear, 1800, None)[0] < -10
+    assert tag_effect(tags[("GB-2301", "TI-B-GB2301")], 3000, None)[0] > 5
     assert ("C-2301", "PI-2301A") not in tags or tags[("C-2301", "PI-2301A")].via == "utility"   # 압축기에는 윤활유 압력 태그가 없다
 
 

@@ -34,6 +34,7 @@
 | --- | --- | --- | --- |
 | `schema_meta` | — | `version` (=3) | 스키마 버전 |
 | `plant` | `plant_id` | `name`, `config_version` | `plant` |
+| `plant_config_change` | `plant_id`, `config_version` | `applied_at` (구성안 버전이 바뀐 시각, 2026-11-25) | `plant` |
 | `unit_group` | `unit_group_id` | `plant_id`, `name` | `plant.unit_groups` |
 | `unit` | `unit_id` | `unit_group_id`, `name` | `plant.unit_groups[].units` |
 | `equipment_type` | `type` | `name`, `prefix` | `equipment_types` |

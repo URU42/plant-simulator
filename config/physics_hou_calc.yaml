@@ -1,0 +1,11 @@
+# HOU 정적 계산(M1) 전용 단일 회로 목록 (scripts/calibrate_calc_singles.py 생성, synthetic assumption).
+# 수집기 트윈(physics_*_twin.yaml)과 AE 기준에는 쓰지 않는다. 시뮬레이션 화면 계산에서만 읽는다.
+circuits:
+  - physics_hou_p2501.yaml
+  - physics_hou_p2601.yaml
+notes:
+  P-2501: "정적 계산 전용 대용 회로(압축기 윤활유): 펌프 곡선·배관 저항은 정상 운전점에서 역산한 가정값입니다, 흡입 경계압은 태그가 없어 가정값입니다. 탑·드럼 수력과 순환 루프는 계산하지 않습니다."
+  P-2601: "정적 계산 전용 대용 회로(분별탑 환류): 펌프 곡선·배관 저항은 정상 운전점에서 역산한 가정값입니다. 탑·드럼 수력과 순환 루프는 계산하지 않습니다."
+faults:
+  PM-IMPELLER-WEAR: [P-2501, P-2601]
+  PM-DISCHARGE-VALVE-RESTRICTION: [P-2101]

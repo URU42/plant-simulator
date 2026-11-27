@@ -11,7 +11,7 @@
 plant:
   plant_id: CDU
   name: "CDU (상압증류)"
-  config_version: 3
+  config_version: 5                 # 2026-11-27 추가 계측(스트레이너·회전수·밸브 개도·이중화 토출·헤더 유량) 반영. 2026-11-25 PU-D5a: P-8101B 추가 (병렬)
   unit_groups:
     - id: UG-CDU-01
       name: "원유 전처리"
@@ -44,11 +44,16 @@ signals:
   - { signal: bearing_temp, prefix: TI, unit: "DEG C", name: 베어링 온도 }
   - { signal: suction_pressure, prefix: PI, unit: "kg/cm2(g)", name: 흡입 압력 }
   - { signal: discharge_pressure, prefix: PI, unit: "kg/cm2(g)", name: 토출 압력 }
+  - { signal: redundant_discharge_pressure, prefix: PI, unit: "kg/cm2(g)", name: 토출 압력(이중화 전송기) }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: flow, prefix: FI, unit: "m3/h", name: 유량 }
+  - { signal: header_flow, prefix: FI, unit: "m3/h", name: 입력 헤더 합계 유량 }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: current, prefix: II, unit: "A", name: 모터 전류 }
   - { signal: speed, prefix: SI, unit: "rpm", name: 회전속도 }
   - { signal: differential_pressure, prefix: PDI, unit: "mmH2O", name: 차압 }
   - { signal: process_temp, prefix: TI, unit: "DEG C", name: 공정 유체 온도 }
+  - { signal: strainer_dp, prefix: PDI, unit: kPa, name: 흡입 스트레이너 차압 }   # 2026-11-27 추가 계측 (synthetic)
+  - { signal: strainer_inlet_pressure, prefix: PI, unit: "kg/cm2(g)", name: 스트레이너 앞 흡입 압력 }   # 2026-11-27 추가 계측 (synthetic)
+  - { signal: control_valve_position, prefix: ZI, unit: "%", name: 제어밸브 개도 }   # 2026-11-27 추가 계측 (synthetic)
 
 # 정상 운전 공통 요인 (synthetic): 공정 그룹마다 평균 0 인 빠른 성분 하나를 아래 신호의 태그들이 나눠 갖는다.
 # 태그 분산 중 share 만큼이 공통 요인이고, 부호는 그 신호가 부하와 같이(1)·반대로(-1) 움직이는지다.
@@ -68,6 +73,7 @@ flow:
     HX: "원유 예열 열교환기"
   edges:
     - [P-8101A, DS, "", process]
+    - [P-8101B, DS, "", process]   # 가상 공장 추가 (PU-D5a)
     - [DS, HX, "저온측", process]
     - [HX, HT, "저온측", process]
     - [HT, AT, "", process]
@@ -165,8 +171,192 @@ equipment:
           interval_sec: 1,
           decimals: 4,
           seed_key: cdu-r007,
-          derive: { formula: power, terms: [{ tag: FI-8101A, exp: 1 }, { tag: PI-8101B, minus: PI-8101A, exp: 1 }], noise_sigma: 0.15171 },
-          control: { mean: 106.2212, sigma: 0.814372 } }
+          derive: { formula: power, terms: [{ tag: FI-8101A, exp: 1 }, { tag: PI-8101B, minus: PI-8101A, exp: 1 }], noise_sigma: 0.254368 },
+          control: { mean: 106.2212, sigma: 0.5057 } }
+      - { tag_id: PDI-8101A-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "흡입 스트레이너 차압 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 50, alarm_hi: 100 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 50·경보 100 kPa(고압 구간이라 약한 막힘 차압의 약 2배로 둠). 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: cdu-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-8101A-STR,
+          signal: strainer_inlet_pressure,
+          unit: "kg/cm2(g)",
+          description: "스트레이너 앞 흡입 압력 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 1.62, warn_lo: 2.02 },
+          limit_basis: "가정값: 같은 설비 흡입 압력(PI-8101A)과 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-str-pi,
+          control: { mean: 2.851789, sigma: 0.0092 } }
+      - { tag_id: SI-8101A,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 3240, warn_lo: 3420 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: cdu-8101a-spd,
+          control: { mean: 3600.0, sigma: 1.5 } }
+      - { tag_id: ZI-8101-FCV,
+          signal: control_valve_position,
+          unit: "%",
+          description: "원유 공급 제어밸브 개도(위치 전송기) (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 70, warn_lo: 85 },
+          limit_basis: "가정값: 정상 개도 100 %(가상 밸브), 경고 85·경보 70 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: cdu-fcv-zi,
+          control: { mean: 100.0, sigma: 0.3 } }
+      - { tag_id: PI-8101B-D2,
+          signal: redundant_discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_lo: 20.16, alarm_lo: 16.24 },
+          limit_basis: "가정값: PI-8101B 와 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r005-d2,
+          control: { mean: 27.814, sigma: 0.10578375903735555 } }
+      - { tag_id: FI-8101-HDR,
+          signal: header_flow,
+          unit: "m3/h",
+          description: "병렬 입력 펌프 헤더 합계 유량 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_lo: 576.0, alarm_lo: 496.0 },
+          limit_basis: "가정값: FI-8101A 한계를 합계 유량 비율로 키움. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-hdr-fi,
+          control: { mean: 802.6939, sigma: 2.4798 } }
+  # 합성 추가 (2026-11-25 PU-D5a): 자료에 없는 두 번째 펌프(P-8101A 와 병렬). 태그·단위·주기·잡음은 P-8101A 를 본떴고 개별 잡음은 seed_key 로 독립이다
+  - equip_id: P-8101B
+    name: "원유 공급 펌프 B (Crude Charge Pump B, 합성 가정)"
+    type: PM
+    unit_id: UNIT-CDU-01
+    tags:
+      - { tag_id: VI-P8101B-A,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 구동측 진동",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "1.1~2.2",
+          limit_basis: "P-8101A 를 본뜬 합성 설비: 경고 3.0=API 610 선호운전영역(POR) 한계, 알람 4.5/정지 7.1=ISO 20816-3 Group 1 강성지지 B/C·C/D 경계 (가정 적용)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r101,
+          control: { mean: 1.6466, sigma: 0.07598426116605081 } }
+      - { tag_id: VI-P8101B-B,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 반구동측 진동",
+          limits: { warn_hi: 3, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "0.9~1.8",
+          limit_basis: "P-8101A 를 본뜬 합성 설비: 경고 3.0=API 610 선호운전영역(POR) 한계, 알람 4.5/정지 7.1=ISO 20816-3 Group 1 강성지지 B/C·C/D 경계 (가정 적용)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r102,
+          control: { mean: 1.3137, sigma: 0.062202849966242216 } }
+      - { tag_id: TI-P8101B-A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "51~67",
+          limit_basis: "P-8101A 를 본뜬 합성 설비: 구름 베어링 하우징 온도 일반 관리 수준을 참고한 가정값",
+          interval_sec: 10,
+          decimals: 4,
+          seed_key: cdu-r103,
+          control: { mean: 57.27945, sigma: 0.15584909309396022 } }
+      - { tag_id: PI-P8101B-A,
+          signal: suction_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 흡입 압력",
+          limits: { warn_lo: 2.02, alarm_lo: 1.62 },
+          normal_ref: "2.38~3.22",
+          limit_basis: "P-8101A 를 본뜬 합성 설비: 압력 저하 관리용 가정값 (정상 기준 72%/58%)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r104,
+          control: { mean: 2.8008, sigma: 0.009228877630245361 } }
+      - { tag_id: PI-P8101B-B,
+          signal: discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "펌프 토출 압력",
+          limits: { warn_lo: 20.16, alarm_lo: 16.24 },
+          normal_ref: "23.80~32.20",
+          limit_basis: "P-8101A 를 본뜬 합성 설비: 압력 저하 관리용 가정값 (정상 기준 72%/58%)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r105,
+          control: { mean: 27.814, sigma: 0.10578375903735555 } }
+      - { tag_id: FI-P8101B-A,
+          signal: flow,
+          unit: "m3/h",
+          description: "원유 공급 유량",
+          limits: { warn_lo: 288, alarm_lo: 248 },
+          normal_ref: "340~440",
+          limit_basis: "P-8101A 를 본뜬 합성 설비: 최소 연속 유량 보호를 고려한 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r106,
+          control: { mean: 401.34794999999997, sigma: 1.7534874855774707 } }
+      - { tag_id: II-P8101B-A,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { warn_hi: 122, alarm_hi: 129 },
+          normal_ref: "94~113",
+          limit_basis: "P-8101A 를 본뜬 합성 설비: 정격 전류 대비 여유를 고려한 가정값",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r107,
+          derive: { formula: power, terms: [{ tag: FI-P8101B-A, exp: 1 }, { tag: PI-P8101B-B, minus: PI-P8101B-A, exp: 1 }], noise_sigma: 0.254507 },
+          control: { mean: 106.2212, sigma: 0.5057 } }
+      - { tag_id: PDI-8101B-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "흡입 스트레이너 차압 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 50, alarm_hi: 100 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 50·경보 100 kPa(고압 구간이라 약한 막힘 차압의 약 2배로 둠). 실제 설정값 아님 (합성 설비)",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: cdu-b-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-8101B-STR,
+          signal: strainer_inlet_pressure,
+          unit: "kg/cm2(g)",
+          description: "스트레이너 앞 흡입 압력 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 1.62, warn_lo: 2.02 },
+          limit_basis: "가정값: 같은 설비 흡입 압력(PI-P8101B-A)과 같은 한계 (합성 설비)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-b-str-pi,
+          control: { mean: 2.851789, sigma: 0.0092 } }
+      - { tag_id: SI-8101B,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 3240, warn_lo: 3420 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님 (합성 설비)",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: cdu-8101b-spd,
+          control: { mean: 3600.0, sigma: 1.5 } }
+      - { tag_id: PI-P8101B-B-D2,
+          signal: redundant_discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_lo: 20.16, alarm_lo: 16.24 },
+          limit_basis: "가정값: PI-P8101B-B 와 같은 한계 (합성 설비)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r105-d2,
+          control: { mean: 27.814, sigma: 0.10578375903735555 } }
   # ---------------- UNIT-CDU-02 U-812 ----------------
   - equip_id: P-8102A
     name: "탈염 세정수 펌프 A (Desalter Wash Water Pump A)"
@@ -636,3 +826,42 @@ equipment:
           seed_key: cdu-r046,
           derive: { formula: power, terms: [{ tag: FI-8401A, exp: 1 }, { tag: PI-8401B, exp: 1 }], noise_sigma: 0.0570678 },
           control: { mean: 40.18945, sigma: 0.416573 } }
+      - { tag_id: PDI-8401A-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "후속 펌프 흡입 스트레이너 차압 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_hi: 640, alarm_hi: 1280 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 640·경보 1280 kPa(고압 구간이라 약한 막힘 차압의 약 2배로 둠). 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: cdu-d-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-8401A-STR,
+          signal: strainer_inlet_pressure,
+          unit: "kg/cm2(g)",
+          description: "후속 펌프 스트레이너 앞 흡입 압력 (2026-11-27 추가 계측) (synthetic)",
+          limit_basis: "한계값 없음(원인 판별용 계측)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-d-str-pi,
+          control: { mean: 2.402923, sigma: 0.0092 } }
+      - { tag_id: SI-8401A,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도 (2026-11-27 추가 계측, synthetic)",
+          limits: { alarm_lo: 3240, warn_lo: 3420 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: cdu-8401a-spd,
+          control: { mean: 3600.0, sigma: 1.5 } }
+      - { tag_id: PI-8401B-D2,
+          signal: redundant_discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "토출 압력 이중화 전송기 (2026-11-27 추가 계측, synthetic)",
+          limits: { warn_lo: 7.56, alarm_lo: 6.09 },
+          limit_basis: "가정값: PI-8401B 와 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: cdu-r045-d2,
+          control: { mean: 10.4265, sigma: 0.052100997177016745 } }

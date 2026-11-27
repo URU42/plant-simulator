@@ -21,7 +21,9 @@ from collector.storage import Storage
 from collector.stream import Broadcaster
 from common.config_models import ConfigError, PlantConfig, RuntimeConfig, TagKey, apply_profile, load_plant, load_runtime
 from common.message import Sample
+from common.sim_clock import ControlledClock
 from simulator.fault import FaultMode
+from simulator.physics_adapter import PhysicsAdapter, PhysicsBundle, load_physics
 from simulator.instrument import InstrumentSchedule
 from common.timefmt import from_db, to_db
 
@@ -41,6 +43,9 @@ class PlantContext:
     book: AnomalyBook                         # 고장 모드 사건 장부 (통합 실행 생성기의 EventSource, 정답지)
     live: bool = False                        # 생성기가 실시간(또는 가속)으로 시계를 따라잡았는가. 백필·밀린 구간 재생 중이면 False
     catch_up_task: asyncio.Task | None = field(default=None)
+    simulation_clock: ControlledClock | None = None
+    control_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    control_receipts: dict = field(default_factory=dict)
     simulator_error: str | None = field(default=None)               # 통합 실행의 생성기 태스크가 예외로 끝났을 때
     # 저장·배치 전진은 워커 스레드에서도 돌 수 있다(통합 실행). 한 공장의 SQLite 트랜잭션이 겹치지 않도록 락으로 직렬화한다.
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -51,11 +56,13 @@ class PlantContext:
 
     @classmethod
     def open(cls, entry: PlantEntry, modes: dict[str, FaultMode], redis_url: str | None = None,
-             reset_db: bool = False, profile: str = "demo") -> "PlantContext":
+             reset_db: bool = False, profile: str = "demo", simulation_control: bool = False) -> "PlantContext":
         """modes 는 공장들이 함께 쓰는 고장 모드 정의(config/fault_modes.yaml). redis_url 이 있으면 Redis Stream 으로도 보낸다.
+        조작 시뮬레이션(simulation_control 이고 트윈 실행 설정인 공장)은 보내지 않는다: 일부러 낸 고장이 AE·업무 알람으로 이어지지 않게.
         reset_db 면 스키마 버전이 다른 DB 파일을 지우고 새로 만든다. profile 은 실행 용도(demo·eval)로 DB 마다 하나로 고정된다."""
         plant = load_plant(entry.plant)
         runtime = apply_profile(load_runtime(entry.runtime), profile)
+        physics = load_physics(plant, runtime.physics, runtime.physics_general) if runtime.physics is not None else None
         Path(entry.db).parent.mkdir(parents=True, exist_ok=True) if entry.db != ":memory:" else None
         storage = Storage(entry.db, reset_on_schema_change=reset_db)
         _pin_profile(storage, entry.db, profile)
@@ -65,9 +72,9 @@ class PlantContext:
         except RuntimeError:
             loop = None
         return cls(key=entry.key, plant=plant, runtime=runtime, storage=storage, jobs=JobRunner(storage, plant, runtime),
-                   broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime), tag_keys=storage.tag_keys(),
-                   loop=loop, book=AnomalyBook(storage, plant, modes, _instrument(plant, runtime)),
-                   data_stream=DataStream.from_url(redis_url, entry.key) if redis_url else None)
+                   broadcaster=Broadcaster(), listing=equipment_listing(plant, runtime, physics), tag_keys=storage.tag_keys(),
+                   loop=loop, book=AnomalyBook(storage, plant, modes, _instrument(plant, runtime), physics),
+                   data_stream=DataStream.from_url(redis_url, entry.key) if redis_url and not (simulation_control and runtime.twin) else None)
 
     def set_live(self, at: float) -> None:
         """생성기가 실시간으로 넘어가 시계를 따라잡았다(at = 따라잡은 첫 구간 시작, epoch 초). 이때부터 주입을 받는다."""
@@ -184,7 +191,7 @@ class PlantContext:
         return row or {"equip_id": key[0], "tag_id": key[1], "ts": None, "value": None, "received_at": None}
 
 
-def equipment_listing(plant: PlantConfig, runtime: RuntimeConfig) -> list[dict]:
+def equipment_listing(plant: PlantConfig, runtime: RuntimeConfig, physics: PhysicsAdapter | PhysicsBundle | None = None) -> list[dict]:
     """unit_groups → units → 설비(yaml 순서) 순으로 설비와 태그를 펼친다. 마스터 참고 필드와 한계값도 함께.
     control 은 운전점을 반영한 μ·σ (탐지 쪽 Nelson 기준)."""
     control = plant.control_by_key()
@@ -201,6 +208,9 @@ def equipment_listing(plant: PlantConfig, runtime: RuntimeConfig) -> list[dict]:
                     "tags": [{"tag_id": t.tag_id, "signal": t.signal, "unit": t.unit, "description": t.description,
                               "interval_sec": plant.tag_interval_sec((e.equip_id, t.tag_id), runtime.sample_interval_sec),
                               "decimals": t.decimals, "normal_ref": t.normal_ref, "limit_basis": t.limit_basis,
+                              **({"measurement_model": ("physical" if (e.equip_id, t.tag_id) in physics.tag_keys else "empirical"),
+                                  "hydraulic_role": physics.roles.get(e.equip_id), "circuit_id": physics.circuit_of(e.equip_id)}
+                                 if physics is not None else {}),
                               "limits": t.limits.model_dump(exclude_none=True) if t.limits else None,
                               "control": dict(zip(("mean", "sigma"), control[(e.equip_id, t.tag_id)]))} for t in e.tags],
                 })

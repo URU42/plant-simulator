@@ -469,8 +469,17 @@ class RuntimeConfig(StrictModel):
     collector_url: str = "http://localhost:8000"
     raw_retention_days: int = Field(default=7, ge=1)
     instrument_faults: InstrumentFaults = InstrumentFaults()
+    physics: Path | None = None  # 선택형 물리 회로 설정 파일
+    # true 면 일반 모드의 물리 회로: 회로가 계산하지 않는 경험 효과·흐름 그래프 전파를 유지하고 트윈(조작 시계·토큰·발행 차단)이 아니다 (PU-D5a)
+    physics_general: bool = False
+    # 일반 모드 CDU 경유 제품 측 합성 완충(PU-D6 모델)을 실시간 생성에도 쓴다. 기본 꺼짐(2026-11-27 D13 보강, simulator.dynamic_buffer.LiveBuffer)
+    dynamic_buffer: Path | None = None
     # 정상 잡음을 Nelson 규칙 1~3 위반 없이 고른다(억제 표집, D3). false 면 거르지 않는다 — 학습·오탐률 평가용 (2026-11-20)
     quiet_normal: bool = True
+
+    @property
+    def twin(self) -> bool:
+        return self.physics is not None and not self.physics_general
 
     @model_validator(mode="after")
     def _intervals(self) -> "RuntimeConfig":
@@ -503,7 +512,14 @@ def load_plant(path: str | Path) -> PlantConfig:
 
 
 def load_runtime(path: str | Path) -> RuntimeConfig:
-    return RuntimeConfig.model_validate(load_yaml(path))
+    runtime = RuntimeConfig.model_validate(load_yaml(path))
+    if runtime.physics is not None:
+        runtime.physics = Path(path).parent / runtime.physics
+    if runtime.dynamic_buffer is not None:
+        if runtime.physics is None or not runtime.physics_general:
+            raise ConfigError("dynamic_buffer 는 일반 모드 물리 회로(physics + physics_general: true)에서만 씁니다.")
+        runtime.dynamic_buffer = Path(path).parent / runtime.dynamic_buffer
+    return runtime
 
 
 # 용도별 실행 설정 (2026-11-23 사용자 확정). demo: 실행 설정 파일 그대로(시연용, 조용한 정상).

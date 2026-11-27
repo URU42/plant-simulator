@@ -41,8 +41,9 @@ def test_db_with_data_before_profiles_counts_as_demo(plant_path, runtime_path, t
 
 
 @pytest.mark.parametrize("plant_key, equip, mode, own", [
-    ("hou", "C-2201", "OP-LOAD-CHANGE", {"FI-2201", "PI-2201B", "SI-2201"}),
-    ("hou", "C-2301", "OP-LOAD-CHANGE", {"FI-2301", "PI-2301B", "SI-2301"}),
+    ("hou", "M-2201", "OP-LOAD-CHANGE", {"SI-M2201", "II-M2201"}),
+    ("hou", "M-2301", "OP-LOAD-CHANGE", {"SI-M2301", "II-M2301"}),
+    ("vrds", "M-4101", "OP-LOAD-CHANGE", {"SI-M4101", "II-M4101"}),
     ("cdu", "P-8101A", "OP-THROUGHPUT-CHANGE", {"FI-8101A", "PI-8101B", "II-8101A"}),
     ("rfcc", "P-1101A", "OP-THROUGHPUT-CHANGE", {"FI-P-1101A", "PD-P-1101A", "II-P-1101A"}),
     ("hou", "P-2101", "OP-THROUGHPUT-CHANGE", {"FI-2101", "PI-2101B", "II-2101"}),

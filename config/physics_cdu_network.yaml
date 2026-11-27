@@ -1,0 +1,38 @@
+# synthetic assumption: CDU의 합성 데이터에서 가져온 식별자와 물리 검증용 회로.
+plant_id: CDU
+unit_id: UNIT-CDU-01
+equip_id: P-8101A
+suction_node: virtual:suction-boundary
+discharge_node: virtual:discharge-junction
+provenance: synthetic assumption
+network:
+  density_kg_m3: 850
+  pump:
+    reference_speed_rpm: 3600
+    rated_flow_m3_s: 0.11148554
+    shutoff_head_m: 371.895
+    rated_head_m: 294.27
+    efficiency: 0.75
+  branches:
+    - branch_id: virtual:main-branch
+      outlet_node: DS
+      outlet_abs_pa: 2796063
+      elevation_change_m: 0
+      pipes:
+        virtual:main-pipe: {length_m: 70, diameter_m: 0.25, darcy_factor: 0.025, minor_loss_k: 8}
+      valves:
+        virtual:main-valve: {diameter_m: 0.25, full_open_k: 2}
+    - branch_id: virtual:bleed-branch
+      outlet_node: virtual:bleed-pressure-boundary
+      outlet_abs_pa: 330000
+      elevation_change_m: 1.5
+      pipes:
+        virtual:bleed-pipe: {length_m: 15, diameter_m: 0.025, darcy_factor: 0.028, minor_loss_k: 3}
+      valves:
+        virtual:bleed-valve: {diameter_m: 0.025, full_open_k: 100}
+default_point:
+  suction_abs_pa: 375990
+  speed_rpm: 3600
+  valve_openings:
+    virtual:main-valve: 1.0
+    virtual:bleed-valve: 0.7

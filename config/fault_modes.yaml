@@ -6,7 +6,7 @@
 #   목표 z = (한계 − μ)/σ × (1 + margin). 앞 단계 step·ramp 가 남긴 수준을 빼고 그만큼만 움직인다).
 #   to_limit 이 그 태그에 없으면(예: RFCC 는 경고 한계만 있다) z 를 쓰고, z 도 없으면 그 태그에는 걸지 않는다.
 # - shape: step(바로) / ramp(rise_sec 동안 0→z 뒤 유지) / spike(rise_sec 동안 0→z, decay_sec 동안 z→0) / wobble(진폭 z, 주기 period_sec)
-# - lag_sec 는 단계 시작(at_sec) 뒤 지연. 멈추면 손상(damage) 효과를 뺀 모든 효과가 60초 동안 0 으로 가라앉는다.
+# - lag_sec 는 단계 시작(at_sec) 뒤 지연. 멈추면 손상(damage) 효과를 뺀 모든 효과가 60초(온도 신호는 300초) 동안 0 으로 가라앉는다.
 # - propagate.driven: 축으로 이어진 아래쪽 설비(driven_by 사슬)에 주는 효과. speed 는 생성기가 구동기 값을 그대로 넘긴다.
 # - nelson_quiet: 그 단계 동안 효과를 더한 값도 Nelson 규칙 1~3 을 어기지 않게 고른다 (ML 만 잡는 전조를 만드는 합성 장치).
 # - damage: 손상 단계. 그 단계의 step·ramp 효과는 멈춘 뒤에도 멈춘 시각의 크기로 남고, POST /{공장}/anomalies/{설비}/repair
@@ -68,6 +68,19 @@ fault_modes:
 
   - id: CC-SURGE
     name: 원심 압축기·송풍기 서지
+    basis: &surge_basis 가정 기반 (성능 맵 없음, 서지 한계·운전점을 계산하지 않는다)
+    # 교호작용 I5 (2026-11-25 D1, 수치는 synthetic): 저유량 × 고압축비가 겹치면 맥동(wobble)과 축 진동(step)을 키운다.
+    # 배율 = 1 + 0.5 × 저유량 수준 × 압축비 수준. 저유량은 사건의 유량 저하 10σ 에서 1, 압축비는 절대압 토출/흡입 비가 2 % 오르면 1.
+    # 이 모드만 걸면 토출 압력의 평균 상승이 없어 배율 1(기존과 같다). ramp(유량 저하)와 베어링 충격(spike)은 키우지 않는다
+    boost: &surge_boost
+      rule: I5
+      signals: [flow, discharge_pressure, shaft_vibration]
+      shapes: [wobble, step]
+      factors:
+        - { signal: flow, direction: -1, span: 10 }
+        - { signal: discharge_pressure, over: suction_pressure, offset: 1.01325, direction: 1, span: 0.02 }
+      gain: 0.5
+      max_gain: 1.5
     equip_ids: [C-1401, C-2301, C-3101, C-4101, B-1201]   # 원심 압축기와 RFCC 주 공기 송풍기 (설비 유형 CC 는 왕복동과 구분하지 않는다)
     unobserved: [안티서지 밸브 개도, 서지 한계선 대비 운전점(유량-양정)]
     label:
@@ -80,7 +93,8 @@ fault_modes:
         at_sec: 0
         effects:
           - { signal: flow, shape: ramp, z: -10, rise_sec: 120 }
-      - id: S2
+      - &surge_s2
+        id: S2
         name: 서지 발생 → 압력·유량 진동
         at_sec: 120
         effects:
@@ -91,7 +105,8 @@ fault_modes:
         propagate:
           process:
             - { signal: flow, shape: wobble, z: 0.5, period_sec: 4, lag_sec: 10 }     # 서지 맥동이 하류 처리량에 약하게 전달
-      - id: S3
+      - &surge_s3
+        id: S3
         name: 스러스트 베어링·실 충격
         at_sec: 150
         effects:
@@ -106,6 +121,46 @@ fault_modes:
       alarms:
         - { equip: self, count: 1, opens_in: S1 }
 
+  # 저유량에 압축비 상승이 겹친 서지 (2026-11-25 D1, synthetic). CC-SURGE 와 같은 단계에 S1 에서 토출 압력을 +10σ(약 +0.29 bar, 경고 한계 아래)
+  # 올린다. 같은 설비의 CC-SURGE 와 비교해 교호작용 I5 를 보는 용도 (PM-SUCTION-HOT 과 같은 방식).
+  - id: CC-SURGE-HIGH-RATIO
+    name: 습가스 압축기 서지 + 압축비 상승
+    equip_ids: [C-1401]
+    unobserved: [안티서지 밸브 개도, 서지 한계선 대비 운전점(유량-양정)]
+    basis: *surge_basis
+    boost: *surge_boost
+    label:
+      kind: 공정·기계 이상
+      cause: 저유량과 토출 압력 상승이 겹쳐 서지 맥동·진동이 커짐 (합성)
+      action: 안티서지 밸브·제어기와 토출 계통 압력 점검, 운전점 복귀
+    stages:
+      - id: S1
+        name: 저유량 + 압축비 상승 → 서지 한계 접근
+        at_sec: 0
+        effects:
+          - { signal: flow, shape: ramp, z: -10, rise_sec: 120 }
+          - { signal: discharge_pressure, shape: ramp, z: 10, rise_sec: 120 }
+      - *surge_s2
+      - *surge_s3
+
+  # 서지와 같은 크기의 저유량이지만 맥동·진동이 없는 정상 운전 변화 (2026-11-25 D1, synthetic). 저유량만으로 서지로 판정하지 않는지 보는 비교군.
+  - id: OP-LOW-FLOW
+    name: 습가스 압축기 저유량 운전 (정상 운전 변화)
+    equip_ids: [C-1401]
+    basis: *surge_basis
+    unobserved: [운전 지시·유량 설정값(SP), 안티서지 밸브 개도]
+    label:
+      kind: 정상 운전 변화
+      code: 1
+      cause: 의도한 저유량 운전 (맥동 없음)
+      action: 기계 수리 아님. 운전 지시·부하 조건 확인
+    stages:
+      - id: S1
+        name: 유량 하향
+        at_sec: 0
+        effects:
+          - { signal: flow, shape: ramp, z: -10, rise_sec: 120 }
+
   - id: PM-SUCTION-LOSS
     name: 펌프 흡입 조건 악화 (캐비테이션 후보)
     equip_types: [PM]
@@ -116,7 +171,7 @@ fault_modes:
     # hold_below_alarm(경고 구간 보장): 경보 한계 목표 단계(S3) 전에는 키운 효과가 경보 한계 3σ 안쪽에 머물고, S3 효과의 상승 시간 동안
     # 서서히 풀린다. 태그 설명이 "흡입 유체 온도"인 펌프 3대만 (P-3102·P-4102·P-8303A, 사용자 확정 2026-11-23 — 처음엔 취급·인출 유체
     # 온도인 P-2701·P-8301A 도 넣은 5대였다. Auto Ontology·다른 PM 규칙과 같은 기준). 배율 방식은 공통 기준으로 확정(같은 날)
-    boost: &pm_boost { by: process_temp, signals: [vibration, flow], per_unit: 0.03, max_gain: 2.0, hold_below_alarm: true,
+    boost: &pm_boost { rule: I3, by: process_temp, signals: [vibration, flow], per_unit: 0.03, max_gain: 2.0, hold_below_alarm: true,
                        equip_ids: [P-3102, P-4102, P-8303A] }
     label:
       kind: 공정·기계 이상
@@ -126,6 +181,7 @@ fault_modes:
       - id: S1
         name: 흡입 압력 저하
         at_sec: 0
+        hydraulic: [{parameter: strainer_blockage, amount: 0.45, rise_sec: 600}]
         effects:
           - { signal: suction_pressure, shape: ramp, to_limit: warn_lo, margin: 0.1, z: -6, rise_sec: 600 }
       - &pm_s2
@@ -145,10 +201,12 @@ fault_modes:
           # 수치 synthetic). 펌프 단계를 따라 경고 → 경보 → 정지 한계. 압축기 정지(trip) 연동은 모의하지 않는다
           utility:
             - { signal: bearing_temp, shape: ramp, to_limit: warn_hi, margin: 0.1, z: 2.0, lag_sec: 60, rise_sec: 600 }
+            - { signal: oil_pressure, shape: ramp, z: -6, lag_sec: 30, rise_sec: 300 }      # HOU 기어박스 GB-2301 의 윤활유 공급 압력 (2026-11-26)
       - &pm_s3
         id: S3
         name: 이상 심화
         at_sec: 900
+        hydraulic: [{parameter: strainer_blockage, amount: 0.55, rise_sec: 600}]
         effects:
           - { signal: suction_pressure, shape: ramp, to_limit: alarm_lo, margin: 0.05, z: -6, rise_sec: 600 }
           - { signal: vibration, shape: ramp, to_limit: alarm_hi, margin: 0.05, z: 6, rise_sec: 600 }
@@ -158,6 +216,7 @@ fault_modes:
         propagate:
           utility:
             - { signal: bearing_temp, shape: ramp, to_limit: alarm_hi, margin: 0.05, z: 4.0, lag_sec: 60, rise_sec: 600 }
+            - { signal: oil_pressure, shape: ramp, z: -6, lag_sec: 30, rise_sec: 600 }
       - &pm_s4
         id: S4
         name: 정지 한계 도달 — 심한 캐비테이션
@@ -194,6 +253,8 @@ fault_modes:
       - id: S1
         name: 흡입 압력 저하 + 유체 온도 상승
         at_sec: 0
+        # 물리 결합 회로(CDU P-8303A)에서는 같은 600초 동안 흡입 유체 온도를 최대 +15 K(회로 설정) 올려 증기압·NPSHa 를 계산한다.
+        hydraulic: [{parameter: suction_temperature_rise, amount: 1, rise_sec: 600}]
         effects:
           - { signal: suction_pressure, shape: ramp, to_limit: warn_lo, margin: 0.1, z: -6, rise_sec: 600 }
           - { signal: process_temp, shape: ramp, delta: 15, rise_sec: 600 }
@@ -213,8 +274,8 @@ fault_modes:
 
   - id: OP-LOAD-CHANGE
     name: 운전 부하 감소 (정상 운전 변화)
-    # 회전속도를 바꾸는 구동기. HOU 압축기 2대는 구동기 없이 자기 회전수가 있어 2026-11-23 더했다(사용자 확정, 팬은 제외)
-    equip_ids: [T-1401, M-3101, M-3102, M-4102, C-2201, C-2301]
+    # 회전속도를 바꾸는 구동기 (팬은 제외). HOU 는 2026-11-26 구동기가 생겨 압축기에서 옮겼다(사용자 확정)
+    equip_ids: [T-1401, M-3101, M-3102, M-4101, M-4102, M-2201, M-2301]
     unobserved: [운전 지시·속도 설정값(SP)]
     label:
       kind: 정상 운전 변화
@@ -229,9 +290,6 @@ fault_modes:
           # 정상 운전 변화라 경고 한계에 닿지 않고 Nelson 규칙 2(평균 이동)·ML 만 알아챌 크기 (2026-11-19 축소, 전 −15·−12σ)
           - { signal: speed, shape: ramp, z: -1.5, rise_sec: 300 }
           - { signal: current, shape: ramp, z: -1.5, lag_sec: 5, rise_sec: 300 }
-          # 자기 유량·토출 압력이 있는 설비(HOU 압축기)만 움직인다. 터빈·전동기에는 이 태그가 없어 건너뛴다 (2026-11-23)
-          - { signal: flow, shape: ramp, z: -1.5, lag_sec: 10, rise_sec: 300 }
-          - { signal: discharge_pressure, shape: ramp, z: -1.0, lag_sec: 10, rise_sec: 300 }
         propagate:
           driven:
             - { signal: flow, shape: ramp, z: -1.5, lag_sec: 10, rise_sec: 300 }
@@ -263,6 +321,7 @@ fault_modes:
       - id: S1
         name: 공급 유량 하향
         at_sec: 0
+        hydraulic: [{parameter: valve_restriction, amount: 0.2, rise_sec: 300}]
         effects:
           - { signal: flow, shape: ramp, z: -1.5, rise_sec: 300 }
           - { signal: discharge_pressure, shape: ramp, z: -1.0, rise_sec: 300 }
@@ -275,6 +334,37 @@ fault_modes:
       alarms:
         - { equip: self, kind: 정상 운전 변화 }
 
+  # 플랜트별 대표 수력 회로 전용 합성 시나리오 (물리 결합이 켜진 공장에서만 보인다). 진동·온도는 경험적 반응이다.
+  # 입력 펌프 두 대와 후속 펌프 (PU-D5a): CDU P-8101A·B·P-8401A, RFCC P-1101A·B·P-1303A (병렬), HOU P-2101·S2·P-2701, RHDS P-3101·S2·P-3102, VRDS P-4101·S2·P-4102 (직렬)
+  # 직렬 펌프 한 대 정지는 근거가 없어 고장 모드로 두지 않는다(사용자 결정)
+  - id: PM-IMPELLER-WEAR
+    name: 임펠러 마모
+    equip_ids: [P-8101A, P-8101B, P-8401A, P-8303A, P-2101, P-2101-S2, P-2701, P-1101A, P-1101B, P-1303A,
+                P-3101, P-3101-S2, P-3102, P-4101, P-4101-S2, P-4102]
+    physics_only: true
+    label: {kind: 공정·기계 이상, cause: 합성 임펠러 마모로 양정과 효율 감소, action: 정지 후 임펠러 점검·수리}
+    stages:
+      - id: S1
+        name: 임펠러 마모 진행
+        at_sec: 0
+        damage: true
+        hydraulic: [{parameter: impeller_wear, amount: 1, rise_sec: 300}]
+        effects:
+          - {signal: vibration, shape: ramp, z: 5, rise_sec: 300}
+          - {signal: bearing_temp, shape: ramp, z: 3, lag_sec: 30, rise_sec: 300}
+
+  # CDU 결합 회로 제품 분기 제어밸브 전용 (2026-11-24 D2-A: 다른 공장에는 밸브 설비·태그가 없어 적용하지 않는다)
+  - id: PM-DISCHARGE-VALVE-RESTRICTION
+    name: 토출 제어밸브 개도 이상
+    equip_ids: [P-8101A]
+    physics_only: true
+    label: {kind: 공정·기계 이상, cause: 합성 제어밸브 개도 저하, action: 밸브 작동과 지시 개도 확인}
+    stages:
+      - id: S1
+        name: 밸브 개도 저하
+        at_sec: 0
+        hydraulic: [{parameter: valve_restriction, amount: 1, rise_sec: 300}]
+
   - id: FN-IMPELLER-FOULING
     name: 팬 임펠러 오염·불균형
     equip_types: [FN]
@@ -283,7 +373,7 @@ fault_modes:
     # (불균형 힘 ∝ 회전수²). 배율 = min(2.0, (N / N_설계)²), N = 운전점(구성안 operating.speed_rpm) + 사건 효과. 진동 효과 크기는 설계
     # 회전수 기준으로 정하고 배율을 곱한다. 예: ×0.8 회전수 → ×0.64, ×1.05 → ×1.10. 베어링 온도도 같은 배율(불균형 하중·마찰열,
     # 사용자 확정 2026-11-23 — 처음엔 진동만이었다). 늦게 오르는 모양(S2 + 120초)은 그대로. 풍량은 키우지 않는다
-    boost: { by: speed, signals: [vibration, bearing_temp], exponent: 2, max_gain: 2.0 }
+    boost: &fn_boost { rule: I4, by: speed, signals: [vibration, bearing_temp], exponent: 2, max_gain: 2.0 }
     # 아래 expect 는 설계 회전수 기준이다. 생성 확인(2026-11-23, 팬 4대): ×0.8 이면 경보에 닿지 않고 S2 후반에야 경고, ×1.05 면 경고·경보가 3~4분 이르다
     label:
       kind: 기계 이상
@@ -294,6 +384,8 @@ fault_modes:
         name: 오염 퇴적 진행
         at_sec: 0
         damage: true
+        # 물리 결합 회로(CDU F-8201): 오염 퇴적으로 팬 압력 곡선·효율 저하 (S1 0.6 + S2 0.4 = 최대치, synthetic)
+        hydraulic: [{parameter: impeller_wear, amount: 0.6, rise_sec: 1200}]
         effects:
           - { signal: vibration, shape: ramp, to_limit: warn_hi, margin: 0.1, z: 8, rise_sec: 1200 }
           - { signal: flow, shape: ramp, z: -4, rise_sec: 1200 }
@@ -305,6 +397,7 @@ fault_modes:
         name: 불균형 심화
         at_sec: 1200
         damage: true
+        hydraulic: [{parameter: impeller_wear, amount: 0.4, rise_sec: 900}]
         effects:
           - { signal: vibration, shape: ramp, to_limit: alarm_hi, margin: 0.05, z: 15, rise_sec: 900 }
           - { signal: bearing_temp, shape: ramp, z: 10, lag_sec: 120, rise_sec: 900 }
@@ -314,6 +407,51 @@ fault_modes:
         S2: { setpoint: alarm, nelson: [1, 2], ml_plant: high }
       alarms:
         - { equip: self, count: 1, opens_in: S1, upgrades_in: S2 }
+
+  # 오염으로 줄어드는 풍량을 회전수로 보상하는 경우 (2026-11-25 D1, synthetic). 오염 진동은 FN-IMPELLER-FOULING 과 같고 회전수를 경고 한계의
+  # 80 % 까지 올린다(약 +4.7 %). 풍량은 유지되므로 움직이지 않는다. 교호작용 I4(회전수²)로 진동·베어링 온도가 커진다.
+  # 회전수 경고 한계가 있고 물리 팬 회로가 아닌 두 팬만. 팬의 다른 수준 비교는 구성안 operating.speed_rpm 으로 한다
+  - id: FN-FOULING-SPEED-UP
+    name: 팬 임펠러 오염 + 풍량 보상 회전수 상승
+    equip_ids: [F-3101, F-4101]
+    unobserved: [진동 스펙트럼(1× 회전 성분), 흡입 필터·댐퍼 상태, 회전수 설정값(SP)]
+    boost: *fn_boost
+    label:
+      kind: 기계 이상
+      cause: 임펠러 오염 불균형에 회전수 상승이 겹쳐 진동 증가
+      action: 임펠러 청소·밸런싱, 회전수 조건 확인
+    stages:
+      - id: S1
+        name: 오염 퇴적 진행 + 회전수 상승
+        at_sec: 0
+        damage: true
+        effects:
+          - { signal: vibration, shape: ramp, to_limit: warn_hi, margin: 0.1, z: 8, rise_sec: 1200 }
+      - id: S1B
+        name: 회전수 보상
+        at_sec: 1
+        effects:
+          - { signal: speed, shape: ramp, to_limit: warn_hi, margin: -0.2, rise_sec: 1200 }
+      - id: S2
+        name: 불균형 심화
+        at_sec: 1200
+        damage: true
+        effects:
+          - { signal: vibration, shape: ramp, to_limit: alarm_hi, margin: 0.05, z: 15, rise_sec: 900 }
+          - { signal: bearing_temp, shape: ramp, z: 10, lag_sec: 120, rise_sec: 900 }
+
+  # CDU F-8201 팬 회로 전용 합성 시나리오 (2026-11-24). 흡입 필터·소음기·댐퍼 저항 증가로 풍량 저하. 진동·온도 효과는 넣지 않는다.
+  - id: FN-INLET-RESTRICTION
+    name: 팬 흡입 필터·댐퍼 막힘
+    equip_ids: [F-8201]
+    physics_only: true
+    unobserved: [흡입 필터 차압, 댐퍼 개도, 가열로 과잉 공기율·연소 상태]
+    label: {kind: 공정·기계 이상, cause: 합성 흡입 필터·댐퍼 막힘으로 연소 공기 풍량 저하, action: 흡입 필터 청소·교체와 댐퍼 개도 확인}
+    stages:
+      - id: S1
+        name: 흡입 저항 증가
+        at_sec: 0
+        hydraulic: [{parameter: strainer_blockage, amount: 1, rise_sec: 600}]
 
   - id: EX-CATALYST-EROSION
     name: 팽창 터빈 촉매 미립자 부착·침식
@@ -450,6 +588,19 @@ fault_modes:
   - id: GB-LUBE-WEAR
     name: 기어박스 윤활 불량·치면 마모
     equip_types: [GB]
+    basis: 가정 기반 (치면 마모·기어 동역학을 계산하지 않는다)
+    # 교호작용 I6 (2026-11-25 D1, 수치는 synthetic): 윤활유 압력 저하와 온도 상승이 겹친 만큼 치면 마모(S2)의 진동·베어링 온도 잔차를 키운다.
+    # 배율 = 1 + 0.5 × 압력 저하 수준(6σ 에서 1) × 온도 상승 수준(8σ 에서 1). 이 모드는 둘을 함께 움직이므로 S2 에서 ×1.5 까지 커진다.
+    # 베어링 온도의 유온 추종(derive)은 키우지 않는다. 멈춘 뒤 남는 손상은 멈춘 시각의 배율을 유지하고 수리로 회복한다
+    boost:
+      rule: I6
+      signals: [vibration, bearing_temp]
+      shapes: [ramp]
+      factors:
+        - { signal: oil_pressure, direction: -1, span: 6 }
+        - { signal: oil_temp, direction: 1, span: 8 }
+      gain: 0.5
+      max_gain: 1.5
     unobserved: [기어 맞물림 주파수 진동 스펙트럼, 윤활유 금속분·입자, 윤활유 필터 차압]
     label:
       kind: 기계 이상

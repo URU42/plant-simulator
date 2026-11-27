@@ -1,0 +1,34 @@
+# synthetic assumption: RFCC P-1502A 단일 펌프 회로(가솔린 이송), 정적 계산(M1) 전용.
+# scripts/calibrate_calc_singles.py 로 생성. 정상 해는 마스터 운전점 μ 를 재현한다. 수집기 트윈은 읽지 않는다.
+# 물성·곡선·배관·경계압은 합성 설계 선택이며 현장 자료가 아니다. 탑·드럼 수력과 순환 루프는 계산하지 않는다.
+plant_id: RFCC
+unit_id: UNIT-RFCC-08
+equip_id: P-1502A
+kind: pump
+provenance: synthetic assumption
+suction_node: GR
+discharge_node: virtual:gasoline-product
+atmospheric_pa: 101325.0
+density_kg_m3: 700.0
+source_abs_pa: 314401.9326696374
+outlet_abs_pa: 567539.0
+machine:
+  reference_speed_rpm: 3560
+  speed_rpm: 3560
+  rated_flow_m3_s: 0.033282291666666665
+  shutoff_rise_pa: 800387.5
+  rated_rise_pa: 640310.0
+  efficiency: 0.7
+suction_pipe:
+  length_m: 15.0
+  diameter_m: 0.168
+  darcy_factor: 0.02
+  minor_loss_k: 2.0
+discharge_pipe:
+  length_m: 80.0
+  diameter_m: 0.13
+  darcy_factor: 0.02
+  minor_loss_k: 162.2746106459604
+max_strainer_resistance_pa_s2_m6: 85149100.0
+max_impeller_head_loss: 0.1
+max_impeller_efficiency_loss: 0.2

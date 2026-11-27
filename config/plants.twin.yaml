@@ -1,0 +1,8 @@
+# 다섯 공장 디지털 트윈 수집기 (D0 CDU → D4 HOU·RFCC·RHDS·VRDS, 조작 시계·물리 회로 묶음).
+# SIMULATION_CONTROL=1 과 INGEST_TOKEN 이 필요하다. DB 는 컨테이너 볼륨(data/). 공장마다 시계·사건·DB 가 따로다.
+plants:
+  - { key: cdu, plant: config/plant_cdu.yaml, runtime: config/runtime_cdu_twin.yaml, db: data/cdu-twin.db }
+  - { key: hou, plant: config/plant_hou.yaml, runtime: config/runtime_hou_twin.yaml, db: data/hou-twin.db }
+  - { key: rfcc, plant: config/plant_rfcc.yaml, runtime: config/runtime_rfcc_twin.yaml, db: data/rfcc-twin.db }
+  - { key: rhds, plant: config/plant_rhds.yaml, runtime: config/runtime_rhds_twin.yaml, db: data/rhds-twin.db }
+  - { key: vrds, plant: config/plant_vrds.yaml, runtime: config/runtime_vrds_twin.yaml, db: data/vrds-twin.db }

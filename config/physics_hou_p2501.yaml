@@ -1,0 +1,35 @@
+# synthetic assumption: HOU P-2501 단일 펌프 회로(압축기 윤활유), 정적 계산(M1) 전용.
+# scripts/calibrate_calc_singles.py 로 생성. 정상 해는 마스터 운전점 μ 를 재현한다. 수집기 트윈은 읽지 않는다.
+# 물성·곡선·배관·경계압은 합성 설계 선택이며 현장 자료가 아니다. 탑·드럼 수력과 순환 루프는 계산하지 않는다.
+#   흡입압 태그 없음: 흡입 경계 게이지압 0.3 은 가정값
+plant_id: HOU
+unit_id: UNIT-HOU-05
+equip_id: P-2501
+kind: pump
+provenance: synthetic assumption
+suction_node: virtual:lube-oil-reservoir
+discharge_node: virtual:bearing-header
+atmospheric_pa: 101325.0
+density_kg_m3: 870.0
+source_abs_pa: 135692.66714269086
+outlet_abs_pa: 440282.0506000001
+machine:
+  reference_speed_rpm: 3560
+  speed_rpm: 3560
+  rated_flow_m3_s: 0.011575
+  shutoff_rise_pa: 967303.4393750002
+  rated_rise_pa: 773842.7515000001
+  efficiency: 0.7
+suction_pipe:
+  length_m: 15.0
+  diameter_m: 0.099
+  darcy_factor: 0.02
+  minor_loss_k: 2.0
+discharge_pipe:
+  length_m: 80.0
+  diameter_m: 0.077
+  darcy_factor: 0.02
+  minor_loss_k: 151.96971334915924
+max_strainer_resistance_pa_s2_m6: 303833000.0
+max_impeller_head_loss: 0.1
+max_impeller_efficiency_loss: 0.2

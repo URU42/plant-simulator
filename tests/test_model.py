@@ -169,15 +169,18 @@ def test_rfcc_driven_speed_equal(rfcc):
     assert s[("B-1201", "SI-B-1201")] == s[("E-1202", "SI-E-1202")] and s[("C-1401", "SI-C-1401")] == s[("T-1401", "SI-T-1401")]
 
 
-@pytest.mark.parametrize("key", ["rhds", "vrds"])
+@pytest.mark.parametrize("key", ["rhds", "vrds", "hou"])
 def test_compressor_speed_follows_motor(config_dir, key):
     """직결 전동기는 압축기와 같은 값, M-3101 → GB-3101 → C-3101 연쇄는 기어비(9210.1/1790)만큼 반올림 오차 안에서 같다."""
     plant, rt = load_plant(config_dir / f"plant_{key}.yaml"), load_runtime(config_dir / f"runtime_{key}.yaml")
     s = PlantGenerator(plant, rt).generate(T0, T0 + timedelta(hours=1))
     def speed(eq):
         return [x.value for x in s if x.equip_id == eq and plant.tag_by_key()[(eq, x.tag_id)].signal == "speed"]
-    if key == "vrds":
-        assert speed("M-4102") == speed("C-4102")
+    if key != "rhds":
+        direct = {"vrds": ("M-4102", "C-4102"), "hou": ("M-2201", "C-2201")}[key]
+        motor, gear, comp, ratio = {"vrds": ("M-4101", "GB-4101", "C-4101", 9203.6 / 1790), "hou": ("M-2301", "GB-2301", "C-2301", 5285.1 / 1790)}[key]
+        assert speed(direct[0]) == speed(direct[1]) and speed(gear) == speed(comp)
+        assert max(abs(c - m * ratio) for m, c in zip(speed(motor), speed(comp))) <= 0.05 * ratio + 0.05 + 1e-9
         return
     assert speed("M-3102") == speed("C-3102") and speed("GB-3101") == speed("C-3101")
     assert max(abs(c - m * 9210.1 / 1790) for m, c in zip(speed("M-3101"), speed("C-3101"))) <= 0.05 + 1e-9
@@ -215,7 +218,7 @@ def test_each_mode_changes_only_its_planned_tags(config_dir, modes, mode_id):
     end = T0 + timedelta(minutes=3)
     base, hit = by_tag(PlantGenerator(plant, rt).generate(T0, end)), by_tag(PlantGenerator(plant, rt, Fixed([ev])).generate(T0, end))
     changed = {k for k in base if base[k] != hit[k]}
-    planned = set(plan(plant, modes[mode_id], target, plant.control_by_key()))
+    planned = set(PlantGenerator(plant, rt).physics.tag_plan(modes[mode_id], target))      # 회로가 계산하는 사건이면 회로의 물리 태그 전부
     driven_speed = {k for k in base if plant.tag_by_key()[k].signal == "speed"}
     assert changed and changed <= planned | driven_speed, (mode_id, changed - planned)
 

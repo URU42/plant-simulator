@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL);
 
 -- 시설 계층 (구성안에서 적재)
 CREATE TABLE IF NOT EXISTS plant (plant_id TEXT PRIMARY KEY, name TEXT NOT NULL, config_version INTEGER NOT NULL);
+-- 구성안 버전이 바뀐 시각. 한계·μ·σ 가 바뀐 태그의 이력은 이 시각 앞뒤로 나눠 본다 (이력은 지우지 않는다)
+CREATE TABLE IF NOT EXISTS plant_config_change (plant_id TEXT NOT NULL, config_version INTEGER NOT NULL, applied_at TEXT NOT NULL, PRIMARY KEY (plant_id, config_version));
 CREATE TABLE IF NOT EXISTS unit_group (unit_group_id TEXT PRIMARY KEY, plant_id TEXT NOT NULL, name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS unit (unit_id TEXT PRIMARY KEY, unit_group_id TEXT NOT NULL, name TEXT NOT NULL);
 
