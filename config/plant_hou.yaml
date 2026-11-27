@@ -11,7 +11,7 @@
 plant:
   plant_id: PL-HOU
   name: "HOU (수첨분해)"
-  config_version: 6                 # 2026-11-26 압축기 구동기 추가. 2026-11-25 PU-D5a: P-2101-S2 추가 (직렬 2단), 바뀐 μ·σ·한계는 limit_basis
+  config_version: 7                 # 2026-11-27 추가 계측(스트레이너·회전수·밸브 개도·이중화 토출·헤더 유량) 반영. 2026-11-26 압축기 구동기 추가. 2026-11-25 PU-D5a: P-2101-S2 추가 (직렬 2단), 바뀐 μ·σ·한계는 limit_basis
   unit_groups:
     - id: UG-HOU-01
       name: "원료 공급"

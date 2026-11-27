@@ -119,7 +119,7 @@ def test_existing_history_survives_and_switch_time_is_kept(config_dir, tmp_path)
         seed_master(storage, new)
         assert storage.count("ts_raw") == 1 and storage.count("equipment") == len(new.equipment)
         rows = storage.query_dicts("SELECT config_version, applied_at FROM plant_config_change ORDER BY config_version")
-        assert [r["config_version"] for r in rows] == [8, 9]
+        assert [r["config_version"] for r in rows] == [8, new.plant.config_version]   # 현재 RFCC 구성 버전(2026-11-27 10)
         values = storage.recent_values(5)
         storage.close()
     # 옛 μ 로 쌓인 마지막 값에서 이어도 새 값은 새 μ 둘레에서 바로 시작한다

@@ -11,7 +11,7 @@
 plant:
   plant_id: PL-CDU
   name: "CDU (상압증류)"
-  config_version: 4                 # 2026-11-25 PU-D5a: P-8101B 추가 (병렬)
+  config_version: 5                 # 2026-11-27 추가 계측(스트레이너·회전수·밸브 개도·이중화 토출·헤더 유량) 반영. 2026-11-25 PU-D5a: P-8101B 추가 (병렬)
   unit_groups:
     - id: UG-CDU-01
       name: "원유 전처리"

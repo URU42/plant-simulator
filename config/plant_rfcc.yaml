@@ -18,7 +18,7 @@
 plant:
   plant_id: PL-RFCC
   name: "RFCC(중질유 유동상 촉매 분해)"
-  config_version: 9                 # 2026-11-25 PU-D5a: P-1101B 추가 (병렬), 바뀐 μ·σ·한계는 limit_basis (8: 2026-11-23 공학 기준 한계값)
+  config_version: 10                # 2026-11-27 추가 계측(스트레이너·회전수·밸브 개도·이중화 토출·헤더 유량) 반영. 2026-11-25 PU-D5a: P-1101B 추가 (병렬), 바뀐 μ·σ·한계는 limit_basis (8: 2026-11-23 공학 기준 한계값)
   unit_groups:
     - id: UG-RFCC-01
       name: 원료 공급
