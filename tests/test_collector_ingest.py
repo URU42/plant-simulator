@@ -31,11 +31,11 @@ def _post(client, batch: IngestBatch, **overrides):
 
 def test_master_is_seeded_from_plant_config(client):
     storage = client.app.state.plants["plant"].storage
-    assert storage.count("equipment") == 9
-    assert storage.count("equipment_tag") == 58
+    assert storage.count("equipment") == 10
+    assert storage.count("equipment_tag") == 77
     assert storage.count("unit") == 6
     assert storage.count("equipment_type") == 5
-    assert storage.count("tag_std") == 16
+    assert storage.count("tag_std") == 20      # 2026-11-27 스트레이너 차압·앞 압력, 제어밸브 개도·이중화 토출 압력 신호 추가(이 시험 공장에는 헤더 유량계가 없음)
     row = storage.query_dicts("SELECT * FROM equipment_tag WHERE equip_id = 'P-3101' AND tag_id = 'VI-A-P3101'")[0]
     assert (row["control_mean"], row["control_sigma"]) == (1.65, 0.04614035877985053)
     assert (row["warn_hi"], row["alarm_hi"], row["trip_hi"], row["interval_sec"], row["decimals"]) == (4.5, 7.1, 11, 1, 3)

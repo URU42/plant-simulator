@@ -1,0 +1,23 @@
+# 정적 계산(M1/M2 시뮬레이션 화면) 전용 고장 모드 — synthetic 가정, 공정·설비 담당 검토 전.
+# 수집기 트윈·AE 학습·평가 데이터는 config/fault_modes.yaml 만 읽고 이 파일은 읽지 않는다(실시간 데이터·AE 기준 불변).
+# 형식은 fault_modes.yaml 과 같다. 물리 파라미터가 있는 설비에만 둔다.
+
+fault_modes:
+  # 결합 회로 입력 펌프의 자체 토출 차단밸브(정상 개도 1). 제품 제어밸브(PM-DISCHARGE-VALVE-RESTRICTION)와 다른 밸브다.
+  # 개도 = 1 − 크기 × 0.99 (static_calc.BLOCK_VALVE_MIN). 차단밸브는 거의 닫혀야 유량이 준다(개도 0.1 에서 0.1~2.6 %).
+  #   S1 = 개도 0.1(운전값 '토출 차단밸브 개도'의 검증 하한), S2 = 개도 0.01(검증 밖 외삽, 결과에 extrapolated 가정).
+  # 정적 계산이 펌프 상태로 직접 옮긴다(static_calc._physical).
+  - id: PM-DISCHARGE-BLOCK-VALVE
+    name: 토출 차단밸브 부분 닫힘(고착)
+    equip_ids: [P-8101A, P-8101B, P-2101, P-2101-S2, P-1101A, P-1101B, P-3101, P-3101-S2, P-4101, P-4101-S2]
+    physics_only: true
+    label: {kind: 공정·기계 이상, cause: 합성 토출 차단밸브 부분 닫힘·고착, action: "밸브 개도 현장 확인, 구동부·스템 점검"}
+    stages:
+      - id: S1
+        name: 개도 10 %로 저하
+        at_sec: 0
+        hydraulic: [{parameter: discharge_valve_restriction, amount: 0.909091, rise_sec: 300}]
+      - id: S2
+        name: 거의 닫힘(개도 1 %, 검증 밖 외삽)
+        at_sec: 600
+        hydraulic: [{parameter: discharge_valve_restriction, amount: 0.090909, rise_sec: 300}]

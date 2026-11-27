@@ -1,0 +1,22 @@
+# D4 VRDS 디지털 트윈 실행 설정 (runtime_vrds.yaml + 물리 회로 묶음). Compose 트윈 오버레이가 쓴다. 비밀값 없음.
+# VRDS 구성안 실행 설정 (다중 공장 설계 §4.5). runtime_rfcc.yaml 과 같고 source_id · seed · collector_url 만 다르다.
+units: [all]
+source_id: SIM-VRDS
+sample_interval_sec: 1       # 값 생성 주기. 온도 태그는 구성안의 interval_sec(10)을 따른다
+send_interval_sec: 1         # 묶어서 보내는 주기. 화면이 1초마다 갱신된다
+time_mode: live              # backfill / live / accelerated
+speed: 60
+backfill_days: 1             # 원시값을 하루까지 되돌아본다
+seed: 20261111               # RHDS 와 구조가 같아 쌍둥이 값이 되지 않도록 하나 올린다
+collector_url: http://localhost:8000/vrds   # 수집 서버의 공장 접두어까지
+raw_retention_days: 1        # 10분마다 이보다 오래된 원시값을 지운다
+quiet_normal: true           # 정상 잡음을 Nelson 규칙 1~3 위반 없이 고른다. false = 거르지 않음(ML 학습·오탐률 평가용)
+# 계측 이상 층 (2026-11-19, synthetic 빈도·크기). 정상 운전에 섞이는 튐·고착·송신 누락. 정답지에 코드 2(계측 이상)로 남는다.
+# 보내는 측정값만 바꾸고 공정 값은 그대로다. 같은 seed 면 같은 일정. enabled: true 로 켠다.
+instrument_faults:
+  enabled: false
+  spike: { per_tag_per_day: 1.0, z_min: 4, z_max: 8 }               # 태그당 하루 평균 1회, 표본 하나가 4~8σ 튐
+  stuck: { per_equipment_per_week: 1.0, min_sec: 300, max_sec: 1800 }   # 설비당 주 1회, 태그 하나가 5~30분 고정
+  dropout: { per_plant_per_day: 3, min_sec: 10, max_sec: 300 }       # 공장당 하루 3회, 설비 하나의 모든 태그가 10초~5분 빠짐
+# physics: physics_vrds_twin.yaml  # 물리 결합(대표 수력 회로 + 설비별 제외 사유)을 켜려면 주석을 해제한다.
+physics: physics_vrds_twin.yaml   # D4 트윈: 결합 회로(입력·후속 펌프, NPSH)

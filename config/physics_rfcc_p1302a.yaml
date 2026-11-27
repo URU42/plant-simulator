@@ -1,0 +1,34 @@
+# synthetic assumption: RFCC P-1302A 단일 펌프 회로(LCO 펌프어라운드), 정적 계산(M1) 전용.
+# scripts/calibrate_calc_singles.py 로 생성. 정상 해는 마스터 운전점 μ 를 재현한다. 수집기 트윈은 읽지 않는다.
+# 물성·곡선·배관·경계압은 합성 설계 선택이며 현장 자료가 아니다. 탑·드럼 수력과 순환 루프는 계산하지 않는다.
+plant_id: RFCC
+unit_id: UNIT-RFCC-04
+equip_id: P-1302A
+kind: pump
+provenance: synthetic assumption
+suction_node: FR
+discharge_node: FR
+atmospheric_pa: 101325.0
+density_kg_m3: 860.0
+source_abs_pa: 404447.41104679223
+outlet_abs_pa: 661393.0
+machine:
+  reference_speed_rpm: 3560
+  speed_rpm: 3560
+  rated_flow_m3_s: 0.06660375
+  shutoff_rise_pa: 812775.0
+  rated_rise_pa: 650220.0
+  efficiency: 0.7
+suction_pipe:
+  length_m: 15.0
+  diameter_m: 0.238
+  darcy_factor: 0.02
+  minor_loss_k: 2.0
+discharge_pipe:
+  length_m: 80.0
+  diameter_m: 0.184
+  darcy_factor: 0.02
+  minor_loss_k: 135.9138427708268
+max_strainer_resistance_pa_s2_m6: 27351800.0
+max_impeller_head_loss: 0.1
+max_impeller_efficiency_loss: 0.2

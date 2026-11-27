@@ -41,7 +41,7 @@ def test_messages_per_second_with_ten_second_tags_only_on_their_second(rfcc_plan
     ctx.close()
     assert [a[0] for a in fake.added] == ["plant-sim:data:rfcc"] * 3
     msgs = [a[1] for a in fake.added]
-    assert all(set(m) == {"plant", "plant_id", "ts", "samples"} and m["plant"] == "rfcc" and m["plant_id"] == "PL-RFCC" for m in msgs)
+    assert all(set(m) == {"plant", "plant_id", "ts", "samples"} and m["plant"] == "rfcc" and m["plant_id"] == "RFCC" for m in msgs)
     assert [len(m["samples"]) for m in msgs] == [2, 1, 1] and [m["ts"] for m in msgs] == sorted(m["ts"] for m in msgs)
     assert set(msgs[0]["samples"][0]) == {"equip_id", "tag_id", "ts", "value"}
     assert all(a[2] == MAXLEN == 1800 and a[3] for a in fake.added)       # 초당 1건 × 30분, 대략 자르기
@@ -63,3 +63,15 @@ def test_redis_down_does_not_raise():
     s = DataStream(redis.Redis.from_url("redis://127.0.0.1:1", socket_timeout=0.2, socket_connect_timeout=0.2), "cdu")
     s.send([{"plant": "cdu", "ts": datetime.now(timezone.utc).isoformat(), "samples": []}])
     s.close()
+
+
+def test_controlled_simulation_never_publishes(config_dir):
+    """조작 시뮬레이션(일부러 낸 고장)은 REDIS_URL 이 있어도 AE 입력 Stream 으로 나가지 않는다. 그 밖의 공장은 그대로 보낸다."""
+    from collector.plant_context import PlantContext
+    from collector.plants import PlantEntry
+    for runtime, control, sends in (("runtime_rhds_twin.yaml", True, False), ("runtime_rhds_twin.yaml", False, True),
+                                    ("runtime_rhds.yaml", True, True)):
+        ctx = PlantContext.open(PlantEntry(key="rhds", plant=str(config_dir / "plant_rhds.yaml"), runtime=str(config_dir / runtime),
+                                           db=":memory:"), {}, "redis://127.0.0.1:1", simulation_control=control)
+        assert (ctx.data_stream is not None) == sends, (runtime, control)
+        ctx.close()

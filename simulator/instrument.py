@@ -4,6 +4,8 @@
 - spike: 한 태그의 표본 하나가 z_min~z_max σ 튄다 (부호 무작위)
 - stuck: 한 태그가 시작 직전에 보낸 값으로 고정된다
 - dropout: 한 설비의 모든 태그를 보내지 않는다 (표본이 없다)
+- bias·drift: 한 태그에 일정한 편향(z σ) 또는 0 → z σ 로 선형 증가하는 편향을 더한다. 평가 배치에서 직접 넣을 때만 쓰며
+  일과 일정(_make)은 만들지 않는다(2026-11-27, D13 계측 이상 평가 보강).
 일정은 (seed, plant_id, KST 날짜)로만 정해진다. 같은 시드면 같고, Unit 을 나눠 돌려도, 수집 서버가 정답지를 만들 때도 같은 일정이 나온다.
 빈도·크기는 synthetic 가정이며 실행 설정(instrument_faults)에서 바꾼다.
 """
@@ -26,18 +28,20 @@ LABEL = {
     "spike": ("IM-SPIKE", "계측값 순간 튐 (노이즈·전송 오류 후보)", "계측기·배선·전송 상태 확인. 설비 점검 대상 아님"),
     "stuck": ("IM-STUCK", "계측값 고착 (계측기 고장·통신 정지 후보)", "계측기·통신 상태 확인. 설비 점검 대상 아님"),
     "dropout": ("IM-DROPOUT", "설비 계측값 송신 누락 (I/O·통신 장애 후보)", "통신·I/O 상태 확인. 설비 점검 대상 아님"),
+    "bias": ("IM-BIAS", "계측값 일정 편향 (영점·교정 이상 후보)", "계측기 교정 확인. 설비 점검 대상 아님"),
+    "drift": ("IM-DRIFT", "계측값 서서히 벗어남 (계측기 드리프트 후보)", "계측기 교정 확인. 설비 점검 대상 아님"),
 }
 
 
 @dataclass(frozen=True)
 class InstrumentEvent:
     event_id: str
-    kind: str                   # spike / stuck / dropout
+    kind: str                   # spike / stuck / dropout / bias / drift
     equip_id: str
     tag_ids: tuple[str, ...]
     start: int                  # epoch 초, [start, end)
     end: int
-    z: float = 0.0              # spike 크기 (σ 배수, 부호 포함)
+    z: float = 0.0              # spike·bias 크기, drift 끝 크기 (σ 배수, 부호 포함)
 
 
 class InstrumentSchedule:
@@ -61,7 +65,8 @@ class InstrumentSchedule:
 
     def _make(self, day: int) -> list[InstrumentEvent]:
         cfg, plant_id = self.cfg, self.plant.plant.plant_id
-        rng = np.random.default_rng([self.seed, zlib.crc32(plant_id.encode()), day, 2])
+        # 시드는 옛 plant_id(PL-RHDS)로 계산: 2026-11-27 에 접두사를 뗐지만 저장된 원시값·정답지와 같은 일정을 유지한다
+        rng = np.random.default_rng([self.seed, zlib.crc32(f"PL-{plant_id}".encode()), day, 2])
         day0 = int(datetime.combine(date.fromordinal(day), datetime.min.time(), KST).timestamp())
         raw: list[tuple[str, str, tuple[str, ...], int, int, float]] = []
 

@@ -63,3 +63,43 @@ class SimClock:
         remaining = (t - self.now()).total_seconds()
         if remaining > 0:
             await asyncio.sleep(remaining / self._speed)
+
+
+class ControlledClock(SimClock):
+    """생성 창 사이의 시간을 보존하는 시연 전용 시계."""
+
+    def __init__(self, anchor: datetime) -> None:
+        super().__init__("accelerated", anchor)
+        self.phase = "ready"
+        self.changed = asyncio.Event()
+
+    def now(self) -> datetime:
+        return super().now() if self.phase == "running" else self._anchor
+
+    @property
+    def rate(self) -> float:
+        return self._speed
+
+    def update(self, phase: str | None = None, rate: float | None = None) -> None:
+        self._anchor = self.now()
+        self._wall_anchor = time.monotonic()
+        if phase is not None:
+            self.phase = phase
+        if rate is not None:
+            self._speed = rate
+        previous, self.changed = self.changed, asyncio.Event()
+        previous.set()
+
+    async def sleep_until(self, t: datetime) -> None:
+        while True:
+            event = self.changed
+            if self.phase != "running":
+                await event.wait()
+                continue
+            remaining = (t - self.now()).total_seconds()
+            if remaining <= 0:
+                return
+            try:
+                await asyncio.wait_for(event.wait(), remaining / self._speed)
+            except TimeoutError:
+                continue

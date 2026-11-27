@@ -16,16 +16,17 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Literal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
-from collector.anomaly_book import Busy, NotApplicable
+from collector.twin_catalog import build_catalog, injectable
+from collector.anomaly_book import Busy, CircuitBusy, NotApplicable
 from collector.ingest import RawBatch, schema_supported, validate_samples
 from collector.plant_context import PlantContext
 from collector.plants import PlantEntry, PlantsConfig, load_plants
@@ -33,6 +34,7 @@ from collector.settings import Settings
 from collector.stream import QUEUE_SIZE
 from common.config_models import ConfigError
 from simulator.fault import load_fault_modes
+from common.sim_clock import ControlledClock, KST, align_down
 from common.timefmt import from_db, parse_iso, to_db
 
 STATIC_DIR = Path(__file__).with_name("static")     # 디버깅 화면
@@ -188,7 +190,7 @@ def fault_modes(ctx: PlantContext = Depends(context)):
     for mode in ctx.book.modes.values():
         equip_ids = [e.equip_id for e in ctx.plant.equipment if mode in ctx.book.applicable(e.equip_id)]
         if equip_ids:
-            out.append({"mode": mode.id, "name": mode.name, "equip_ids": equip_ids, "unobserved": mode.unobserved,
+            out.append({"mode": mode.id, "name": mode.name, "equip_ids": equip_ids, "unobserved": mode.unobserved, "basis": mode.basis,
                         "stages": [{"id": s.id, "name": s.name, "at_sec": s.at_sec, "damage": s.damage} for s in mode.stages]})
     return out
 
@@ -206,6 +208,8 @@ async def inject_anomaly(request: Request, ctx: PlantContext = Depends(context))
     _require_equipment(ctx, body.equip_id)
     try:
         event = await asyncio.to_thread(lambda: ctx.book.inject(body.equip_id, body.mode, event_time(ctx), body.speed))
+    except CircuitBusy as e:
+        raise HTTPException(409, f"hydraulic circuit busy ({e}): one physics scenario per circuit until it recovers")
     except Busy:
         raise HTTPException(409, f"{body.equip_id} has a live fault: stop it first")
     except NotApplicable as e:
@@ -245,41 +249,179 @@ async def repair_anomaly(equip_id: str, request: Request, ctx: PlantContext = De
     return {"repaired": repaired, "repair_requested_at": _utc(at)}
 
 
+def _require_physics_operator_token(request: Request, ctx: PlantContext) -> None:
+    if not ctx.runtime.twin:
+        return
+    token = request.app.state.settings.ingest_token
+    if not token or not hmac.compare_digest(request.headers.get("X-Ingest-Token", ""), token):
+        raise HTTPException(403, "physics scenario records require the operator token")
+
+
 @router.get("/anomalies/damaged")
-def damaged_anomalies(ctx: PlantContext = Depends(context)):
+def damaged_anomalies(request: Request, ctx: PlantContext = Depends(context)):
     """멈췄지만 손상이 남아 아직 안 고친 사건 (화면의 수리 버튼용). 정답 분류는 싣지 않는다."""
+    _require_physics_operator_token(request, ctx)
     return [{"event_id": e.event_id, "equip_id": e.equip_id, "mode": e.mode.id, "start_at": _utc(e.start), "stop_requested_at": _utc(e.stop)}
             for e in ctx.book.damaged()]
 
 
 @router.get("/anomalies/active")
-def active_anomalies(ctx: PlantContext = Depends(context)):
+def active_anomalies(request: Request, ctx: PlantContext = Depends(context)):
     """안 멈춘 고장 모드 사건: event_id·설비·모드·시작. 정답 분류는 싣지 않는다 (화면의 적용/해제 상태용)."""
+    _require_physics_operator_token(request, ctx)
     return [{"event_id": e.event_id, "equip_id": e.equip_id, "mode": e.mode.id, "speed": e.speed, "start_at": _utc(e.start)}
             for e in ctx.book.active()]
 
 
 @router.get("/anomalies")
-def answer_key(equip_id: str | None = None, from_: str | None = Query(default=None, alias="from"), to: str | None = None,
+def answer_key(request: Request, equip_id: str | None = None, from_: str | None = Query(default=None, alias="from"), to: str | None = None,
                ctx: PlantContext = Depends(context)):
-    """정답지: 사건마다 고장 모드·분류·기대값·단계와 태그별 효과 시작·시작·멈춤·끝(멈춤 + 회복). from/to 는 구간과 겹치는 사건."""
+    """정답지(X-Eval-Token 필요): 사건마다 고장 모드·분류·기대값·단계와 태그별 효과 시작·시작·멈춤·끝(멈춤 + 회복). from/to 는 구간과 겹치는 사건."""
+    token = request.app.state.settings.eval_token
+    if not token or not hmac.compare_digest(request.headers.get("X-Eval-Token", "").encode(), token.encode()):
+        raise HTTPException(403, "answer key requires X-Eval-Token (EVAL_TOKEN)")
     return ctx.book.answer_key(equip_id, query_time("from", from_) if from_ else None, query_time("to", to) if to else None)
+
+
+class SimulationAction(BaseModel):
+    model_config = {"extra": "forbid"}
+    command_id: str = Field(min_length=1, max_length=64)
+    action: Literal["start", "pause", "resume", "speed", "normal", "inject", "stop", "repair"]
+    rate: Literal[1, 5, 10, 30, 60] | None = None
+    mode: str | None = Field(default=None, max_length=80)
+    equip_id: str | None = Field(default=None, max_length=80)
+    scenario_speed: Literal[1, 3, 5, 10] = 1
+
+
+def _simulation_state(ctx: PlantContext) -> dict:
+    clock = ctx.simulation_clock
+    if clock is None:
+        raise HTTPException(404, "simulation control disabled")
+    if ctx.simulator_error:
+        raise HTTPException(503, "simulator unavailable")
+    return {"phase": clock.phase, "rate": clock.rate, "sim_time": _utc(clock.now().timestamp())}
+
+
+@router.get("/simulation")
+def simulation_state(ctx: PlantContext = Depends(context)):
+    return _simulation_state(ctx)
+
+
+@router.get("/simulation/catalog")
+def simulation_catalog(request: Request, ctx: PlantContext = Depends(context)):
+    """설비별 트윈 조작 지원 범위와 조작 상태. 운영자 토큰 필요. 정답 분류·기대값은 싣지 않는다."""
+    require_ingest_token(request)
+    state = _simulation_state(ctx)
+    return {"sim_time": state["sim_time"],
+            **build_catalog(ctx.plant, ctx.book, ctx.book.physics, from_db(state["sim_time"]).timestamp())}
+
+
+@router.get("/simulation/observations")
+def simulation_observations(request: Request, equip_id: str | None = None,
+                            from_: str | None = Query(default=None, alias="from"), to: str | None = None,
+                            ctx: PlantContext = Depends(context)):
+    """관측 전용 원시 표본. 종료 시각은 현재 시뮬레이션 시각으로 제한한다."""
+    require_ingest_token(request)
+    _simulation_state(ctx)
+    if equip_id is not None:
+        _require_equipment(ctx, equip_id)
+    now = from_db(_simulation_state(ctx)["sim_time"])
+    end = min(from_db(query_time("to", to)), now) if to is not None else now
+    start = from_db(query_time("from", from_)) if from_ is not None else end - timedelta(seconds=30)
+    if not timedelta(0) <= end - start <= timedelta(minutes=5):
+        raise HTTPException(422, "observation range must be within five minutes and end at or before simulation time")
+    condition = " AND equip_id = ?" if equip_id is not None else ""
+    params = (to_db(start), to_db(end)) if equip_id is None else (to_db(start), to_db(end), equip_id)
+    return ctx.storage.query_dicts(
+        "SELECT equip_id, tag_id, ts, value, received_at FROM ts_raw "
+        "WHERE ts >= ? AND ts <= ? AND value IS NOT NULL" + condition + " ORDER BY ts, equip_id, tag_id", params,
+    )
+
+
+@router.post("/simulation/control")
+async def simulation_control(body: SimulationAction, request: Request, ctx: PlantContext = Depends(context)):
+    require_ingest_token(request)
+    _simulation_state(ctx)
+    clock = ctx.simulation_clock
+    assert clock is not None
+    async with ctx.control_lock:
+        previous = ctx.control_receipts.get(body.command_id)
+        if previous is not None:
+            payload, state = previous
+            if payload != body:
+                raise HTTPException(409, "command_id already used for another command")
+            return state
+        if body.action in ("start", "resume"):
+            clock.update(phase="running")
+        elif body.action == "pause":
+            if clock.phase == "ready":
+                raise HTTPException(409, "simulation has not started")
+            clock.update(phase="paused")
+        elif body.action == "speed":
+            if body.rate is None:
+                raise HTTPException(422, "rate required")
+            clock.update(rate=body.rate)
+        elif body.action == "normal":
+            at = clock.now().timestamp() + START_DELAY_SEC
+
+            def restore():
+                ctx.book.stop(None, at)
+                for equip_id in {event.equip_id for event in ctx.book.damaged()}:
+                    ctx.book.repair(equip_id, at)
+
+            await asyncio.to_thread(restore)
+        elif body.action in ("stop", "repair"):
+            if not body.equip_id:
+                raise HTTPException(422, "equipment required")
+            _require_equipment(ctx, body.equip_id)
+            operation = ctx.book.stop if body.action == "stop" else ctx.book.repair
+            _, changed = await asyncio.to_thread(operation, body.equip_id, clock.now().timestamp() + START_DELAY_SEC)
+            if not changed:
+                # 멈추거나 고칠 사건이 없는 요청을 성공으로 돌려주지 않는다.
+                raise HTTPException(409, f"no {'active scenario' if body.action == 'stop' else 'damage to repair'} on {body.equip_id}")
+        elif body.action == "inject":
+            if clock.phase != "running":
+                raise HTTPException(409, "simulation must be running")
+            if not body.equip_id or not body.mode:
+                raise HTTPException(422, "equipment and mode required")
+            _require_equipment(ctx, body.equip_id)
+            now = clock.now().timestamp()
+            catalog = await asyncio.to_thread(build_catalog, ctx.plant, ctx.book, ctx.book.physics, now)
+            status, reason = injectable(catalog, body.equip_id, body.mode)
+            if status != 200:
+                raise HTTPException(status, reason)
+            try:
+                await asyncio.to_thread(ctx.book.inject, body.equip_id, body.mode,
+                                        now + START_DELAY_SEC, body.scenario_speed)
+            except CircuitBusy as exc:
+                raise HTTPException(409, f"hydraulic circuit busy: {exc}") from exc
+            except Busy as exc:
+                raise HTTPException(409, "equipment already has an active scenario") from exc
+            except NotApplicable as exc:
+                raise HTTPException(422, str(exc)) from exc
+        state = _simulation_state(ctx)
+        ctx.control_receipts[body.command_id] = (body, state)
+        if len(ctx.control_receipts) > 1024:
+            ctx.control_receipts.pop(next(iter(ctx.control_receipts)))
+        return state
 
 
 @router.get("/stream")
 async def stream(ctx: PlantContext = Depends(context)):
-    return StreamingResponse(ctx.broadcaster.subscribe(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+    return StreamingResponse(ctx.broadcaster.subscribe(heartbeat=10), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
 # --- 앱 ----------------------------------------------------------------------
 def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
+    if settings.eval_token and settings.eval_token == settings.ingest_token:
+        raise ConfigError("EVAL_TOKEN must differ from INGEST_TOKEN: operators must not be able to read the answer key")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         modes = load_fault_modes(plants.fault_modes)
         app.state.plants = {entry.key: PlantContext.open(entry, modes, settings.redis_url, settings.reset_db_on_schema_change,
-                                                         settings.profile)
+                                                         settings.profile, settings.simulation_control)
                             for entry in plants.plants}
         app.state.started_at = to_db(datetime.now(timezone.utc))
         tasks: list[asyncio.Task] = []
@@ -290,6 +432,13 @@ def create_app(plants: PlantsConfig, settings: Settings | None = None) -> FastAP
             limiter = asyncio.Semaphore(EMBEDDED_CONCURRENCY)
             for entry in plants.plants:
                 ctx = app.state.plants[entry.key]
+                # 트윈 실행 설정인 공장마다 조작 시계를 둔다 (D0 CDU → D4 HOU·RFCC·RHDS·VRDS).
+                if settings.simulation_control and ctx.runtime.twin:
+                    stored = ctx.storage.sim_now()
+                    anchor = align_down(datetime.now(KST), ctx.runtime.send_interval_sec)
+                    if stored:
+                        anchor = max(anchor, from_db(stored).astimezone(KST) + timedelta(seconds=ctx.runtime.sample_interval_sec))
+                    ctx.simulation_clock = ControlledClock(anchor)
                 task = asyncio.create_task(run_plant_simulator(ctx, entry, settings, limiter), name=f"sim-{entry.key}")
                 task.add_done_callback(lambda t, ctx=ctx: _simulator_done(t, ctx))
                 tasks.append(task)
@@ -428,6 +577,9 @@ def _parse_args(argv=None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+GRACEFUL_SHUTDOWN_SEC = 5
+
+
 def main(argv=None) -> None:
     import uvicorn
 
@@ -440,7 +592,10 @@ def main(argv=None) -> None:
         check_plants(plants, settings.reset_db_on_schema_change, settings.profile)
     except ConfigError as e:
         sys.exit(f"error: {e}")
-    uvicorn.run(create_app(plants, settings), host=args.host, port=args.port, root_path=settings.root_path)
+    # SSE 구독(10초 heartbeat)은 스스로 끝나지 않는다. 시간 제한 없이 연결 종료를 기다리면 포트만 놓고 프로세스가 남아
+    # 내장 생성기가 같은 DB 에 계속 쓴다(D4 재시작 검사에서 확인). 제한 시간 뒤 연결을 끊고 lifespan 종료로 생성기를 멈춘다.
+    uvicorn.run(create_app(plants, settings), host=args.host, port=args.port, root_path=settings.root_path,
+                timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SEC)
 
 
 if __name__ == "__main__":

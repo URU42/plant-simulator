@@ -63,17 +63,17 @@ Nov 8, 2026 · @xxhigh
 
 | 키(경로) | plant_id | 공장 | 설비 · 태그 |
 | --- | --- | --- | --- |
-| `/rfcc/` | `PL-RFCC` | RFCC(중질유 유동상 촉매 분해) | 12 · 81 |
-| `/cdu/` | `PL-CDU` | 상압증류 | 7 · 46 |
-| `/hou/` | `PL-HOU` | 수첨분해 | 7 · 61 |
-| `/rhds/` | `PL-RHDS` | 상압 잔사유 수첨탈황 | 9 · 57 |
-| `/vrds/` | `PL-VRDS` | 감압 잔사유 수첨탈황 | 7 · 47 |
+| `/rfcc/` | `RFCC` | RFCC(중질유 유동상 촉매 분해) | 12 · 81 |
+| `/cdu/` | `CDU` | 상압증류 | 7 · 46 |
+| `/hou/` | `HOU` | 수첨분해 | 7 · 61 |
+| `/rhds/` | `RHDS` | 상압 잔사유 수첨탈황 | 9 · 57 |
+| `/vrds/` | `VRDS` | 감압 잔사유 수첨탈황 | 7 · 47 |
 
 모든 데이터는 개발용 합성 값이다. 샘플 묶음에서 옮긴 마스터 값과 Nelson 기준 μ·σ가 구성안에 들어 있다. 설비는 유형 접두어로 구분한다: PM 펌프, FN 팬, CC 압축기, BL 송풍기, EX 팽창 터빈, ST 증기 터빈, MT 전동기, GB 기어박스(공장마다 쓰는 유형은 구성안의 `equipment_types`).
 
 ### 3.1 계층
 
-- **Plant · Unit Group · Unit**: 구성안의 `plant.unit_groups` 가 정의한다. 예: RHDS 는 `PL-RHDS` 아래 `UG-RHDS-01`(원료 공급)~`UG-RHDS-06`(생성물 분별) 여섯 계열이고, 계열마다 Unit 하나(`UNIT-RHDS-01`…)와 설비 하나가 있다.
+- **Plant · Unit Group · Unit**: 구성안의 `plant.unit_groups` 가 정의한다. 예: RHDS 는 `RHDS` 아래 `UG-RHDS-01`(원료 공급)~`UG-RHDS-06`(생성물 분별) 여섯 계열이고, 계열마다 Unit 하나(`UNIT-RHDS-01`…)와 설비 하나가 있다.
 - 설비는 `unit_id` 로 Unit에 속한다. 이 계층은 서버가 시작할 때 DB의 설비 마스터로 적재한다.
 
 ### 3.2 설비 ID 규칙
@@ -88,7 +88,7 @@ Nov 8, 2026 · @xxhigh
 - **복합키**: 태그는 `(equip_id, tag_id)` 로 식별한다. 태그명은 한 공장 안에서도 고유하게 둔다(RHDS·VRDS 는 자료에서 겹치던 `TI-B-3101` 을 설비 종류 문자를 넣어 `TI-B-P3101`·`TI-B-C3101`·`TI-B-F3101` 로 바꿨다).
 - **형식**: `{신호 접두어}-…` 다. 접두어는 구성안 `signals` 의 `prefix` 이다(VI 진동, TI 온도, PI 압력, FI 유량, II 전류, SI 속도…). 뒷부분은 공장 자료의 이름을 따른다. 예: RFCC `VI-P-1101A`, CDU `VI-8101A`, RHDS `TI-B-P3101`.
 - **단위**: 공장 사이에 통일하지 않고 태그마다 원본 자료의 단위를 쓴다.
-- **공장 코드**: `rfcc` 같은 key 는 URL·DB 스키마 접두어, `PL-RFCC` 같은 plant_id 는 `plant` 테이블 키다. 이 ID 체계는 앞단에만 쓰며 MVP 의 설비 ID와 매핑하지 않는다.
+- **공장 코드**: `rfcc` 같은 key 는 URL·DB 스키마 접두어, `RFCC` 같은 plant_id 는 `plant` 테이블 키다. 이 ID 체계는 앞단에만 쓰며 MVP 의 설비 ID와 매핑하지 않는다.
 
 ### 3.4 ID를 나중에 바꾸기 쉽게 하는 원칙
 
@@ -114,7 +114,7 @@ Nov 8, 2026 · @xxhigh
 
 ```yaml
 plant:
-  plant_id: PL-RHDS
+  plant_id: RHDS
   name: "RHDS (상압 잔사유 수첨탈황)"
   config_version: 4
   unit_groups:

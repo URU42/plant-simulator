@@ -14,11 +14,11 @@
 
 | key | plant_id | 공장 | 설비 | 태그 (1초 / 10초) | 한계값 있는 태그 | 원시 행/일 |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
-| `rfcc` | `PL-RFCC` | RFCC(중질유 유동상 촉매 분해) | 12 | 81 (65 / 16) | 81 (μ±3σ) | 약 575만 |
-| `cdu` | `PL-CDU` | CDU (상압증류) | 7 | 46 (37 / 9) | 46 | 약 327만 |
-| `hou` | `PL-HOU` | HOU (수첨분해) | 7 | 61 (43 / 18) | 61 | 약 387만 |
-| `rhds` | `PL-RHDS` | RHDS (상압 잔사유 수첨탈황) | 9 | 57 (41 / 16) | 43 | 약 368만 |
-| `vrds` | `PL-VRDS` | VRDS (감압 잔사유 수첨탈황) | 7 | 47 (34 / 13) | 43 | 약 304만 |
+| `rfcc` | `RFCC` | RFCC(중질유 유동상 촉매 분해) | 12 | 81 (65 / 16) | 81 (μ±3σ) | 약 575만 |
+| `cdu` | `CDU` | CDU (상압증류) | 7 | 46 (37 / 9) | 46 | 약 327만 |
+| `hou` | `HOU` | HOU (수첨분해) | 7 | 61 (43 / 18) | 61 | 약 387만 |
+| `rhds` | `RHDS` | RHDS (상압 잔사유 수첨탈황) | 9 | 57 (41 / 16) | 43 | 약 368만 |
+| `vrds` | `VRDS` | VRDS (감압 잔사유 수첨탈황) | 7 | 47 (34 / 13) | 43 | 약 304만 |
 | **합계** | | | **42** | **292** | **274** | **약 1,963만** |
 
 - 온도 계열 태그는 10초, 나머지는 1초 주기다. 원시 행/일은 `Σ 86400 / interval_sec` 이다.
@@ -34,6 +34,7 @@
 | --- | --- | --- | --- |
 | `schema_meta` | — | `version` (=3) | 스키마 버전 |
 | `plant` | `plant_id` | `name`, `config_version` | `plant` |
+| `plant_config_change` | `plant_id`, `config_version` | `applied_at` (구성안 버전이 바뀐 시각, 2026-11-25) | `plant` |
 | `unit_group` | `unit_group_id` | `plant_id`, `name` | `plant.unit_groups` |
 | `unit` | `unit_id` | `unit_group_id`, `name` | `plant.unit_groups[].units` |
 | `equipment_type` | `type` | `name`, `prefix` | `equipment_types` |
@@ -88,7 +89,7 @@
 - 유형: PM 펌프, FN 팬, CC 압축기, BL 송풍기, EX 팽창 터빈, ST 증기 터빈.
 - 한계값 칸은 `경고 / 알람 / 정지` 순서이고, `—` 는 자료에 값이 없는 칸이다 (DB 에는 NULL).
 
-### 3.1 RFCC(중질유 유동상 촉매 분해) — `rfcc` (`PL-RFCC`)
+### 3.1 RFCC(중질유 유동상 촉매 분해) — `rfcc` (`RFCC`)
 
 설비 12대 · 태그 81개
 
@@ -195,7 +196,7 @@
 
 </details>
 
-### 3.2 CDU (상압증류) — `cdu` (`PL-CDU`)
+### 3.2 CDU (상압증류) — `cdu` (`CDU`)
 
 설비 7대 · 태그 46개
 
@@ -262,7 +263,7 @@
 
 </details>
 
-### 3.3 HOU (수첨분해) — `hou` (`PL-HOU`)
+### 3.3 HOU (수첨분해) — `hou` (`HOU`)
 
 설비 7대 · 태그 61개
 
@@ -344,7 +345,7 @@
 
 </details>
 
-### 3.4 RHDS (상압 잔사유 수첨탈황) — `rhds` (`PL-RHDS`)
+### 3.4 RHDS (상압 잔사유 수첨탈황) — `rhds` (`RHDS`)
 
 설비 9대 · 태그 57개
 
@@ -426,7 +427,7 @@
 
 </details>
 
-### 3.5 VRDS (감압 잔사유 수첨탈황) — `vrds` (`PL-VRDS`)
+### 3.5 VRDS (감압 잔사유 수첨탈황) — `vrds` (`VRDS`)
 
 설비 7대 · 태그 47개
 

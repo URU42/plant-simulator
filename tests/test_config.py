@@ -14,17 +14,18 @@ from common.config_models import (
 )
 
 # RHDS 구성안: 펌프 3, 압축기 2, 팬 1 + 합성 추가 전동기 2·기어박스 1
-EXPECTED_TYPE_COUNTS = {"PM": 3, "CC": 2, "FN": 1, "MT": 2, "GB": 1}
+EXPECTED_TYPE_COUNTS = {"PM": 4, "CC": 2, "FN": 1, "MT": 2, "GB": 1}
 SYNTHETIC_TYPES = {"MT", "GB"}   # 자료에 없는 합성 추가 설비 (2026-11-18). 한계값이 없다
+NO_LIMIT_TAGS = {("C-3102", "PI-I-C3102")}   # 합성 단간 압력 √(흡입·토출): 한계값 없음 (설명의 합성 표시는 2026-11-27 에 뺐다)
 
 
 def test_plant_loads_and_matches_master(plant_path: Path):
     plant = load_plant(plant_path)
     assert isinstance(plant, PlantConfig)
-    assert plant.plant.plant_id == "PL-RHDS"
-    assert len(plant.equipment) == 9
+    assert plant.plant.plant_id == "RHDS"
+    assert len(plant.equipment) == 10
     assert plant.type_counts() == EXPECTED_TYPE_COUNTS
-    assert len(plant.all_tags()) == 58
+    assert len(plant.all_tags()) == 77
     assert len(plant.unit_ids()) == 6
 
 
@@ -41,7 +42,7 @@ def test_control_mean_is_inside_warning_limits(plant_path: Path):
         for tag in e.tags:
             lim = tag.limits
             if lim is None:
-                assert e.type in SYNTHETIC_TYPES or "(synthetic)" in (tag.description or ""), tag.tag_id
+                assert e.type in SYNTHETIC_TYPES or ((e.equip_id, tag.tag_id) in NO_LIMIT_TAGS and tag.description), tag.tag_id
                 continue
             assert lim.warn_hi is None or tag.control.mean < lim.warn_hi, tag.tag_id
             assert lim.warn_lo is None or tag.control.mean > lim.warn_lo, tag.tag_id
@@ -82,7 +83,7 @@ def test_runtime_units_subset_selects_equipment(plant_path: Path):
     rt = RuntimeConfig(units=["UNIT-RHDS-02"], source_id="SIM-U2")
     chosen = plant.equipment_for_units(rt.units)
     assert [e.equip_id for e in chosen] == ["M-3102", "C-3102"]
-    assert len(plant.equipment_for_units(["all"])) == 9
+    assert len(plant.equipment_for_units(["all"])) == 10
 
 
 def test_runtime_unknown_unit_rejected(plant_path: Path):
@@ -214,7 +215,8 @@ def test_operating_scales_driver_and_driven_means(config_dir):
     assert all(ctl[k][1] == base[k][1] for k in base)                                    # σ 는 바꾸지 않는다
 
 
-@pytest.mark.parametrize("equip_id, msg", [("C-1401", "driver"), ("P-1101A", "speed tag")])
+# P-1101A 는 2026-11-27 회전수 태그가 생겨 회전수 태그가 없는 P-1301A 로 바꿈
+@pytest.mark.parametrize("equip_id, msg", [("C-1401", "driver"), ("P-1301A", "speed tag")])
 def test_operating_only_on_driver_with_speed(config_dir, equip_id, msg):
     raw = _rfcc_raw(config_dir)
     _equip(raw, equip_id)["operating"] = {"speed_rpm": 1000}

@@ -1,0 +1,34 @@
+# synthetic assumption: VRDS P-4103 단일 펌프 회로(분별탑 환류), 정적 계산(M1) 전용.
+# scripts/calibrate_calc_singles.py 로 생성. 정상 해는 마스터 운전점 μ 를 재현한다. 수집기 트윈은 읽지 않는다.
+# 물성·곡선·배관·경계압은 합성 설계 선택이며 현장 자료가 아니다. 탑·드럼 수력과 순환 루프는 계산하지 않는다.
+plant_id: VRDS
+unit_id: UNIT-VRDS-06
+equip_id: P-4103
+kind: pump
+provenance: synthetic assumption
+suction_node: FR
+discharge_node: FR
+atmospheric_pa: 101325.0
+density_kg_m3: 700.0
+source_abs_pa: 414543.360009105
+outlet_abs_pa: 753725.0
+machine:
+  reference_speed_rpm: 3560
+  speed_rpm: 3560
+  rated_flow_m3_s: 0.02330555555555556
+  shutoff_rise_pa: 1070000.0
+  rated_rise_pa: 856000.0
+  efficiency: 0.7
+suction_pipe:
+  length_m: 15.0
+  diameter_m: 0.141
+  darcy_factor: 0.02
+  minor_loss_k: 2.0
+discharge_pipe:
+  length_m: 80.0
+  diameter_m: 0.109
+  darcy_factor: 0.02
+  minor_loss_k: 220.56794454185138
+max_strainer_resistance_pa_s2_m6: 228967000.0
+max_impeller_head_loss: 0.1
+max_impeller_efficiency_loss: 0.2

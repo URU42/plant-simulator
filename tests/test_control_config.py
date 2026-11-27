@@ -36,7 +36,8 @@ def test_control_matches_baselines(config_dir):
             if e.type in ("MT", "GB"):      # 합성 추가 설비는 baselines.json 에 없다
                 continue
             for t in e.tags:
-                if "(synthetic)" in (t.description or ""):   # 합성 추가 태그도 없다
+                if (key.upper(), e.equip_id, t.tag_id) not in base:   # 자료 밖 합성 추가 태그(단간 압력·추가 계측)도 없다
+                    assert t.description, t.tag_id
                     continue
                 b = base[(key.upper(), e.equip_id, t.tag_id)]
                 assert t.control.mean == b["mean"]

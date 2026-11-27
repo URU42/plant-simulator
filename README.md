@@ -6,11 +6,11 @@ Skadi 앞단 데이터 생성기. 가상 공장 다섯 곳의 설비 센서 값�
 
 | 키(경로) | plant_id | 공장 | 설비 · 태그 | 주기 | 근거 |
 | --- | --- | --- | --- | --- | --- |
-| `/rfcc/` | PL-RFCC | RFCC(중질유 유동상 촉매 분해) | 12 · 82 (합성 1) | 온도 10초 · 나머지 1초 | [RFCC 설계](docs/superpowers/specs/2026-11-09-rfcc-simulator-design.md), 샘플 `rfcc-20261109/` |
-| `/cdu/` | PL-CDU | 상압증류 | 7 · 46 | 온도 10초 · 나머지 1초 | [다중 공장 설계](docs/superpowers/specs/2026-11-09-multi-plant-design.md), 샘플 `cdu-sample/` |
-| `/hou/` | PL-HOU | 수첨분해 | 7 · 62 (합성 1) | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `hou-plant-sample/` |
-| `/rhds/` | PL-RHDS | 상압 잔사유 수첨탈황 | 9 · 58 (합성 1) | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `RHDS_VRDS_v3/` |
-| `/vrds/` | PL-VRDS | 감압 잔사유 수첨탈황 | 7 · 48 (합성 1) | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `RHDS_VRDS_v3/` |
+| `/rfcc/` | RFCC | RFCC(중질유 유동상 촉매 분해) | 12 · 82 (합성 1) | 온도 10초 · 나머지 1초 | [RFCC 설계](docs/superpowers/specs/2026-11-09-rfcc-simulator-design.md), 샘플 `rfcc-20261109/` |
+| `/cdu/` | CDU | 상압증류 | 7 · 46 | 온도 10초 · 나머지 1초 | [다중 공장 설계](docs/superpowers/specs/2026-11-09-multi-plant-design.md), 샘플 `cdu-sample/` |
+| `/hou/` | HOU | 수첨분해 | 7 · 62 (합성 1) | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `hou-plant-sample/` |
+| `/rhds/` | RHDS | 상압 잔사유 수첨탈황 | 9 · 58 (합성 1) | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `RHDS_VRDS_v3/` |
+| `/vrds/` | VRDS | 감압 잔사유 수첨탈황 | 7 · 48 (합성 1) | 온도 10초 · 나머지 1초 | 같은 설계, 샘플 `RHDS_VRDS_v3/` |
 
 샘플 묶음 폴더는 git 밖이다. 거기서 옮긴 마스터 값(계층, 설비, 태그명, 설명, 단위, 정상 기준, 경고/알람/정지 상·하한(참고값), 근거)과 Nelson 기준 μ·σ(`baselines.json`)가 `config/plant_*.yaml` 에 있다. 설계와 계획은 [기획서](plant-simulator-plan.md), [시나리오 주입형 전환 계획](docs/superpowers/plans/2026-11-19-scenario-driven.md). 2026-11-18 까지의 자동 이상·Nelson 알람 설계는 [Nelson 이상 설계](docs/superpowers/specs/2026-11-12-nelson-anomaly-design.md)(대체됨).
 
@@ -37,6 +37,9 @@ Skadi 앞단 데이터 생성기. 가상 공장 다섯 곳의 설비 센서 값�
 | 집계 배치 | 집계·보관은 수집 서버 안에서 측정 시각 기준으로 실행(별도 스케줄러 없음) |
 | 실시간 화면 갱신 | SSE (`GET /{공장}/stream`). 디버깅용 현재값 페이지 `GET /{공장}/` 는 의존성 없는 HTML 한 장 |
 | 실행 | 스크립트, Docker Compose, k8s(`deploy/k8s`, 파드 하나 500m/1Gi) |
+
+CDU 소규모 물리 모델과 Three.js·GLB 계측 재생은 [CDU 물리 재생 안내](docs/cdu-physics.md)에서 실행할 수 있다.
+CDU 디지털 트윈 완성 기준선(D0: 결합 회로·NPSH·팬)은 [cdu-d0-twin.md](docs/cdu-d0-twin.md), 다섯 공장 회로·온톨로지 대조(D1)는 [twin-ontology-mapping.md](docs/twin-ontology-mapping.md), 생성기 연동·Modelica(D2)는 [plant-d2.md](docs/plant-d2.md), 설비별 지원 범위는 [지원 매트릭스](docs/twin-support-matrix.md). 이전 D4 기록은 [plant-twin-d4.md](docs/plant-twin-d4.md)(인정 보류).
 
 ## 빠른 시작
 
@@ -94,7 +97,7 @@ curl localhost:8000/rhds/current
 curl localhost:8000/rhds/equipment/P-3101/tags/TI-B-P3101/current
 curl "localhost:8000/cdu/timeseries?equip_id=P-8101A&tag_id=PI-8101A&from=2026-11-08T00:00:00%2B09:00&to=2026-11-09T00:00:00%2B09:00&interval=10m"
 curl localhost:8000/rhds/fault-modes                         # 걸 수 있는 고장 모드와 대상 설비
-curl localhost:8000/rhds/anomalies                           # 정답지(고장 모드·분류·단계·태그별 효과 시작)
+curl -H "X-Eval-Token: $EVAL_TOKEN" localhost:8000/rhds/anomalies   # 정답지(고장 모드·분류·단계·태그별 효과 시작)
 curl -N localhost:8000/rfcc/stream
 ```
 
@@ -103,17 +106,17 @@ curl -N localhost:8000/rfcc/stream
 토큰을 주고 통합 실행으로 띄운 뒤, 고장 모드를 넣고 → 탐지 쪽이 `/timeseries`·`/stream`·`/current` 로 값을 읽어 판정하고 → 정답지와 대조한다.
 
 ```bash
-INGEST_TOKEN=t uv run python -m collector.app --plants config/plants.yaml --with-simulators --time-mode backfill
+INGEST_TOKEN=t EVAL_TOKEN=e uv run python -m collector.app --plants config/plants.yaml --with-simulators --time-mode backfill
 H='X-Ingest-Token: t'
 
 curl localhost:8000/rhds/health                               # "live": true 가 될 때까지 기다린다 (그 전엔 POST 가 503)
 curl localhost:8000/rhds/fault-modes                          # CC-SURGE → C-3101, OP-LOAD-CHANGE → M-3101·M-3102 …
 curl -XPOST -H "$H" -H 'content-type: application/json' \
      localhost:8000/rhds/anomalies -d '{"equip_id":"C-3101","mode":"CC-SURGE"}'   # → event_id, start_at
-curl -XPOST -H "$H" localhost:8000/rhds/anomalies/C-3101/stop # 그 설비만 정상으로 (60초 회복, 손상 단계를 지났으면 손상은 남는다)
+curl -XPOST -H "$H" localhost:8000/rhds/anomalies/C-3101/stop # 그 설비만 정상으로 (회복: 온도 300초, 그 밖 60초. 손상 단계를 지났으면 손상은 남는다)
 curl localhost:8000/rhds/anomalies/damaged                    # 멈췄지만 손상이 남은 사건
-curl -XPOST -H "$H" localhost:8000/rhds/anomalies/GB-3101/repair # 남은 손상 수리 (60초 회복)
-curl "localhost:8000/rhds/anomalies?from=2026-11-19T00:00:00Z" # 정답지 → 채점에만 쓰고 탐지·요약 입력에는 주지 않는다
+curl -XPOST -H "$H" localhost:8000/rhds/anomalies/GB-3101/repair # 남은 손상 수리 (회복: 온도 300초, 그 밖 60초)
+curl -H "X-Eval-Token: $EVAL_TOKEN" "localhost:8000/rhds/anomalies?from=2026-11-19T00:00:00Z" # 정답지 → 채점에만 쓰고 탐지·요약 입력에는 주지 않는다
 ```
 
 정상 운전에는 이상이 없으므로 주입한 것 = 정답이다.
@@ -125,11 +128,12 @@ curl "localhost:8000/rhds/anomalies?from=2026-11-19T00:00:00Z" # 정답지 → �
 | 수집 서버 | `--plants` | `PLANTS_CONFIG` | `config/plants.yaml` |
 | 수집 서버 | `--host`, `--port` | `HOST`, `PORT` | `0.0.0.0`, `8000` |
 | 수집 서버 | `--with-simulators` | `WITH_SIMULATORS` | 꺼짐. 켜면 공장 목록의 생성기를 같은 프로세스에서 돌린다 |
-| 수집 서버 | | `REDIS_URL` | 있으면 받은 값을 Redis Stream `plant-sim:data:{공장}` 으로 보낸다(아래). k8s 는 `redis://clx-redis:6379` |
+| 수집 서버 | | `REDIS_URL` | (조작 시뮬레이션 `SIMULATION_CONTROL=1` 인 물리 회로 공장은 제외) 있으면 받은 값을 Redis Stream `plant-sim:data:{공장}` 으로 보낸다(아래). k8s 는 `redis://clx-redis:6379` |
 | 수집 서버 | `--time-mode`, `--backfill-days` | | 통합 실행에서 각 공장 runtime 값을 덮어쓴다 |
 | 수집 서버·시뮬레이터 | `--profile` | `DATA_PROFILE` | `demo`. 실행 용도 — `demo` 는 runtime 파일 그대로(시연용 조용한 정상), `eval` 은 학습·평가용(`quiet_normal: false`, 계측 이상 켬). DB 마다 하나로 고정된다(아래) |
 | 수집 서버 | | `ROOT_PATH` | 경로 접두어(예: `/plant-sim`). 루트 링크·리다이렉트·`/docs` 가 붙인다 |
 | 수집 서버 | | `CORS_ORIGINS` | 쉼표 구분. 있으면 GET 에 CORS 헤더 |
+| 수집 서버 | | `EVAL_TOKEN` | 정답지 `GET /{공장}/anomalies` 는 헤더 `X-Eval-Token` 필수. 없으면 닫힌다(403). 관측·조작용 `INGEST_TOKEN` 으로는 못 읽고, 두 값이 같으면 기동하지 않는다 |
 | 수집 서버 | | `INGEST_TOKEN` | 있으면 외부 `POST /ingest` 와 `POST /anomalies…`(주입·멈춤)는 헤더 `X-Ingest-Token` 필수. 통합 실행인데 없으면 둘 다 닫힌다(403). 통합 실행의 생성기는 거치지 않는다. 시뮬레이터 `HttpSender` 도 같은 변수를 읽어 헤더를 붙인다 |
 | 시뮬레이터 | `--plant` | `PLANT_CONFIG` | `config/plant_rhds.yaml` |
 | 시뮬레이터 | `--runtime` | `RUNTIME_CONFIG` | `config/runtime_rhds.yaml` |
@@ -173,13 +177,30 @@ RFCC 는 자료에 통계 경고(μ ± 3σ)만 있어 2026-11-19 에 알람 μ �
 flow:
   nodes: { MX: "원료·수소 혼합기", HX: "원료·반응 유출물 열교환기", ... }   # 설비가 아닌 공정 노드
   edges:                                      # [from, to, label, stream]
-    - [P-3101, MX, "", process]
+    - [P-3101, P-3101-S2, "", process]
+    - [P-3101-S2, MX, "", process]
     - [MX, HX, "저온측", process]              # 열교환기는 들어온 쪽과 같은 이름의 출구로만 나간다
     - [C-3102, C-3101, 보충 수소, utility]      # 가상 공장 추가 (뷰어 원래 그래프에 없음)
 ```
 
 - `stream`: `process`(원료·탄화수소 흐름) 또는 `utility`(수소·연소공기·윤활유·세정수 등 보조 계통). 뷰어의 계통 구분 규칙을 옮긴 값이다.
 - 축 연결은 `driven_by` 가 맡아 여기에 넣지 않는다. 노드 ID 는 설비 ID 와 겹치면 안 되고, 간선 끝은 설비나 공정 노드여야 한다.
+
+### 두 번째 원료 펌프 (2026-11-25 PU-D5a, 합성 가정)
+
+| 공장 | 배치 | 펌프 | 정상 운전점 |
+| --- | --- | --- | --- |
+| CDU | 병렬 | `P-8101A`·`P-8101B` | 각 401.35 m3/h, 합 802.7 (기존 펌프 값 그대로) |
+| RFCC | 병렬 | `P-1101A`·`P-1101B` | 각 104.73 m3/h, 합 209.46 (한 대 209.46 을 절반 유량 제원 두 대로) |
+| HOU·RHDS·VRDS | 직렬 2단 | `P-2101`→`P-2101-S2`, `P-3101`→`P-3101-S2`, `P-4101`→`P-4101-S2` | 유량 같음. 1단 토출 = 중간 압력(`PI-2101B` 95.9 kg/cm2(g) 등), 최종 토출은 2단 태그 |
+
+실제 설비의 직렬·병렬 관계가 아니라 합성 가정이다. 새 펌프의 태그·단위·주기·구동기·잡음 크기는 기존 펌프를 본떴고 개별 잡음은 `seed_key` 로 독립이다(같은 공정 그룹의 공통 요인은 기존처럼 나눠 갖는다).
+새 펌프의 한계는 기존 값을 복제했고, 값이 바뀐 태그만 기존과 같은 규칙(한계/μ 비율, 유효숫자 3자리)으로 다시 정했다(`limit_basis`).
+일반 모드도 트윈과 같은 물리 회로를 푼다(`physics` + `physics_general: true`, 2026-11-25). 회로가 계산하는 사건에서 그 회로의 물리 태그는 해만 따르고, 나머지 태그와 회로가 계산하지 않는 사건은 기존 경험 효과·흐름 그래프 전파를 유지한다(트윈은 그래프 전파 없음). 회로마다 물리 사건 하나만 받는다(겹치면 409). 계산 태그(전류)는 회로 해 위에서 입력 잡음을 따른다. 트윈의 조작 시계·운영자 토큰·발행 차단은 `physics_general` 이 아닌 실행 설정에만 적용한다. 물리를 끄려면 두 줄을 지운다.
+직렬 펌프 한 대 정지 고장은 근거가 없어 지원하지 않는다(사용자 결정). 구성안이 바뀐 시각은 `plant_config_change` 테이블에 남는다.
+입력 펌프 두 대의 정상 유량·압력은 원인 변동(흡입압·회전수·수요)을 회로로 나눠 갖는다(`physics_<공장>_twin.yaml` 의 `disturbance`, `simulator/physics_noise.py`). 산정: `python -m scripts.calibrate_noise hou`.
+
+AE 학습용 정상 데이터: `python -m scripts.normal_data --out .cache/normal` (일반 모드, 조용한 정상, 같은 인자면 같은 파일).
 
 ### 운전점 (`operating`)
 
@@ -231,14 +252,14 @@ flow:
 - 같은 설비에는 안 멈춘 사건이 하나뿐이다(겹치면 409). 사건은 멈출 때까지 가고, 멈추면 효과가 60초(하류 k단계는 60초 × (k+1)) 동안 0 으로 가라앉는다.
   단, 멈추기 전에 시작한 손상 단계(`damage`)의 step·ramp 효과는 수리할 때까지 남는다(멈춤 = 원인 해제, 수리 = 손상 회복). 손상이 남은 설비에도 새 사건을 걸 수 있고 효과는 더해진다.
 - 공정 흐름 하류 전파 (2026-11-20, 사용자 확정, 수치는 synthetic): 고장 설비와 그 축 사슬을 0단계로, 흐름 그래프를 따라 설비에 닿을 때마다 1단계씩
-  최대 2단계까지 퍼진다. **완만한 감쇠**: k단계 크기 = 1단계 × 0.7^(k−1), `lag`·`rise` × k(늦고 천천히 오른다), 회복 60초 × (k+1).
+  최대 2단계까지 퍼진다. **완만한 감쇠**: k단계 크기 = 1단계 × 0.7^(k−1), `lag`·`rise` × k(늦고 천천히 오른다), 회복 (온도 300초, 그 밖 60초) × (k+1).
   줄인 크기가 0.25σ 이하면 걸지 않는다. utility 간선은 출발 설비와 utility 로 닿은 공정 노드에서만 지나고(공정 흐름에 들어선 뒤 보조 계통으로
   퍼지지 않는다), utility 로 닿은 설비에서는 멈춘다(정지(trip)는 모의하지 않는다). 윤활유 상실은 예외로 한계까지 간다(사용자 확정 2026-11-23):
   `PM-SUCTION-LOSS` 를 윤활유 펌프 HOU P-2501 에 걸면 자기 윤활유 압력(PI-2501)이 S3 경보·S4 정지 한계로 떨어지고, 압축기 C-2301 베어링 온도가
   S2 경고 → S3 경보 → S4 정지 한계로 오른다. 전파하는 모드: `PM-SUCTION-LOSS`·`CC-SURGE`·
   `FN-IMPELLER-FOULING`·`OP-LOAD-CHANGE`·`RC-VALVE-LEAK`. 근거·도달 표는 위키 raw 초안 `PSIM-LINK-20261120` v0.3.
 - 효과는 단계가 끝나도 남는다(예: S0 의 wobble 은 S2·S3 에도 계속된다). `nelson_quiet` 는 그 단계 동안만이다.
-- 정답지의 `end_at` 은 멈춤 + 60초(멈추기 전에 시작한 하류 효과가 있으면 가장 먼 단계 k 의 60초 × (k+1))다. 손상이 남은 사건(`damage_remains`)은 수리 + 회복이고, 안 고쳤으면 null 이다. 그 뒤 규칙 창(8표본, 10초 태그는 80초) 안의 위반은 사건 꼬리다.
+- 정답지의 `end_at` 은 멈춤 + 멈추기 전에 시작한 효과의 가장 느린 회복(온도 300초·그 밖 60초, 하류 k단계는 × (k+1))이다. 손상이 남은 사건(`damage_remains`)은 수리 + 회복이고, 안 고쳤으면 null 이다. 그 뒤 규칙 창(8표본, 10초 태그는 80초) 안의 위반은 사건 꼬리다.
 - 시나리오는 **지금 있는 설비·태그만으로** 표현한다. 고장 모드가 가리킨 신호의 태그가 그 설비에 없으면 건너뛴다. 실제 고장이면 보일 신호지만 태그가 없어 만들지 않는 것은 모드의 `unobserved` 에 적고 `/fault-modes`·정답지에 싣는다(예: 드레인 밸브 상태, 밸브 커버 온도). 태그를 더할지는 따로 정한다.
 - 계산 태그 (구성안 `derive`, 2026-11-19, synthetic): 같은 설비 안 관계를 매 표본 지킨다. 값 = 그 시각 입력 태그 값의 계산식
   + 자체 잡음(`noise_sigma`) + 고장 효과. 입력이 움직이면 따라 움직이고(정답지에도 입력 효과의 단계·시작으로 실린다), 자기 효과는 관계를 깬다.
@@ -246,11 +267,11 @@ flow:
     (m 은 자료 μ 로 맞춤), 베어링 온도(K) ∝ 윤활유 온도(K). 물리식 우선(사용자 확정): μ 는 자료 그대로, σ 는 식이 정하는 변동이 자료 σ 를
     넘으면 정상 생성값으로 바꿨다(35개, 자료의 1.1~5.2배 — 공통 요인이 유량·토출 압력을 같은 쪽으로 움직여 곱이 커진다). RFCC 의 μ±3σ 경고 한계는
     새 σ 로 다시 계산했고(2026-11-23 공학 기준값으로 바뀜), 다른 공장의 자료 한계값은 새 σ 로도 6σ 이상 떨어져 그대로 두었다. 운전점의 μ 이동도 식을 따른다(팬은 상사 법칙과 같다).
-  - 합성 태그 4개(자료에 없음, description 에 `(synthetic)`): `STT-T-1401` 입구 증기 온도 = `SP-T-1401` 의 포화 온도(IAPWS-IF97) + 과열도 150 ℃ 가정,
+  - 합성 태그 4개(자료에 없음. description 의 `(synthetic)` 표시는 2026-11-27 에 뺐다): `STT-T-1401` 입구 증기 온도 = `SP-T-1401` 의 포화 온도(IAPWS-IF97) + 과열도 150 ℃ 가정,
     `PI-2201C`·`PI-I-C3102`·`PI-I-C4102` 단간 압력 = √(흡입·토출 절대압) (2단·단별 압력비 같음 가정, 한계값 없음). σ 는 정상 생성값에서 잰 값.
   - 억제 표집은 자체 잡음만 다시 뽑으므로 계산 태그는 정상에서도 규칙 위반(하루 약 0.26 %)과 한계 넘음(0.004 %, RFCC 펌프 전류)이 가끔 난다.
     실제 공장처럼 정상에도 넘는 일이 있다는 것을 받아들인 것이며, 정상 여부는 정답지로 가린다. 나머지 태그의 규칙 위반은 0 이다.
-- 지금 들어 있는 모드 11개 — 다섯 공장 42대 모두 하나 이상 걸 수 있다(테스트로 지킨다). 수치·지연은 모두 synthetic 이며 공정·설비 검토 전이다.
+- 지금 들어 있는 모드 11개 — 다섯 공장 52대 모두 하나 이상 걸 수 있다(테스트로 지킨다). 수치·지연은 모두 synthetic 이며 공정·설비 검토 전이다.
 
   | 모드 | 대상 | 시나리오 |
   | --- | --- | --- |
@@ -262,8 +283,8 @@ flow:
   | `PM-SUCTION-HOT` | 흡입 유체 온도 태그가 있는 펌프 `P-3102`·`P-4102`·`P-8303A` | 위와 같은 단계에 S1 유체 온도 +15 ℃. 교호작용(`boost`)으로 진동·유량 효과 ×1.45(계수 0.03/℃, 상한 ×2.0, 경고 구간 보장). 경고 단계는 남고 경보·정지가 이르다 |
   | `FN-IMPELLER-FOULING` | 팬 4대 | 임펠러 오염 → 불균형 진동 → 베어링 온도 상승. 진동·베어링 온도는 회전수 교호작용(`boost`, 지수 2): 운전점 ×0.8 이면 ×0.64, ×1.05 면 ×1.10 |
   | `EX-CATALYST-EROSION` | 팽창 터빈 `E-1202` | 촉매 미립자 부착·침식 → 회수 동력 감소(피구동 `B-1201` 유량) → 블레이드 손상 위험 |
-  | `GB-LUBE-WEAR` | 기어박스 `GB-3101` | 윤활 불량 → 치면 마모. 피구동 `C-3101` 진동으로 전파 (기어박스는 한계값이 없다) |
-  | `OP-LOAD-CHANGE` | 구동기 `T-1401`·`M-3101`·`M-3102`·`M-4102`, HOU 압축기 `C-2201`·`C-2301` | 운전 부하 감소(회전속도·전류·유량·토출 압력 하향) — 정답은 "정상 운전 변화". 팬은 제외 |
+  | `GB-LUBE-WEAR` | 기어박스 `GB-2301`·`GB-3101`·`GB-4101` | 윤활 불량 → 치면 마모. 피구동 압축기(`C-2301`·`C-3101`·`C-4101`) 진동으로 전파 (기어박스는 한계값이 없다) |
+  | `OP-LOAD-CHANGE` | 구동기 `T-1401`·`M-2201`·`M-2301`·`M-3101`·`M-3102`·`M-4101`·`M-4102` | 운전 부하 감소(회전속도·전류·유량·토출 압력 하향) — 정답은 "정상 운전 변화". 팬은 제외 |
   | `OP-THROUGHPUT-CHANGE` | 원료 공급 펌프 `P-8101A`(CDU)·`P-1101A`(RFCC)·`P-2101`(HOU)·`P-3101`(RHDS)·`P-4101`(VRDS) | 처리량 감소(공급 유량·토출 압력 하향, 하류 펌프 처리량도 감소) — 정답은 "정상 운전 변화" |
 
 ### 이상 API (통합 실행 전용)
@@ -280,7 +301,7 @@ flow:
 | `GET /{공장}/anomalies?equip_id=&from=&to=` | 정답지: `event_id`, `equip_id`, `mode`, `code`, `kind`, `cause`, `action`, `expect`, `stages`(단계별 시작), `response_tags`(태그·단계별 효과 시작, `via`: self·driven·process·utility, `hop`: 흐름 단계 — 2026-11-20 전 사건은 null), `unobserved`, `start_at`, `stop_requested_at`, `damage_remains`(멈춘 뒤 손상이 남았는가), `repair_requested_at`, `end_at`. `response_tags` 의 `damage` 는 수리 전까지 남는 효과. `boost` 는 교호작용 규칙(없으면 null), `response_tags[].boost_by` 는 교호작용으로 키운 효과의 by 태그. 고장 모드와 계측 이상(켰을 때)을 시작 순으로 함께 싣는다 |
 
 생성기가 이미 `ceil(sim_now)+3` 보다 뒤까지 표본을 만들었으면 그 끝으로 미룬다(이미 만든 표본은 바뀌지 않는다). 응답의 `start_at`·`stop_requested_at` 이 실제 시각이다.
-`POST` 는 `/ingest` 와 같은 토큰 규칙(`INGEST_TOKEN` 이 있으면 `X-Ingest-Token`, 통합 실행인데 토큰이 없으면 403)이다. 그 밖의 오류: 분리 실행 409(`embedded only`), 생성기가 죽었으면 503(`simulator stopped…`),
+정답지(`GET /{공장}/anomalies`)는 `X-Eval-Token`(`EVAL_TOKEN`)만 받는다. `POST` 는 `/ingest` 와 같은 토큰 규칙(`INGEST_TOKEN` 이 있으면 `X-Ingest-Token`, 통합 실행인데 토큰이 없으면 403)이다. 그 밖의 오류: 분리 실행 409(`embedded only`), 생성기가 죽었으면 503(`simulator stopped…`),
 백필 중이거나 밀린 구간을 아직 따라잡지 못했거나 `sim_now` 를 모를 때 503(`backfilling`, `/health` 의 `live` 가 true 가 되면 가능),
 모르는 설비 404, 그 설비에 안 멈춘 사건이 있으면 409, 모르는 고장 모드이거나 그 설비에 걸 수 없으면 422.
 정답지는 주입할 때 적은 계획을 그대로 쓰므로 나중에 `fault_modes.yaml` 을 고쳐도 바뀌지 않는다. 멈추기 전에 시작하지 못한 단계·효과와 길이 0 인 사건은 싣지 않는다.
@@ -296,7 +317,7 @@ flow:
 | --- | --- |
 | 스트림 | `plant-sim:data:{공장 키}` — `plant-sim:data:rfcc`, `…:cdu`, `…:hou`, `…:rhds`, `…:vrds` |
 | 엔트리 필드 | `data` 하나. 값은 JSON 문자열 |
-| `data` | `{"plant": "rfcc", "plant_id": "PL-RFCC", "ts": "2026-11-19T16:19:30+09:00", "samples": [{"equip_id", "tag_id", "ts", "value"}, …]}` |
+| `data` | `{"plant": "rfcc", "plant_id": "RFCC", "ts": "2026-11-19T16:19:30+09:00", "samples": [{"equip_id", "tag_id", "ts", "value"}, …]}` |
 | 주기 | 측정 시각(초)마다 하나, 시각 순. 10초 태그는 그 초(0, 10, 20…초)의 메시지에만. 누락(계측 이상)이면 그 태그가 빠진다 |
 | 길이 | `XADD … MAXLEN ~ 1800` (초당 1건 × 30분) |
 | 보내는 범위 | 실제 시각 기준 최근 30분 안의 값만 (백필의 지난 값은 보내지 않는다) |
@@ -310,9 +331,9 @@ flow:
 ### 화면에서 고장 걸기
 
 첫 화면(공장 목록, 배포에서는 `/plant-sim/`) 아래 **고장 설정**에서 설비(공장별 묶음) → 고장 유형(그 설비에 걸 수 있는 모드) → 진행 속도(×1·×3·×5·×10) → 적용/해제를 고른다.
-진행 속도는 단계 시작 시각과 ramp 상승을 1/속도로 줄인다. lag(응답 지연)·spike·wobble 모양·해제 뒤 회복(60초)은 실제 시간 그대로다(진동 주기를 줄이면 1초 표본에서 사라지고, spike 뒤에 맞춘 lag 를 줄이면 둘이 겹친다).
+진행 속도는 단계 시작 시각과 ramp 상승을 1/속도로 줄인다. lag(응답 지연)·spike·wobble 모양·해제 뒤 회복(온도 300초, 그 밖 60초)은 실제 시간 그대로다(진동 주기를 줄이면 1초 표본에서 사라지고, spike 뒤에 맞춘 lag 를 줄이면 둘이 겹친다).
 예: 펌프 흡입 악화의 첫 정지 ×1 34분 → ×10 3.4분. 정답지의 `stages`·`response_tags` 시각도 이 규칙으로 계산하고 `speed` 를 싣는다.
-고장 유형에 "해제 후 손상 남음"이 붙은 모드는 손상 단계를 지나 해제하면 손상이 남는다. 그 설비를 고르면 **수리** 버튼이 나오고, 누르면 손상이 60초 동안 회복한다. 화면의 "손상 남음" 줄에 안 고친 사건이 모두 나온다.
+고장 유형에 "해제 후 손상 남음"이 붙은 모드는 손상 단계를 지나 해제하면 손상이 남는다. 그 설비를 고르면 **수리** 버튼이 나오고, 누르면 손상이 회복한다(온도 300초, 그 밖 60초). 화면의 "손상 남음" 줄에 안 고친 사건이 모두 나온다.
 적용 중인지는 서버(`/anomalies/active`, 손상은 `/anomalies/damaged`)에서 5초마다 읽으므로 다른 화면에 갔다 오거나 다른 사람이 바꿔도 "해제"로 맞게 보인다.
 적용·해제·수리는 API 와 같은 토큰(`X-Ingest-Token`)이 필요하다. 화면의 토큰 칸에 넣으면 그 브라우저의 localStorage 에만 저장된다. 분리 실행에서는 안내 문구만 나온다.
 
@@ -329,6 +350,7 @@ instrument_faults:
 ```
 
 - 빈도·크기는 synthetic 가정이다. 일정은 `(seed, plant_id, KST 날짜)` 로만 정해져 같은 시드면 같고, Unit 을 나눠 돌려도 같다. 횟수는 포아송 분포.
+  plant_id 는 접두사를 떼기 전 값(`PL-RHDS`)으로 해시해, 2026-11-27 접두사 제거 전후의 일정이 같다.
 - **보내는 값만** 바꾼다. 공정 값(계산 태그의 입력, 억제 표집 상태)은 그대로라 유량계가 튀어도 전류는 그대로다. 그래서 켜도 계측 이상이 걸린 표본 밖의 값은 꺼졌을 때와 같다.
 - 누락은 표본을 보내지 않는다(실제 통신 끊김처럼).
 - 정답지에는 수집 서버가 같은 일정을 다시 계산해 `code: 2`, `kind: 계측 이상(설비 고장 아님)`, `mode: IM-SPIKE / IM-STUCK / IM-DROPOUT`, 대상 태그(`response_tags`), `start_at`·`end_at` 으로 싣는다.
@@ -348,6 +370,8 @@ instrument_faults:
     정답지의 계측 이상은 지금 설정으로 과거 구간까지 다시 계산하므로, 용도가 다른 실행이 같은 DB 를 이어 쓰면 정답지가 틀린다. 그래서 DB(`run_meta`)에 처음 용도를 적고 다른 용도로 열면 시작하지 않는다. 이 기능 전에 데이터가 쌓인 DB 는 `demo` 로 본다.
     서버 배포는 `demo`(실시간 시연)만 쓰고 `eval` 은 로컬에서만 돌린다(사용자 확정 2026-11-23). 로컬 `eval` 은 DB 가 `data/eval/` 에 따로 생기는
     공장 목록 `config/plants.eval.yaml` 로 실행한다: `python -m collector.app --plants config/plants.eval.yaml --with-simulators --profile eval`.
+    쌍대 평가 데이터(정상·부하 변화·설비 고장·계측 이상·교호작용 on/off)는 파일로 만든다: `python -m scripts.eval_batch --out .cache/eval/observations --eval-dir .cache/eval/truth`.
+    정답지는 관측 폴더 밖에만 쓰고, 분할(train·val·test)은 시드 단위다.
     분리 실행이면 시뮬레이터에도 같은 `--profile` 을 준다.
   - 정상 구간에는 자동 이상·자동 부하 변경이 없다(D1·D2·D4). 부하 변경은 정상 운전 변화(코드 1) 모드를 주입해서 만든다.
   - 피구동 설비 `speed` 는 구동기 `speed` 의 z 를 그대로 쓴다(직결은 같은 값, 기어박스 사슬은 기어비만큼).
@@ -417,6 +441,7 @@ Nelson 알람(`/alarms`, `nelson_alarm`)과 Redis Stream `plant-sim:alarms` 는 
 | `ingest_batch`, `job_state`, `schema_meta` | 중복 확인, 배치 진행 상태, 스키마 버전 |
 
 - **예전 DB 파일(v1~v4)은 열 수 없다.** 수집 서버가 파일 경로와 함께 옮기거나 지우라고 알리고 멈춘다. `data/old/` 로 옮긴 뒤 백필을 다시 돌린다. 배포(k8s)에서는 DB v5 이므로 PVC 의 기존 DB 파일을 지우고 다시 띄운다.
+- **plant_id 접두사 제거(2026-11-27, `PL-RHDS` → `RHDS`)**: 그 전에 만든 DB 는 그대로 열리지만 옛 흔적이 남는다. `plant` 테이블에 옛 `PL-…` 행이 참조 없이 남고(적재가 덮어쓰기라 새 행이 따로 생긴다), 정답지에는 그 전에 주입한 사건이 `FM-PL-RHDS-0001` 형식으로, 그 뒤 사건이 `FM-RHDS-0002` 형식으로 섞인다(번호는 이어져 겹치지 않는다). 계측 이상(`IM-…`)은 다시 계산하므로 모두 새 형식이고 일정은 같다. 코드는 옛 행을 지우지 않는다. 깨끗이 하려면 DB 를 지우고 백필을 다시 돌리거나 `DELETE FROM plant WHERE plant_id LIKE 'PL-%'` 로 고아 행만 지운다.
 - 보관: 10분 배치가 끝날 때마다 `raw_retention_days` 보다 오래된 `ts_raw` 행(측정 시각 기준)과 `ingest_batch` 행(받은 시각 기준)을 지운다. 집계는 남긴다.
 - 용량(하루 백필 뒤 실측, 행당 약 180 B): rfcc 1.1 GB · hou 0.7 GB · cdu 0.6 GB · rhds 0.5 GB · vrds 0.5 GB. 다섯 1초 공장을 하루 보관하면 합계 약 3.5 GB 에서 머문다. SQLite 파일은 지워도 줄지 않고 최고점에서 고정된다.
 - 수집 서버는 프로세스 하나다. 통합 실행에서는 동시에 저장하는 공장을 둘로 제한하고(나머지는 기다린다) 값 계산·저장을 워커 스레드에서 돌린다. 분리 실행으로 다섯 공장이 동시에 첫 백필을 하면 SQLite 쓰기가 직렬화돼 하루 백필이 함께 끝나기까지 약 2~5분 걸렸고, 먼저 실시간에 들어간 공장의 1초 전송은 재시도로 버틴다.
@@ -441,7 +466,7 @@ Nelson 알람(`/alarms`, `nelson_alarm`)과 Redis Stream `plant-sim:alarms` 는 
 # 1. 이미지 (PC 에서 빌드·push)
 docker build --platform linux/amd64 -t harbor.uru42.space/uru42/plant-simulator:<TAG> . && docker push harbor.uru42.space/uru42/plant-simulator:<TAG>
 # 2. kustomization.yaml 의 images.newTag 를 그 태그로 바꾼다 (주소는 harbor.uru42.space/uru42 로 적혀 있다)
-# 3. Secret (이상 주입·멈춤 API 나 외부 /ingest 를 쓸 때 필수): kubectl -n u4-2 create secret generic plant-sim --from-literal=ingest-token='<긴 문자열>'
+# 3. Secret (이상 주입·멈춤 API 나 외부 /ingest 를 쓸 때 필수): kubectl -n u4-2 create secret generic plant-sim --from-literal=ingest-token='<긴 문자열>' --from-literal=eval-token='<다른 긴 문자열>'
 # 4. 적용·확인
 kubectl apply -k deploy/k8s -n u4-2
 kubectl -n u4-2 rollout status deploy/plant-sim

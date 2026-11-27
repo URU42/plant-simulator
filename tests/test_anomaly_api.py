@@ -6,8 +6,10 @@ from fastapi.testclient import TestClient
 
 from collector.app import create_single_app
 from collector.settings import Settings
+from common.config_models import ConfigError
 
 TOKEN = {"X-Ingest-Token": "t"}
+EVAL = {"X-Eval-Token": "e"}
 SURGE = {"equip_id": "C-3101", "mode": "CC-SURGE"}
 
 
@@ -24,7 +26,7 @@ def _wait(client, path, pred, timeout=10.0):
 @pytest.fixture(scope="module")
 def client(plant_path, runtime_path, tmp_path_factory):
     """생성기가 실시간으로 도는 통합 실행 앱. 모듈 안 테스트가 함께 쓴다."""
-    settings = Settings(with_simulators=True, ingest_token="t", time_mode="live", backfill_days=0)
+    settings = Settings(with_simulators=True, ingest_token="t", eval_token="e", time_mode="live", backfill_days=0)
     app = create_single_app(plant_path, runtime_path, tmp_path_factory.mktemp("api") / "rhds.db", settings=settings)
     with TestClient(app) as c:
         _wait(c, "/plant/health", lambda r: r["live"] and r["sim_now"] is not None)
@@ -33,6 +35,20 @@ def client(plant_path, runtime_path, tmp_path_factory):
 
 def test_token_required(client):
     assert client.post("/plant/anomalies", json=SURGE).status_code == 403
+
+
+def test_answer_key_needs_its_own_token(client, plant_path, runtime_path):
+    """관측·조작 토큰으로는 정답지를 못 읽는다. EVAL_TOKEN 이 없으면 닫히고, 두 토큰이 같으면 앱을 만들지 않는다."""
+    for headers in ({}, TOKEN, {"X-Eval-Token": "t"}, {"X-Ingest-Token": "e"}):
+        assert client.get("/plant/anomalies", headers=headers).status_code == 403
+    assert client.get("/plant/anomalies", headers=EVAL).status_code == 200
+    assert client.post("/plant/anomalies", json=SURGE, headers=EVAL).status_code == 403      # 정답지 토큰으로 조작할 수 없다
+    closed = create_single_app(plant_path, runtime_path, ":memory:", settings=Settings(with_simulators=False, ingest_token="t"))
+    with TestClient(closed) as c:
+        assert c.get("/plant/anomalies", headers=EVAL).status_code == 403
+        assert c.get("/plant/anomalies", headers={"X-Eval-Token": ""}).status_code == 403
+    with pytest.raises(ConfigError):
+        create_single_app(plant_path, runtime_path, ":memory:", settings=Settings(ingest_token="t", eval_token="t"))
 
 
 def test_split_mode_conflict(plant_path, runtime_path):
@@ -58,12 +74,14 @@ def test_fault_modes_listing(client):
     assert rows["CC-SURGE"]["equip_ids"] == ["C-3101"] and "ST-WATER-INDUCTION" not in rows
     assert rows["RC-VALVE-LEAK"]["equip_ids"] == ["C-3102"] and rows["CC-SURGE"]["unobserved"]
     assert not {"label", "kind", "cause", "expect"} & set(rows["CC-SURGE"])
+    assert rows["CC-SURGE"]["basis"] == "성능 맵 없음, 서지 한계·운전점을 계산하지 않는다"      # 모델 종류 표시: 물리 계산 없이 정한 효과의 근거
+    assert rows["RC-VALVE-LEAK"]["basis"] is None
 
 
 def test_flow_graph(client):
     """3D 뷰어가 읽는 공정 흐름 그래프: 공정 노드, 설비와 축 연결, 간선(stream)."""
     body = client.get("/plant/flow").json()
-    assert body["plant"] == "PL-RHDS" and body["nodes"]["SP"] == "고압 분리기"
+    assert body["plant"] == "RHDS" and body["nodes"]["SP"] == "고압 분리기"
     assert {"equip_id": "GB-3101", "driven_by": "M-3101"} in body["equipment"]
     assert {"from": "C-3102", "to": "C-3101", "label": "보충 수소", "stream": "utility"} in body["edges"]
     assert {e["stream"] for e in body["edges"]} == {"process", "utility"}
@@ -74,13 +92,13 @@ def test_inject_busy_stop_answer_key(client):
     r = client.post("/plant/anomalies", json=SURGE, headers=TOKEN)
     assert r.status_code == 201, r.text
     body = r.json()
-    assert set(body) == {"event_id", "equip_id", "mode", "speed", "start_at"} and body["speed"] == 1 and body["event_id"].startswith("FM-PL-RHDS-")
+    assert set(body) == {"event_id", "equip_id", "mode", "speed", "start_at"} and body["speed"] == 1 and body["event_id"].startswith("FM-RHDS-")
     assert client.post("/plant/anomalies", json=SURGE, headers=TOKEN).status_code == 409
     _wait(client, "/plant/health", lambda h: h["sim_now"] > body["start_at"], timeout=8.0)   # 시작 뒤에 멈춰야 정답지에 남는다
     stop = client.post("/plant/anomalies/C-3101/stop", headers=TOKEN).json()
     assert stop["stopped"] == [body["event_id"]] and stop["stop_requested_at"] >= body["start_at"]
     assert client.post("/plant/anomalies/C-3101/stop", headers=TOKEN).status_code == 404
-    row = next(x for x in client.get("/plant/anomalies?equip_id=C-3101").json() if x["event_id"] == body["event_id"])
+    row = next(x for x in client.get("/plant/anomalies?equip_id=C-3101", headers=EVAL).json() if x["event_id"] == body["event_id"])
     assert row["mode"] == "CC-SURGE" and row["stop_requested_at"] == stop["stop_requested_at"] and row["end_at"] is not None
     assert row["response_tags"] and row["stages"][0]["id"] == "S1"
 
@@ -117,9 +135,9 @@ TS = {"equip_id": "C-3101", "tag_id": "XI-X-C3101", "to": "2026-11-13T00:00:00Z"
 @pytest.mark.parametrize("path,extra", [("/plant/anomalies", {}), ("/plant/timeseries", TS)])
 def test_unparseable_time_is_400(client, path, extra):
     """'+09:00' 을 인코딩하지 않으면 공백이 되어 못 읽는다 → 500 이 아니라 Z·%2B 를 알려 주는 400."""
-    r = client.get(path, params=extra | {"from": "2026-11-12T09:00:00 09:00"})
+    r = client.get(path, params=extra | {"from": "2026-11-12T09:00:00 09:00"}, headers=EVAL)
     assert r.status_code == 400 and "from" in r.json()["detail"] and "%2B" in r.json()["detail"]
-    assert client.get(path, params=extra | {"from": "2026-11-12T00:00:00Z"}).status_code == 200
+    assert client.get(path, params=extra | {"from": "2026-11-12T00:00:00Z"}, headers=EVAL).status_code == 200
 
 
 def test_active_list_follows_inject_and_stop(client):
@@ -167,7 +185,7 @@ def test_repair_after_stop_clears_damage(client):
     assert all(d["equip_id"] != "C-3102" for d in client.get("/plant/anomalies/damaged").json())
     assert client.post("/plant/anomalies/C-3102/repair", headers=TOKEN).status_code == 404
     assert client.post("/plant/anomalies/X-9999/repair", headers=TOKEN).status_code == 404
-    row = next(x for x in client.get("/plant/anomalies?equip_id=C-3102").json() if x["event_id"] == body["event_id"])
+    row = next(x for x in client.get("/plant/anomalies?equip_id=C-3102", headers=EVAL).json() if x["event_id"] == body["event_id"])
     assert row["damage_remains"] and row["repair_requested_at"] == r.json()["repair_requested_at"] and row["end_at"] > row["repair_requested_at"]
     stages = next(m for m in client.get("/plant/fault-modes").json() if m["mode"] == "RC-VALVE-LEAK")["stages"]
     assert [s["damage"] for s in stages] == [True, True]

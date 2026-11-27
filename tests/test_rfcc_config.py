@@ -2,12 +2,19 @@
 from common.config_models import load_plant, load_runtime
 
 TEMPS = {"bearing_temp", "suction_temp", "discharge_temp", "oil_temp"}
+# 자료 밖 합성 추가 태그: 입구 증기 온도와 2026-11-27 추가 계측 (설명의 합성 표시는 2026-11-27 에 뺐다). P-1101B 는 tag_id 로 거른다
+SYNTHETIC_ADDED = {"STT-T-1401",
+                   "PDI-P-1101A-STR", "PI-P-1101A-STR", "SI-P-1101A", "PD-P-1101A-D2", "FI-1101-HDR",
+                   "PDI-P-1101B-STR", "PI-P-1101B-STR", "SI-P-1101B", "PD-P-1101B-D2",
+                   "PDI-P-1303A-STR", "PI-P-1303A-STR", "SI-P-1303A", "ZI-1303-FCV", "PD-P-1303A-D2"}
 
 
 def test_rfcc_plant_matches_sample_package(rfcc_plant_path):
     plant = load_plant(rfcc_plant_path)
-    tags = [t for t in plant.all_tags() if "(synthetic)" not in (t.description or "")]   # 합성 추가 STT-T-1401 제외
-    assert len(plant.equipment) == 12 and len(tags) == 81 and len(plant.all_tags()) == 82
+    added = {t.tag_id: t for t in plant.all_tags() if t.tag_id in SYNTHETIC_ADDED}
+    assert set(added) == SYNTHETIC_ADDED and all(t.description for t in added.values())
+    tags = [t for t in plant.all_tags() if t.tag_id not in SYNTHETIC_ADDED and "1101B" not in t.tag_id]
+    assert len(plant.equipment) == 13 and len(tags) == 81 and len(plant.all_tags()) == 102
     assert len(plant.unit_ids()) == 8 and len(plant.plant.unit_groups) == 5
     temps = [t for t in tags if t.signal in TEMPS]
     assert len(temps) == 16 and all(t.interval_sec == 10 for t in temps)

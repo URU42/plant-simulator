@@ -1,4 +1,4 @@
-# 구성안: HOU (수첨분해) (PL-HOU) — 다중 공장 설계 docs/superpowers/specs/2026-11-09-multi-plant-design.md
+# 구성안: HOU (수첨분해) — 다중 공장 설계 docs/superpowers/specs/2026-11-09-multi-plant-design.md
 # - 출처: hou-plant-sample/data/HOU_*.xlsx 의 `설비 설명`(계층)·`설비 태그`(태그명·설명·단위·정상 기준·경고/알람/정지 상·하한·근거) 시트. 마스터 값은 그대로.
 # - 태그명은 같은 설비 안에서만 고유하다 (복합키 (equip_id, tag_id)). 한계값·정상 기준·근거는 자료 그대로이며 빈 칸은 적지 않았다.
 # - decimals 는 데이터의 소수 자릿수.
@@ -9,9 +9,9 @@
 #   식이 정하는 변동을 그대로 쓴다(물리식 우선, 사용자 확정). μ 는 자료 그대로, σ 는 식만의 변동이 자료 σ 를 넘으면 정상 생성값으로 바꿨다
 #   (자체 잡음 = 자료 σ × 0.3). 자료 σ 이하면 자료 σ 에 맞게 자체 잡음으로 채웠다. RFCC 의 μ±3σ 경고 한계는 새 σ 로 다시 계산했다(2026-11-23 공학 기준값으로 바뀜).
 plant:
-  plant_id: PL-HOU
+  plant_id: HOU
   name: "HOU (수첨분해)"
-  config_version: 4
+  config_version: 7                 # 2026-11-27 추가 계측(스트레이너·회전수·밸브 개도·이중화 토출·헤더 유량) 반영. 2026-11-26 압축기 구동기 추가. 2026-11-25 PU-D5a: P-2101-S2 추가 (직렬 2단), 바뀐 μ·σ·한계는 limit_basis
   unit_groups:
     - id: UG-HOU-01
       name: "원료 공급"
@@ -41,6 +41,8 @@ equipment_types:
   - { type: PM, name: 펌프, prefix: P, kind: pump }
   - { type: CC, name: 압축기, prefix: C, kind: compressor }
   - { type: FN, name: 팬, prefix: F, kind: fan }
+  - { type: MT, name: 전동기, prefix: M, kind: motor }
+  - { type: GB, name: 기어박스, prefix: GB, kind: gearbox }
 
 # 표준 태그 (신호 종류 · 대표 접두어 · 대표 단위). 태그별 실제 단위는 각 태그에 적는다
 signals:
@@ -48,6 +50,7 @@ signals:
   - { signal: bearing_temp, prefix: TI, unit: "DEG C", name: 베어링 온도 }
   - { signal: suction_pressure, prefix: PI, unit: "kg/cm2(g)", name: 흡입 압력 }
   - { signal: discharge_pressure, prefix: PI, unit: "kg/cm2(g)", name: 토출 압력 }
+  - { signal: redundant_discharge_pressure, prefix: PI, unit: "kg/cm2(g)", name: 토출 압력(이중화 전송기) }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: interstage_pressure, prefix: PI, unit: "kg/cm2(g)", name: 단간 압력 }
   - { signal: flow, prefix: FI, unit: "m3/h", name: 유량 }
   - { signal: current, prefix: II, unit: "A", name: 모터 전류 }
@@ -60,6 +63,9 @@ signals:
   - { signal: oil_pressure, prefix: PI, unit: "kg/cm2(g)", name: 윤활유 압력 }
   - { signal: oil_temp, prefix: TI, unit: "DEG C", name: 윤활유 온도 }
   - { signal: process_temp, prefix: TI, unit: "DEG C", name: 공정 유체 온도 }
+  - { signal: strainer_dp, prefix: PDI, unit: kPa, name: 흡입 스트레이너 차압 }   # 2026-11-27 추가 계측 (synthetic)
+  - { signal: strainer_inlet_pressure, prefix: PI, unit: "kg/cm2(g)", name: 스트레이너 앞 흡입 압력 }   # 2026-11-27 추가 계측 (synthetic)
+  - { signal: control_valve_position, prefix: ZI, unit: "%", name: 제어밸브 개도 }   # 2026-11-27 추가 계측 (synthetic)
 
 # 정상 운전 공통 요인 (synthetic): 공정 그룹마다 평균 0 인 빠른 성분 하나를 아래 신호의 태그들이 나눠 갖는다.
 # 태그 분산 중 share 만큼이 공통 요인이고, 부호는 그 신호가 부하와 같이(1)·반대로(-1) 움직이는지다.
@@ -107,8 +113,10 @@ flow:
     - [C-2201, MIX, H2, utility]
     - [C-2301, MIX, "recycle H2", utility]
     - [FN-2401, FURN, "combustion air", utility]
-    - [P-2101, MIX, "pressurized feed", process]
+    - [P-2101, P-2101-S2, "stage 1 discharge", process]   # 가상 공장 추가 (PU-D5a)
+    - [P-2101-S2, MIX, "pressurized feed", process]
     - [P-2501, C-2301, "lube oil", utility]
+    - [P-2501, GB-2301, "lube oil", utility]   # 가상 공장 추가 (2026-11-26)
     - [P-2601, FRAC, reflux, process]
     - [P-2701, MIX, "UCO recycle", process]
     - [C-2201, C-2301, 보충 수소, utility]   # 가상 공장 추가 (뷰어에 없음)
@@ -178,14 +186,14 @@ equipment:
       - { tag_id: PI-2101B,
           signal: discharge_pressure,
           unit: "kg/cm2(g)",
-          description: "펌프 토출압력",
-          limits: { alarm_lo: 170, alarm_hi: 198, trip_hi: 205 },
-          normal_ref: "185",
-          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          description: "1단 토출 압력 (2단으로 가는 중간 압력)",
+          limits: { alarm_lo: 88.1, alarm_hi: 103, trip_hi: 106 },
+          normal_ref: "96",
+          limit_basis: "1단 토출 = 중간 압력 (synthetic 2026-11-25 PU-D5a: 두 대 직렬, 같은 곡선 두 단). 이전 한계/이전 μ 비율 × 새 μ, 유효숫자 3자리",
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r006,
-          control: { mean: 185.02, sigma: 0.7774128342032636 } }
+          control: { mean: 95.8984, sigma: 0.4029437192712044 } }
       - { tag_id: FI-2101,
           signal: flow,
           unit: "m3/h",
@@ -201,19 +209,233 @@ equipment:
           signal: current,
           unit: "A",
           description: "모터 전류",
-          limits: { alarm_hi: 195, trip_hi: 210 },
-          normal_ref: "168",
-          limit_basis: "원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          limits: { alarm_hi: 97.5, trip_hi: 105 },
+          normal_ref: "86",
+          limit_basis: "단 축동력 (synthetic 2026-11-25 PU-D5a: 두 대 직렬, 같은 곡선 두 단). 이전 한계/이전 μ 비율 × 새 μ, 유효숫자 3자리",
           interval_sec: 1,
           decimals: 2,
           seed_key: hou-r008,
-          derive: { formula: power, terms: [{ tag: FI-2101, exp: 1 }, { tag: PI-2101B, minus: PI-2101A, exp: 1 }], noise_sigma: 0.611101 },
-          control: { mean: 171.73, sigma: 2.40704 } }
+          derive: { formula: power, terms: [{ tag: FI-2101, exp: 1 }, { tag: PI-2101B, minus: PI-2101A, exp: 1 }], noise_sigma: 0.806746 },
+          control: { mean: 85.8938, sigma: 1.01884 } }
+      - { tag_id: PDI-2101-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "흡입 스트레이너 차압",
+          limits: { warn_hi: 40, alarm_hi: 80 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 40·경보 80 kPa(고압 구간이라 약한 막힘 차압의 약 2배로 둠). 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-2101-STR,
+          signal: strainer_inlet_pressure,
+          unit: "kg/cm2(g)",
+          description: "스트레이너 앞 흡입 압력",
+          limits: { trip_lo: 3.5, alarm_lo: 4.5, alarm_hi: 9.0 },
+          limit_basis: "가정값: 같은 설비 흡입 압력(PI-2101A)과 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: hou-str-pi,
+          control: { mean: 6.767986, sigma: 0.1581 } }
+      - { tag_id: SI-2101,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도",
+          limits: { alarm_lo: 3222, warn_lo: 3401 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: hou-2101-spd,
+          control: { mean: 3580.0, sigma: 1.5 } }
+      - { tag_id: PI-2101B-D2,
+          signal: redundant_discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "토출 압력 이중화 전송기",
+          limits: { alarm_hi: 103.0, trip_hi: 106.0, alarm_lo: 88.1 },
+          limit_basis: "가정값: PI-2101B 와 같은 한계",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r006-d2,
+          control: { mean: 95.8984, sigma: 0.4029437192712044 } }
+  # 합성 추가 (2026-11-25 PU-D5a): 자료에 없는 두 번째 펌프(P-2101 와 직렬 2단). 태그·단위·주기·잡음은 P-2101 를 본떴고 개별 잡음은 seed_key 로 독립이다
+  - equip_id: P-2101-S2
+    name: "고압 원료 공급 펌프 2단 (High Pressure Feed Pump Stage 2)"
+    type: PM
+    unit_id: UNIT-HOU-01
+    tags:
+      - { tag_id: VI-2101S2A,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 구동측 진동",
+          limits: { warn_hi: 3.5, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "2.1",
+          limit_basis: "P-2101 를 본뜬 합성 설비: 원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r101,
+          control: { mean: 2.132, sigma: 0.10589142125775654 } }
+      - { tag_id: VI-2101S2B,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "펌프 반구동측 진동",
+          limits: { warn_hi: 3.5, alarm_hi: 4.5, trip_hi: 7.1 },
+          normal_ref: "1.7",
+          limit_basis: "P-2101 를 본뜬 합성 설비: 원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r102,
+          control: { mean: 1.739, sigma: 0.08023931197239917 } }
+      - { tag_id: TI-2101S2A,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 구동측 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "68",
+          limit_basis: "P-2101 를 본뜬 합성 설비: 원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r103,
+          control: { mean: 67.685, sigma: 0.6015978203916633 } }
+      - { tag_id: TI-2101S2B,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "펌프 반구동측 베어링 온도",
+          limits: { warn_hi: 80, alarm_hi: 90, trip_hi: 100 },
+          normal_ref: "63",
+          limit_basis: "P-2101 를 본뜬 합성 설비: 원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r104,
+          control: { mean: 62.12, sigma: 0.43055568750743833 } }
+      - { tag_id: PI-2101S2A,
+          signal: suction_pressure,
+          unit: "kg/cm2(g)",
+          description: "2단 흡입 압력 (중간 압력)",
+          limits: { alarm_lo: 64.2, alarm_hi: 128, trip_lo: 49.9 },
+          normal_ref: "96",
+          limit_basis: "P-2101 를 본뜬 합성 설비: 2단 흡입 = 중간 압력 (synthetic 2026-11-25 PU-D5a: 두 대 직렬, 같은 곡선 두 단). 이전 한계/이전 μ 비율 × 새 μ, 유효숫자 3자리",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r105,
+          control: { mean: 95.8386, sigma: 0.4029437192712044 } }
+      - { tag_id: PI-2101S2B,
+          signal: discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "2단 최종 토출 압력",
+          limits: { alarm_lo: 170, alarm_hi: 198, trip_hi: 205 },
+          normal_ref: "185",
+          limit_basis: "P-2101 를 본뜬 합성 설비: 원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r106,
+          control: { mean: 185.02, sigma: 0.7774128342032636 } }
+      - { tag_id: FI-2101S2,
+          signal: flow,
+          unit: "m3/h",
+          description: "펌프 토출 유량",
+          limits: { alarm_lo: 130, alarm_hi: 215, trip_lo: 100 },
+          normal_ref: "182",
+          limit_basis: "P-2101 를 본뜬 합성 설비: 원 자료의 [예시] 한계값. 공개 자료의 일반 범위를 참고한 가정값이며 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r107,
+          control: { mean: 185.41, sigma: 1.934831324815192 } }
+      - { tag_id: II-2101S2,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { alarm_hi: 97.5, trip_hi: 105 },
+          normal_ref: "86",
+          limit_basis: "P-2101 를 본뜬 합성 설비: 단 축동력 (synthetic 2026-11-25 PU-D5a: 두 대 직렬, 같은 곡선 두 단). 이전 한계/이전 μ 비율 × 새 μ, 유효숫자 3자리",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r108,
+          derive: { formula: power, terms: [{ tag: FI-2101S2, exp: 1 }, { tag: PI-2101S2B, minus: PI-2101S2A, exp: 1 }], noise_sigma: 0.775959 },
+          control: { mean: 85.8938, sigma: 1.01884 } }
+      - { tag_id: PDI-2101S2-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "단간(1단 출구 → 2단 흡입) 스트레이너 차압",
+          limits: { warn_hi: 970, alarm_hi: 1940 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 970·경보 1940 kPa(고압 구간이라 약한 막힘 차압의 약 2배로 둠). 실제 설정값 아님 (합성 설비)",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-s2-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-2101S2-STR,
+          signal: strainer_inlet_pressure,
+          unit: "kg/cm2(g)",
+          description: "스트레이너 앞 단간(1단 출구 → 2단 흡입) 압력",
+          limits: { trip_lo: 49.9, alarm_lo: 64.2, alarm_hi: 128.0 },
+          limit_basis: "가정값: 같은 설비 흡입 압력(PI-2101S2A)과 같은 한계 (합성 설비)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: hou-s2-str-pi,
+          control: { mean: 95.889573, sigma: 0.4029 } }
+      - { tag_id: SI-2101S2,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도",
+          limits: { alarm_lo: 3222, warn_lo: 3401 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님 (합성 설비)",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: hou-2101s2-spd,
+          control: { mean: 3580.0, sigma: 1.5 } }
+      - { tag_id: PI-2101S2B-D2,
+          signal: redundant_discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "토출 압력 이중화 전송기",
+          limits: { alarm_hi: 198.0, trip_hi: 205.0, alarm_lo: 170.0 },
+          limit_basis: "가정값: PI-2101S2B 와 같은 한계 (합성 설비)",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r106-d2,
+          control: { mean: 185.02, sigma: 0.7774128342032636 } }
   # ---------------- UNIT-HOU-02 보충 수소 압축 ----------------
+  # 합성 추가 (2026-11-26): 자료에 없는 구동 전동기 (C-2201 직결). M-3102(RHDS) 를 본떴다. 한계값 없음, μ·σ 는 합성값. 회전속도 μ·σ 는 C-2201 에 맞췄다
+  - equip_id: M-2201
+    name: "보충 수소 압축기 구동 전동기 (Make-up Hydrogen Compressor Motor)"
+    type: MT
+    unit_id: UNIT-HOU-02
+    tags:
+      - { tag_id: VI-A-M2201,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "구동측 케이싱 진동",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r119,
+          control: { mean: 1.5, sigma: 0.04 } }
+      - { tag_id: TI-B-M2201,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "구동측 베어링 온도",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r120,
+          control: { mean: 65.0, sigma: 0.18 } }
+      - { tag_id: II-M2201,
+          signal: current,
+          unit: "A",
+          description: "전동기 전류",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r121,
+          control: { mean: 210.0, sigma: 0.6 } }
+      - { tag_id: SI-M2201,
+          signal: speed,
+          unit: "rpm",
+          description: "전동기 회전속도",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r122,
+          control: { mean: 330.4, sigma: 0.5092344403884889 } }
   - equip_id: C-2201
     name: "보충 수소 압축기 (Make-up Hydrogen Compressor)"
     type: CC
     unit_id: UNIT-HOU-02
+    driven_by: M-2201
     tags:
       - { tag_id: VI-2201A,
           signal: vibration,
@@ -298,7 +520,7 @@ equipment:
       - { tag_id: PI-2201C,
           signal: interstage_pressure,
           unit: "kg/cm2(g)",
-          description: "1단 토출(단간) 압력 (synthetic)",
+          description: "1단 토출(단간) 압력",
           limit_basis: "synthetic: 2단·단별 압력비 같음 가정 √(P_s·P_d), 한계값 없음",
           interval_sec: 1,
           decimals: 3,
@@ -328,10 +550,104 @@ equipment:
           seed_key: hou-r017,
           control: { mean: 330.4, sigma: 0.5092344403884889 } }
   # ---------------- UNIT-HOU-03 수소 순환 ----------------
+  # 합성 추가 (2026-11-26): 자료에 없는 가변속 전동기·증속 기어박스 (M-2301 → GB-2301 → C-2301, 기어박스 윤활유는 P-2501). M-3101·GB-3101(RHDS) 를 본떴다. 한계값 없음, μ·σ 는 합성값. 회전속도 μ·σ 는 C-2301 에 맞췄다
+  - equip_id: M-2301
+    name: "순환가스 압축기 구동 가변속 전동기 (Recycle Gas Compressor VFD Motor)"
+    type: MT
+    unit_id: UNIT-HOU-03
+    tags:
+      - { tag_id: VI-A-M2301,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "구동측 케이싱 진동",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r109,
+          control: { mean: 1.2, sigma: 0.04 } }
+      - { tag_id: TI-B-M2301,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "구동측 베어링 온도",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r110,
+          control: { mean: 68.0, sigma: 0.18 } }
+      - { tag_id: II-M2301,
+          signal: current,
+          unit: "A",
+          description: "전동기 전류",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r111,
+          control: { mean: 310.0, sigma: 0.8 } }
+      - { tag_id: SI-M2301,
+          signal: speed,
+          unit: "rpm",
+          description: "전동기 회전속도",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: hou-r112,
+          control: { mean: 1790.0, sigma: 2.985039174495527 } }
+  - equip_id: GB-2301
+    name: "순환가스 압축기 증속 기어박스 (Recycle Gas Compressor Gearbox)"
+    type: GB
+    unit_id: UNIT-HOU-03
+    driven_by: M-2301
+    tags:
+      - { tag_id: VI-O-GB2301,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "출력축(고속)측 케이싱 진동",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r113,
+          control: { mean: 1.8, sigma: 0.05 } }
+      - { tag_id: VI-I-GB2301,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "입력축(저속)측 케이싱 진동",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-r114,
+          control: { mean: 1.4, sigma: 0.04 } }
+      - { tag_id: TI-B-GB2301,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "출력축 베어링 온도",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r115,
+          derive: { formula: power, out_offset: 273.15, terms: [{ tag: TI-LO-GB2301, offset: 273.15, exp: 1 }], noise_sigma: 0.054 },
+          control: { mean: 72.0, sigma: 0.196528 } }
+      - { tag_id: TI-LO-GB2301,
+          signal: oil_temp,
+          unit: "DEG C",
+          description: "윤활유 공급 온도",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: hou-r116,
+          control: { mean: 48.0, sigma: 0.18 } }
+      - { tag_id: PI-LO-GB2301,
+          signal: oil_pressure,
+          unit: "kg/cm2(g)",
+          description: "윤활유 공급 압력",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: hou-r117,
+          control: { mean: 2.2434, sigma: 0.00407886 } }
+      - { tag_id: SI-GB2301,
+          signal: speed,
+          unit: "rpm",
+          description: "출력축 회전속도",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: hou-r118,
+          control: { mean: 5285.1, sigma: 8.813536615154364 } }
   - equip_id: C-2301
     name: "수소 순환 압축기 (Recycle Gas Compressor)"
     type: CC
     unit_id: UNIT-HOU-03
+    driven_by: GB-2301
     tags:
       - { tag_id: VI-2301A,
           signal: shaft_vibration,
@@ -848,3 +1164,53 @@ equipment:
           seed_key: hou-r061,
           derive: { formula: power, terms: [{ tag: FI-2701, exp: 1 }, { tag: PI-2701B, minus: PI-2701A, exp: 1 }], noise_sigma: 0.173923 },
           control: { mean: 92.55, sigma: 1.18255 } }
+      - { tag_id: PDI-2701-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "후속 펌프 흡입 스트레이너 차압",
+          limits: { warn_hi: 30, alarm_hi: 60 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 30·경보 60 kPa. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: hou-d-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-2701-STR,
+          signal: strainer_inlet_pressure,
+          unit: "kg/cm2(g)",
+          description: "후속 펌프 스트레이너 앞 흡입 압력",
+          limits: { trip_lo: 1.4, alarm_lo: 2.2, alarm_hi: 5.5 },
+          limit_basis: "가정값: 같은 설비 흡입 압력(PI-2701A)과 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: hou-d-str-pi,
+          control: { mean: 3.739986, sigma: 0.0451 } }
+      - { tag_id: SI-2701,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도",
+          limits: { alarm_lo: 3204, warn_lo: 3382 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: hou-2701-spd,
+          control: { mean: 3560.0, sigma: 1.5 } }
+      - { tag_id: ZI-2701-FCV,
+          signal: control_valve_position,
+          unit: "%",
+          description: "제품 제어밸브 개도(위치 전송기)",
+          limits: { alarm_lo: 70, warn_lo: 85 },
+          limit_basis: "가정값: 정상 개도 100 %(가상 밸브), 경고 85·경보 70 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-fcv-zi,
+          control: { mean: 100.0, sigma: 0.3 } }
+      - { tag_id: PI-2701B-D2,
+          signal: redundant_discharge_pressure,
+          unit: "kg/cm2(g)",
+          description: "토출 압력 이중화 전송기",
+          limits: { alarm_hi: 38.0, alarm_lo: 26.0, trip_lo: 22.0 },
+          limit_basis: "가정값: PI-2701B 와 같은 한계",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: hou-r059-d2,
+          control: { mean: 31.46, sigma: 0.15287292703741778 } }

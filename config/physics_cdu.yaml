@@ -1,0 +1,19 @@
+# synthetic assumption: 실제 SK 공장 도면·성능곡선·운전 데이터와 무관한 합성 근사.
+plant_id: CDU
+unit_id: UNIT-CDU-01
+equip_id: P-8101A
+outlet_node: DS
+provenance: synthetic assumption
+atmospheric_pa: 101325
+density_kg_m3: 850
+heat_capacity_j_kg_k: 2100
+inlet_temp_k: 313.15
+nominal_flow_m3_s: 0.11148554166666667
+shutoff_rise_pa: 3100000
+nominal_rise_pa: 2452956.9778
+efficiency: 0.75
+pipe_length_m: 70
+pipe_diameter_m: 0.25
+darcy_factor: 0.025
+minor_loss_coefficient: 8
+outlet_abs_pa: 2796063.17248

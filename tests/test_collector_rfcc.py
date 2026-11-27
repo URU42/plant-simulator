@@ -55,17 +55,17 @@ def test_old_ingest_batches_are_deleted(client):
 
 def test_equipment_listing_follows_hierarchy(client):
     equipment = client.get("/plant/equipment").json()
-    assert [e["equip_id"] for e in equipment][:3] == ["P-1101A", "B-1201", "E-1202"]
-    assert equipment[0]["unit_group_name"] == "원료 공급" and equipment[1]["driven_by"] == "E-1202"
+    assert [e["equip_id"] for e in equipment][:3] == ["P-1101A", "P-1101B", "B-1201"]
+    assert equipment[0]["unit_group_name"] == "원료 공급" and equipment[2]["driven_by"] == "E-1202"
     tags = {t["tag_id"]: t for e in equipment for t in e["tags"]}
-    assert len(tags) == 82 and tags["TI-P-1101A"]["interval_sec"] == 10 and tags["ZI-E-1202"]["decimals"] == 5
+    assert len(tags) == 102 and tags["TI-P-1101A"]["interval_sec"] == 10 and tags["ZI-E-1202"]["decimals"] == 5
     assert tags["TI-P-1101A"]["description"] == "펌프 구동측 베어링 온도"
 
 
 def test_current_lists_every_tag(client):
     _send(client, "VI-P-1101A", "P-1101A", T0, 1, 1, 1.45)
     rows = {r["tag_id"]: r for r in client.get("/plant/current").json()}
-    assert len(rows) == 82
+    assert len(rows) == 102
     assert rows["VI-P-1101A"]["value"] == 1.45 and "status" not in rows["VI-P-1101A"]
     assert rows["TI-P-1101A"]["value"] is None and rows["TI-P-1101A"]["ts"] is None      # 아직 값이 없는 태그
 

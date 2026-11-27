@@ -1,4 +1,4 @@
-# 구성안: VRDS (감압 잔사유 수첨탈황) (PL-VRDS) — 다중 공장 설계 docs/superpowers/specs/2026-11-09-multi-plant-design.md
+# 구성안: VRDS (감압 잔사유 수첨탈황) — 다중 공장 설계 docs/superpowers/specs/2026-11-09-multi-plant-design.md
 # - 출처: RHDS_VRDS_v3/data/VRDS_*.xlsx 의 `설비 설명`(계층)·`설비 태그`(태그명·설명·단위·정상 기준·경고/알람/정지 상·하한·근거) 시트. 마스터 값은 그대로.
 # - 태그명은 자료의 이름에 설비 종류 문자를 넣어 공장 안에서 고유하게 바꿨다 (P-4101 의 TI-B-4101 → TI-B-P4101). 키는 그대로 (equip_id, tag_id). 한계값·정상 기준·근거는 자료 그대로이며 빈 칸은 적지 않았다.
 # - 알람·정지값은 자료에 없어 CDU·HOU 의 같은 신호 경고→알람→정지 간격을 경고값에 적용했다 (규칙은 limit_basis). 유효숫자 3자리.
@@ -11,9 +11,9 @@
 #   식이 정하는 변동을 그대로 쓴다(물리식 우선, 사용자 확정). μ 는 자료 그대로, σ 는 식만의 변동이 자료 σ 를 넘으면 정상 생성값으로 바꿨다
 #   (자체 잡음 = 자료 σ × 0.3). 자료 σ 이하면 자료 σ 에 맞게 자체 잡음으로 채웠다. RFCC 의 μ±3σ 경고 한계는 새 σ 로 다시 계산했다(2026-11-23 공학 기준값으로 바뀜).
 plant:
-  plant_id: PL-VRDS
+  plant_id: VRDS
   name: "VRDS (감압 잔사유 수첨탈황)"
-  config_version: 7
+  config_version: 10                # 2026-11-27 추가 계측(스트레이너·회전수·밸브 개도·이중화 토출·헤더 유량) 반영. 2026-11-26 압축기 구동기 추가. 2026-11-25 PU-D5a: P-4101-S2 추가 (직렬 2단), 바뀐 μ·σ·한계는 limit_basis
   unit_groups:
     - id: UG-VRDS-01
       name: "원료 공급"
@@ -46,6 +46,7 @@ equipment_types:
   - { type: CC, name: 압축기, prefix: C, kind: compressor }
   - { type: FN, name: 팬, prefix: F, kind: fan }
   - { type: MT, name: 전동기, prefix: M, kind: motor }
+  - { type: GB, name: 기어박스, prefix: GB, kind: gearbox }
 
 # 표준 태그 (신호 종류 · 대표 접두어 · 대표 단위). 태그별 실제 단위는 각 태그에 적는다
 signals:
@@ -53,6 +54,7 @@ signals:
   - { signal: bearing_temp, prefix: TI, unit: "DEG C", name: 베어링 온도 }
   - { signal: suction_pressure, prefix: PI, unit: "bar(g)", name: 흡입 압력 }
   - { signal: discharge_pressure, prefix: PI, unit: "bar(g)", name: 토출 압력 }
+  - { signal: redundant_discharge_pressure, prefix: PI, unit: "bar(g)", name: 토출 압력(이중화 전송기) }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: interstage_pressure, prefix: PI, unit: "bar(g)", name: 단간 압력 }
   - { signal: flow, prefix: FI, unit: "m3/h", name: 유량 }
   - { signal: current, prefix: II, unit: "A", name: 모터 전류 }
@@ -65,6 +67,9 @@ signals:
   - { signal: oil_temp, prefix: TI, unit: "DEG C", name: 윤활유 온도 }
   - { signal: differential_pressure, prefix: PDI, unit: "Pa", name: 차압 }
   - { signal: process_temp, prefix: TI, unit: "DEG C", name: 공정 유체 온도 }
+  - { signal: strainer_dp, prefix: PDI, unit: kPa, name: 흡입 스트레이너 차압 }   # 2026-11-27 추가 계측 (synthetic)
+  - { signal: strainer_inlet_pressure, prefix: PI, unit: "bar(g)", name: 스트레이너 앞 흡입 압력 }   # 2026-11-27 추가 계측 (synthetic)
+  - { signal: control_valve_position, prefix: ZI, unit: "%", name: 제어밸브 개도 }   # 2026-11-27 추가 계측 (synthetic)
 
 # 정상 운전 공통 요인 (synthetic): 공정 그룹마다 평균 0 인 빠른 성분 하나를 아래 신호의 태그들이 나눠 갖는다.
 # 태그 분산 중 share 만큼이 공통 요인이고, 부호는 그 신호가 부하와 같이(1)·반대로(-1) 움직이는지다.
@@ -84,7 +89,8 @@ flow:
     FR: "제품 분별탑"
     HX: "원료·반응 유출물 열교환기"
   edges:
-    - [P-4101, MX, "", process]
+    - [P-4101, P-4101-S2, "", process]   # 가상 공장 추가 (PU-D5a)
+    - [P-4101-S2, MX, "", process]
     - [MX, HX, "저온측", process]
     - [HX, HT, "저온측", process]
     - [HT, RX, "", process]
@@ -140,13 +146,13 @@ equipment:
       - { tag_id: PI-D-P4101,
           signal: discharge_pressure,
           unit: "bar(g)",
-          description: "토출 압력",
-          limits: { warn_hi: 170, alarm_hi: 178, trip_hi: 187 },
-          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×1.05, 정지 ×1.10",
+          description: "1단 토출 압력 (2단으로 가는 중간 압력)",
+          limits: { warn_hi: 87.7, alarm_hi: 91.9, trip_hi: 96.5 },
+          limit_basis: "1단 토출 = 중간 압력 (synthetic 2026-11-25 PU-D5a: 두 대 직렬, 같은 곡선 두 단). 이전 한계/이전 μ 비율 × 새 μ, 유효숫자 3자리; σ 는 회로가 정한 합성값 (2026-11-26)",
           interval_sec: 1,
-          decimals: 2,
+          decimals: 3,
           seed_key: vrds-r004,
-          control: { mean: 164.35, sigma: 0.1374126557317299 } }
+          control: { mean: 84.8072, sigma: 0.260169 } }
       - { tag_id: FI-P4101,
           signal: flow,
           unit: "m3/h",
@@ -161,13 +167,160 @@ equipment:
           signal: current,
           unit: "A",
           description: "모터 전류",
-          limits: { warn_hi: 210, alarm_hi: 223, trip_hi: 240 },
-          limit_basis: "원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×1.06, 정지 = 알람 ×1.08",
+          limits: { warn_hi: 105, alarm_hi: 112, trip_hi: 120 },
+          limit_basis: "단 축동력 (synthetic 2026-11-25 PU-D5a: 두 대 직렬, 같은 곡선 두 단). 이전 한계/이전 μ 비율 × 새 μ, 유효숫자 3자리",
           interval_sec: 1,
           decimals: 2,
           seed_key: vrds-r006,
-          derive: { formula: power, terms: [{ tag: FI-P4101, exp: 1 }, { tag: PI-D-P4101, minus: PI-S-P4101, exp: 1 }], noise_sigma: 0.210358 },
-          control: { mean: 165.3, sigma: 1.18532 } }
+          derive: { formula: power, terms: [{ tag: FI-P4101, exp: 1 }, { tag: PI-D-P4101, minus: PI-S-P4101, exp: 1 }], noise_sigma: 0.105222 },
+          control: { mean: 82.6835, sigma: 0.414549 } }
+      - { tag_id: PDI-P4101-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "흡입 스트레이너 차압",
+          limits: { warn_hi: 40, alarm_hi: 80 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 40·경보 80 kPa(고압 구간이라 약한 막힘 차압의 약 2배로 둠). 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: vrds-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-P4101-STR,
+          signal: strainer_inlet_pressure,
+          unit: "bar(g)",
+          description: "스트레이너 앞 흡입 압력",
+          limits: { trip_lo: 2.24, alarm_lo: 2.8, warn_lo: 3.5 },
+          limit_basis: "가정값: 같은 설비 흡입 압력(PI-S-P4101)과 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: vrds-str-pi,
+          control: { mean: 5.250000, sigma: 0.0182 } }
+      - { tag_id: SI-P4101,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도",
+          limits: { alarm_lo: 3213, warn_lo: 3392 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: vrds-p4101-spd,
+          control: { mean: 3570.0, sigma: 1.5 } }
+      - { tag_id: PI-D-P4101-D2,
+          signal: redundant_discharge_pressure,
+          unit: "bar(g)",
+          description: "토출 압력 이중화 전송기",
+          limits: { warn_hi: 87.7, alarm_hi: 91.9, trip_hi: 96.5 },
+          limit_basis: "가정값: PI-D-P4101 와 같은 한계",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: vrds-r004-d2,
+          control: { mean: 84.8072, sigma: 0.260169 } }
+  # 합성 추가 (2026-11-25 PU-D5a): 자료에 없는 두 번째 펌프(P-4101 와 직렬 2단). 태그·단위·주기·잡음은 P-4101 를 본떴고 개별 잡음은 seed_key 로 독립이다
+  - equip_id: P-4101-S2
+    name: "고압 원료 공급 펌프 2단 (High Pressure Feed Pump Stage 2)"
+    type: PM
+    unit_id: UNIT-VRDS-01
+    tags:
+      - { tag_id: VI-A-P4101S2,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "구동측 수평 케이싱 진동",
+          limits: { warn_hi: 4.5, alarm_hi: 7.1, trip_hi: 11 },
+          limit_basis: "P-4101 를 본뜬 합성 설비: 원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람·정지=경고 위 ISO 20816 영역 경계 두 개",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: vrds-r101,
+          control: { mean: 1.65, sigma: 0.04472219729122836 } }
+      - { tag_id: TI-B-P4101S2,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "구동측 베어링 온도",
+          limits: { warn_hi: 85, alarm_hi: 95, trip_hi: 105 },
+          limit_basis: "P-4101 를 본뜬 합성 설비: 원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 +10, 정지 +20",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: vrds-r102,
+          control: { mean: 63.2, sigma: 0.11572503597155205 } }
+      - { tag_id: PI-S-P4101S2,
+          signal: suction_pressure,
+          unit: "bar(g)",
+          description: "2단 흡입 압력 (중간 압력)",
+          limits: { warn_lo: 57, alarm_lo: 45.6, trip_lo: 36.5 },
+          limit_basis: "P-4101 를 본뜬 합성 설비: 2단 흡입 = 중간 압력 (synthetic 2026-11-25 PU-D5a: 두 대 직렬, 같은 곡선 두 단). 이전 한계/이전 μ 비율 × 새 μ, 유효숫자 3자리; σ 는 회로가 정한 합성값 (2026-11-26)",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: vrds-r103,
+          control: { mean: 84.7427, sigma: 0.260781 } }
+      - { tag_id: PI-D-P4101S2,
+          signal: discharge_pressure,
+          unit: "bar(g)",
+          description: "2단 최종 토출 압력",
+          limits: { warn_hi: 170, alarm_hi: 178, trip_hi: 187 },
+          limit_basis: "P-4101 를 본뜬 합성 설비: 원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×1.05, 정지 ×1.10; σ 는 회로가 정한 합성값 (2026-11-26)",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: vrds-r104,
+          control: { mean: 164.35, sigma: 0.520095 } }
+      - { tag_id: FI-P4101S2,
+          signal: flow,
+          unit: "m3/h",
+          description: "원료 유량",
+          limits: { warn_lo: 160, alarm_lo: 138, trip_lo: 110 },
+          limit_basis: "P-4101 를 본뜬 합성 설비: 원 자료의 '주의' 한계(합성 개발 설정, OEM·보호 기준 아님)를 경고 칸에 옮김. 알람·정지는 CDU·HOU 의 같은 신호 간격 적용: 알람 ×0.86, 정지 = 알람 ×0.8",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: vrds-r105,
+          control: { mean: 185.3, sigma: 1.232405461778802 } }
+      - { tag_id: II-P4101S2,
+          signal: current,
+          unit: "A",
+          description: "모터 전류",
+          limits: { warn_hi: 105, alarm_hi: 112, trip_hi: 120 },
+          limit_basis: "P-4101 를 본뜬 합성 설비: 단 축동력 (synthetic 2026-11-25 PU-D5a: 두 대 직렬, 같은 곡선 두 단). 이전 한계/이전 μ 비율 × 새 μ, 유효숫자 3자리",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: vrds-r106,
+          derive: { formula: power, terms: [{ tag: FI-P4101S2, exp: 1 }, { tag: PI-D-P4101S2, minus: PI-S-P4101S2, exp: 1 }], noise_sigma: 0.105222 },
+          control: { mean: 82.6835, sigma: 0.421367 } }
+      - { tag_id: PDI-P4101S2-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "단간(1단 출구 → 2단 흡입) 스트레이너 차압",
+          limits: { warn_hi: 1210, alarm_hi: 2420 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 1210·경보 2420 kPa(고압 구간이라 약한 막힘 차압의 약 2배로 둠). 실제 설정값 아님 (합성 설비)",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: vrds-s2-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-P4101S2-STR,
+          signal: strainer_inlet_pressure,
+          unit: "bar(g)",
+          description: "스트레이너 앞 단간(1단 출구 → 2단 흡입) 압력",
+          limits: { trip_lo: 36.5, alarm_lo: 45.6, warn_lo: 57.0 },
+          limit_basis: "가정값: 같은 설비 흡입 압력(PI-S-P4101S2)과 같은 한계 (합성 설비)",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: vrds-s2-str-pi,
+          control: { mean: 84.792771, sigma: 0.2608 } }
+      - { tag_id: SI-P4101S2,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도",
+          limits: { alarm_lo: 3213, warn_lo: 3392 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님 (합성 설비)",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: vrds-p4101s2-spd,
+          control: { mean: 3570.0, sigma: 1.5 } }
+      - { tag_id: PI-D-P4101S2-D2,
+          signal: redundant_discharge_pressure,
+          unit: "bar(g)",
+          description: "토출 압력 이중화 전송기",
+          limits: { warn_hi: 170.0, alarm_hi: 178.0, trip_hi: 187.0 },
+          limit_basis: "가정값: PI-D-P4101S2 와 같은 한계 (합성 설비)",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: vrds-r104-d2,
+          control: { mean: 164.35, sigma: 0.520095 } }
   # ---------------- UNIT-VRDS-02 보충 수소 압축 ----------------
   # 합성 추가 (2026-11-18): 자료에 없는 구동 전동기(C-4102 직결). 한계값 없음, μ·σ 는 합성값. 회전속도는 C-4102 와 같다
   - equip_id: M-4102
@@ -258,7 +411,7 @@ equipment:
       - { tag_id: PI-I-C4102,
           signal: interstage_pressure,
           unit: "bar(g)",
-          description: "1단 토출(단간) 압력 (synthetic)",
+          description: "1단 토출(단간) 압력",
           limit_basis: "synthetic: 2단·단별 압력비 같음 가정 √(P_s·P_d), 한계값 없음",
           interval_sec: 1,
           decimals: 3,
@@ -307,10 +460,104 @@ equipment:
           seed_key: vrds-r014,
           control: { mean: 590.0, sigma: 0.2499543152702556 } }
   # ---------------- UNIT-VRDS-03 수소 순환 ----------------
+  # 합성 추가 (2026-11-26): 자료에 없는 가변속 전동기·증속 기어박스 (M-4101 → GB-4101 → C-4101). M-3101·GB-3101(RHDS) 를 본떴다. 한계값 없음, μ·σ 는 합성값. 회전속도 μ·σ 는 C-4101 에 맞췄다
+  - equip_id: M-4101
+    name: "순환가스 압축기 구동 가변속 전동기 (Recycle Gas Compressor VFD Motor)"
+    type: MT
+    unit_id: UNIT-VRDS-03
+    tags:
+      - { tag_id: VI-A-M4101,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "구동측 케이싱 진동",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: vrds-r107,
+          control: { mean: 1.2, sigma: 0.04 } }
+      - { tag_id: TI-B-M4101,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "구동측 베어링 온도",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: vrds-r108,
+          control: { mean: 68.0, sigma: 0.18 } }
+      - { tag_id: II-M4101,
+          signal: current,
+          unit: "A",
+          description: "전동기 전류",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: vrds-r109,
+          control: { mean: 310.0, sigma: 0.8 } }
+      - { tag_id: SI-M4101,
+          signal: speed,
+          unit: "rpm",
+          description: "전동기 회전속도",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: vrds-r110,
+          control: { mean: 1790.0, sigma: 1.7077916224045997 } }
+  - equip_id: GB-4101
+    name: "순환가스 압축기 증속 기어박스 (Recycle Gas Compressor Gearbox)"
+    type: GB
+    unit_id: UNIT-VRDS-03
+    driven_by: M-4101
+    tags:
+      - { tag_id: VI-O-GB4101,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "출력축(고속)측 케이싱 진동",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: vrds-r111,
+          control: { mean: 1.8, sigma: 0.05 } }
+      - { tag_id: VI-I-GB4101,
+          signal: vibration,
+          unit: "mm/s RMS",
+          description: "입력축(저속)측 케이싱 진동",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: vrds-r112,
+          control: { mean: 1.4, sigma: 0.04 } }
+      - { tag_id: TI-B-GB4101,
+          signal: bearing_temp,
+          unit: "DEG C",
+          description: "출력축 베어링 온도",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: vrds-r113,
+          derive: { formula: power, out_offset: 273.15, terms: [{ tag: TI-LO-GB4101, offset: 273.15, exp: 1 }], noise_sigma: 0.054 },
+          control: { mean: 72.0, sigma: 0.196528 } }
+      - { tag_id: TI-LO-GB4101,
+          signal: oil_temp,
+          unit: "DEG C",
+          description: "윤활유 공급 온도",
+          interval_sec: 10,
+          decimals: 2,
+          seed_key: vrds-r114,
+          control: { mean: 48.0, sigma: 0.18 } }
+      - { tag_id: PI-LO-GB4101,
+          signal: oil_pressure,
+          unit: "bar(g)",
+          description: "윤활유 공급 압력",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: vrds-r115,
+          control: { mean: 2.2, sigma: 0.004 } }
+      - { tag_id: SI-GB4101,
+          signal: speed,
+          unit: "rpm",
+          description: "출력축 회전속도",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: vrds-r116,
+          control: { mean: 9203.6, sigma: 8.780911159755851 } }
   - equip_id: C-4101
     name: "순환가스 압축기 (Recycle Gas Compressor)"
     type: CC
     unit_id: UNIT-VRDS-03
+    driven_by: GB-4101
     tags:
       - { tag_id: XI-X-C4101,
           signal: shaft_vibration,
@@ -569,6 +816,56 @@ equipment:
           seed_key: vrds-r038,
           derive: { formula: power, terms: [{ tag: FI-P4102, exp: 1 }, { tag: PI-D-P4102, minus: PI-S-P4102, exp: 1 }], noise_sigma: 0.14705 },
           control: { mean: 112.2, sigma: 1.00425 } }
+      - { tag_id: PDI-P4102-STR,
+          signal: strainer_dp,
+          unit: kPa,
+          description: "후속 펌프 흡입 스트레이너 차압",
+          limits: { warn_hi: 3990, alarm_hi: 7980 },
+          limit_basis: "가정값: 깨끗한 스트레이너 차압 5 kPa, 경고 3990·경보 7980 kPa(고압 구간이라 약한 막힘 차압의 약 2배로 둠). 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: vrds-d-str-dp,
+          control: { mean: 5.0, sigma: 0.25 } }
+      - { tag_id: PI-P4102-STR,
+          signal: strainer_inlet_pressure,
+          unit: "bar(g)",
+          description: "후속 펌프 스트레이너 앞 흡입 압력",
+          limits: { trip_lo: 1.92, alarm_lo: 2.4, warn_lo: 3.0 },
+          limit_basis: "가정값: 같은 설비 흡입 압력(PI-S-P4102)과 같은 한계",
+          interval_sec: 1,
+          decimals: 4,
+          seed_key: vrds-d-str-pi,
+          control: { mean: 4.650000, sigma: 0.0187 } }
+      - { tag_id: SI-P4102,
+          signal: speed,
+          unit: rpm,
+          description: "펌프 회전속도",
+          limits: { alarm_lo: 1602, warn_lo: 1691 },
+          limit_basis: "가정값: 정격 회전수의 95 %·90 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 1,
+          seed_key: vrds-p4102-spd,
+          control: { mean: 1780.0, sigma: 1.5 } }
+      - { tag_id: ZI-4102-FCV,
+          signal: control_valve_position,
+          unit: "%",
+          description: "제품 제어밸브 개도(위치 전송기)",
+          limits: { alarm_lo: 70, warn_lo: 85 },
+          limit_basis: "가정값: 정상 개도 100 %(가상 밸브), 경고 85·경보 70 %. 실제 설정값 아님",
+          interval_sec: 1,
+          decimals: 2,
+          seed_key: vrds-fcv-zi,
+          control: { mean: 100.0, sigma: 0.3 } }
+      - { tag_id: PI-D-P4102-D2,
+          signal: redundant_discharge_pressure,
+          unit: "bar(g)",
+          description: "토출 압력 이중화 전송기",
+          limits: { warn_hi: 25.0, alarm_hi: 26.2, trip_hi: 27.5 },
+          limit_basis: "가정값: PI-D-P4102 와 같은 한계",
+          interval_sec: 1,
+          decimals: 3,
+          seed_key: vrds-r036-d2,
+          control: { mean: 20.15, sigma: 0.04006078367791745 } }
   # ---------------- UNIT-VRDS-06 환류·순환 ----------------
   - equip_id: P-4103
     name: "분별탑 환류 펌프 (Fractionator Reflux Pump)"

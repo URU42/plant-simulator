@@ -38,9 +38,9 @@ def test_two_plants_are_isolated(client):
 
 def test_root_health_and_index(client):
     h = client.get("/health").json()
-    assert set(h["plants"]) == {"rhds", "rfcc"} and h["plants"]["rfcc"]["plant_id"] == "PL-RFCC"
+    assert set(h["plants"]) == {"rhds", "rfcc"} and h["plants"]["rfcc"]["plant_id"] == "RFCC"
     index = client.get("/")
-    assert index.status_code == 200 and '/rfcc/' in index.text and 'PL-RHDS' in index.text
+    assert index.status_code == 200 and '/rfcc/' in index.text and 'RHDS' in index.text
     assert 'EventSource(`${DATA.root}/stream`)' in index.text and "__PAGE_DATA__" not in index.text   # 브라우저 로그
     assert client.get("/rfcc", follow_redirects=False).status_code == 307
     assert client.get("/nope/health").status_code == 404
