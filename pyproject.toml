@@ -23,7 +23,6 @@ dev = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-markers = ["slow: CI 에서 빼는 테스트 (tests/conftest.py 의 CI_TESTS 밖 전부)"]
 
 [tool.setuptools]
 packages = ["common", "simulator", "simulator.physics", "collector"]
