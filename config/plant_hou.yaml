@@ -65,7 +65,7 @@ signals:
   - { signal: process_temp, prefix: TI, unit: "DEG C", name: 공정 유체 온도 }
   - { signal: strainer_dp, prefix: PDI, unit: kPa, name: 흡입 스트레이너 차압 }   # 2026-11-27 추가 계측 (synthetic)
   - { signal: strainer_inlet_pressure, prefix: PI, unit: "kg/cm2(g)", name: 스트레이너 앞 흡입 압력 }   # 2026-11-27 추가 계측 (synthetic)
-  - { signal: control_valve_position, prefix: ZI, unit: \"%\", name: 제어밸브 개도 }   # 2026-11-27 추가 계측 (synthetic)
+  - { signal: control_valve_position, prefix: ZI, unit: "%", name: 제어밸브 개도 }   # 2026-11-27 추가 계측 (synthetic)
 
 # 정상 운전 공통 요인 (synthetic): 공정 그룹마다 평균 0 인 빠른 성분 하나를 아래 신호의 태그들이 나눠 갖는다.
 # 태그 분산 중 share 만큼이 공통 요인이고, 부호는 그 신호가 부하와 같이(1)·반대로(-1) 움직이는지다.
