@@ -454,3 +454,23 @@ def test_suction_temperature_rise_moves_the_suction_fluid_temperature_tag():
     assert base["basis"] == hot["basis"] == "physics"
     assert hot["value"] - base["value"] == pytest.approx(15.0, abs=0.05)
     assert by_tag(calc("cdu"))[("P-8303A", "TI-8303A")]["basis"] == "empirical"     # 베어링 온도는 그대로 경험식
+
+
+def test_single_fan_speed_is_a_physical_signal_at_all_operating_points():
+    key = ("F-8201", "SI-8201A")
+    normal = by_tag(calc("cdu"))[key]
+    slower = by_tag(calc("cdu", causes=[{"parameter": "F-8201/speed_ratio", "value": 0.95}]))[key]
+    worn = by_tag(calc("cdu", causes=[{"parameter": "F-8201/impeller_wear", "value": 0.5}]))[key]
+    assert normal["basis"] == slower["basis"] == worn["basis"] == "physics"
+    assert slower["value"] == pytest.approx(normal["value"] * 0.95)
+    assert worn["value"] == pytest.approx(normal["value"])
+
+
+def test_fan_wear_reduces_flow_without_a_modeled_flow_controller():
+    key = ("F-8201", "FI-8201A")
+    normal = by_tag(calc("cdu"))[key]
+    cause = [{"parameter": "F-8201/impeller_wear", "value": 0.6}]
+    worn = by_tag(calc("cdu", causes=cause))[key]
+    expected = by_tag(open_loop("cdu").calculate({"causes": cause}))[key]
+    assert worn["value"] < normal["value"]
+    assert worn["value"] == pytest.approx(expected["value"])

@@ -30,7 +30,7 @@ from simulator.physics_adapter import booster_strainer_centers, drive_centers, h
 from simulator.physics_single import SingleAdapter
 
 PLANTS = ("cdu", "hou", "rfcc", "rhds", "vrds")
-ENGINE = "static-v1"
+ENGINE = "static-v1.1"
 EPS = 1e-9
 LEVELS = (("trip_hi", "trip"), ("trip_lo", "trip"), ("alarm_hi", "alarm"), ("alarm_lo", "alarm"),
           ("warn_hi", "warn"), ("warn_lo", "warn"))
@@ -533,7 +533,8 @@ class PlantCalc:
         case = case.model_copy(update=upd) if upd else case
         reached, control = True, None
         q0 = self.__dict__.get("_normal_flow", {}).get(cid)
-        if target_m3_h is None and q0 is not None and self.flow_control and not _FIC_OFF.get():       # 고정 분배 대상이 아니면 자기 유량 제어(정상 유량 유지)
+        # 팬 덕트에는 펌프용 가상 유량 제어를 적용하지 않는다. 마모로 달라지는 풍량은 개방 회로에서 푼다.
+        if target_m3_h is None and q0 is not None and case.kind == "pump" and self.flow_control and not _FIC_OFF.get():
             pipe = case.discharge_pipe
             at = lambda m: case.model_copy(update={"discharge_pipe": pipe.model_copy(update={      # noqa: E731
                 "darcy_factor": pipe.darcy_factor * m, "minor_loss_k": pipe.minor_loss_k * m})})
@@ -601,8 +602,8 @@ class PlantCalc:
             for b in last.branches:
                 ratio = max(b.flow_m3_s, 1e-9) / target[b.branch_id]
                 new[b.branch_id] = min(hi, max(lo, ms[b.branch_id] * ratio ** 1.6))
-            if new == ms:
-                break                                   # 모두 끝에 닿아 더 움직일 수 없다
+            if all(abs(new[k] - ms[k]) <= 1e-11 for k in new):
+                break                                   # 포화 또는 수치 오차 수준의 갱신
             ms = new
             last = solve(ms)
         if last is None:
@@ -792,7 +793,11 @@ class PlantCalc:
         assumptions: list[dict] = []
         control = self.control
         speed_changed: dict[str, float] = {}
-        cause_z: dict[TagKey, float] = {}
+        # 단일 물리 회로의 회전수 계기는 정상점에서도 직접 계산에 쓰는 신호다.
+        cause_z: dict[TagKey, float] = {
+            self.speed_tag[a.primary]: 0.0 for a in self.adapters.values()
+            if isinstance(a, SingleAdapter) and a.primary in self.speed_tag
+        }
         touched: dict[tuple[str, str], str] = {}        # (설비, 물리 파라미터) → 바꾼 입력 (충돌 판정)
 
         # 1) 원인 값
