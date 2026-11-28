@@ -444,3 +444,13 @@ def test_concurrent_requests_are_isolated():
         together = list(pool.map(post, bodies))
     for i, r in enumerate(together):
         assert r["tags"] == alone[i % 4]["tags"] and r["circuits"] == alone[i % 4]["circuits"]
+
+
+def test_suction_temperature_rise_moves_the_suction_fluid_temperature_tag():
+    # 2026-11-27: 캐비테이션 모델이 있는 P-8303A 는 흡입 유체 온도(TI-8303B)를 물리 출력으로 낸다(원인 값 1 = +15 K).
+    # 그 전에는 경험식 신호라 원인 값을 바꿔도 계산값이 그대로여서 진단이 가장 직접적인 증거를 쓰지 못했다.
+    base = by_tag(calc("cdu"))[("P-8303A", "TI-8303B")]
+    hot = by_tag(calc("cdu", causes=[{"parameter": "P-8303A/suction_temperature_rise", "value": 1.0}]))[("P-8303A", "TI-8303B")]
+    assert base["basis"] == hot["basis"] == "physics"
+    assert hot["value"] - base["value"] == pytest.approx(15.0, abs=0.05)
+    assert by_tag(calc("cdu"))[("P-8303A", "TI-8303A")]["basis"] == "empirical"     # 베어링 온도는 그대로 경험식

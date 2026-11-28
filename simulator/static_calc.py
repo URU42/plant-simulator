@@ -549,7 +549,7 @@ class PlantCalc:
         if case.npsh is not None and r.npsha_m <= 0:
             raise CalcError("no_solution", f"흡입압이 증기압 이하입니다: NPSHa {r.npsha_m:.2f} m", reason="cavitation_range")
         collapse = case.npsh is not None and r.head_loss >= case.npsh.max_head_loss
-        return a.sensor_centers(r), {"circuit_id": cid, "mass_residual_kg_s": 0.0, "pressure_residual_pa": abs(r.pressure_residual_pa),
+        return a.sensor_centers(r, calc_only=True), {"circuit_id": cid, "mass_residual_kg_s": 0.0, "pressure_residual_pa": abs(r.pressure_residual_pa),
                          "energy_residual_w": r.energy_residual_w, "total_flow_m3_h": r.flow_m3_s * 3600,
                          "units": [{"equip_id": e, "status": "running", "flow_m3_h": r.flow_m3_s * 3600,
                                     **_machine(r.rise_pa / (case.density_kg_m3 * GRAVITY_M_S2) if case.kind == "pump" else None, r.shaft_w,

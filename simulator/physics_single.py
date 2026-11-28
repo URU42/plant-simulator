@@ -178,6 +178,7 @@ class SingleResult:
 
 
 SIGNALS = ("suction_pressure", "discharge_pressure", "differential_pressure", "flow", "current")
+TEMP_UNITS = ("DEG C", "°C", "degC")
 FLOW_UNITS = ("m3/h", "Nm3/h")
 ParameterPlans = list[tuple[FaultEvent, dict[HydraulicParameter, TagPlan]]]
 
@@ -232,6 +233,15 @@ class SingleAdapter:
             self.keys[sig] = (case.equip_id, t.tag_id)
             self.units[sig] = t.unit
         self.tag_keys = set(self.keys.values())
+        # 정적 계산 전용 출력(2026-11-27): 캐비테이션 모델(npsh)이 있으면 흡입 유체 온도 태그(process_temp, 설명에 '흡입')에
+        # 흡입 온도 상승 원인 값이 증기압·NPSH 에 쓰는 유체 온도 변화를 그대로 낸다. 시간 생성기(tag_keys)에는 넣지 않는다:
+        # 생성기는 이 태그를 경험식 효과(고장 카탈로그 delta 15 K)로 만들고, 다른 원인의 온도 상승·교호작용 I3 도 이 경로를 쓴다.
+        self.calc_keys: dict[str, TagKey] = {}
+        if case.npsh is not None:
+            hot = [t for t in equipment[case.equip_id].tags
+                   if t.signal == "process_temp" and "흡입" in (t.description or "") and t.unit in TEMP_UNITS]
+            if len(hot) == 1:
+                self.calc_keys["process_temp"] = (case.equip_id, hot[0].tag_id)
         self.parameters: frozenset[HydraulicParameter] = frozenset(
             {"strainer_blockage", "impeller_wear"} | ({"suction_temperature_rise"} if case.npsh else set()))
         self._solve_cached = lru_cache(maxsize=512)(lambda c, w, t: self.case.solve(c, w, t))
@@ -274,10 +284,14 @@ class SingleAdapter:
     def solve(self, clog: float, wear: float, temp_rise: float) -> SingleResult:
         return self._solve_cached(clog, wear, temp_rise)
 
-    def sensor_centers(self, state: SingleResult) -> dict[TagKey, float]:
+    def sensor_centers(self, state: SingleResult, calc_only: bool = False) -> dict[TagKey, float]:
+        """태그 중심값. calc_only 면 정적 계산 전용 출력(흡입 유체 온도)도 낸다."""
         atm = self.case.atmospheric_pa
         normal = self.solve(0.0, 0.0, 0.0)
         out: dict[TagKey, float] = {}
+        if calc_only:
+            for key in self.calc_keys.values():      # 온도 차(K = °C 차)를 운전점 μ 에 더한다
+                out[key] = self.control[key][0] + (state.fluid_temp_k - normal.fluid_temp_k)
         for signal, key in self.keys.items():
             unit = self.units[signal]
             if signal == "suction_pressure":
